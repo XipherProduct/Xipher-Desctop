@@ -27,9 +27,9 @@ Xipher — свободный мессенджер с упором на прив
 
 | | |
 |---|---|
-| 🟣 **Последний релиз** | **[github.com/prd1324/Xipher-Desctop/releases/latest](https://github.com/prd1324/Xipher-Desctop/releases/latest)** |
+| 🟣 **Последний релиз** | **[github.com/XipherProduct/Xipher-Desctop/releases/latest](https://github.com/XipherProduct/Xipher-Desctop/releases/latest)** |
 | 🌐 Страница загрузки | [messenger.xipher.pro/download](https://messenger.xipher.pro/download) |
-| 📦 Все версии | [Releases](https://github.com/prd1324/Xipher-Desctop/releases) |
+| 📦 Все версии | [Releases](https://github.com/XipherProduct/Xipher-Desctop/releases) |
 
 Два формата:
 
