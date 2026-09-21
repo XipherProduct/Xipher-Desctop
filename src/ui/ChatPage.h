@@ -29,8 +29,16 @@ class QScrollArea;
 class QVBoxLayout;
 class QHBoxLayout;
 class QTimer;
+class QVariantAnimation;
 class QMediaPlayer;
 class QAudioOutput;
+#include "ui/Stories.h"   // StoryUserGroup (QList<> требует полный тип)
+
+class StoriesBar;
+class StoriesViewer;
+class StoryCreatorDialog;
+class SuperSearchDialog;
+class LinkPreviewBar;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ChatPage — основной экран мессенджера (раскладка как в Telegram/веб-чате):
@@ -44,6 +52,20 @@ public:
 
     void load();   // вызвать после входа: грузит чаты и запускает realtime
 
+    void loadStoriesUi();   // сторис-бар (как в вебе)
+
+    void applyTheme();   // перегенерация QSS при смене темы («Оформление»)
+    void clampBubbleWidths();   // ≤480px и ≤72% ширины области сообщений
+    void prependOlderMessages();   // догрузка старых при прокрутке к верху (как в ТГ)
+    void prependOlderBatch(int floorFrom, int batch);   // порция prepend без якоря
+    void continueTail(int targetFrom, quint64 gen);   // достройка хвоста чанками (tdesktop-style)
+    void smoothScrollTo(int target);   // плавная прокрутка (как в Telegram)
+    void updateScrollDownButton();
+
+protected:
+    void resizeEvent(QResizeEvent* e) override;  // адаптация под узкое окно
+    void keyPressEvent(QKeyEvent* e) override;   // Ctrl+Shift+F → супер-поиск
+
 signals:
     void logoutRequested();
     void callRequested(const QString& peerId, const QString& peerName, const QString& avatarUrl);
@@ -52,10 +74,17 @@ signals:
 public:
     void openChatWith(const QString& userId, const QString& displayName, const QString& username);
 
+    // Тестовый шов (offscreen-верификация дизайна, tests/design-verify.cpp):
+    // подсадить чаты/папки/историю без сети и открыть чат.
+    void injectForDesignTest(const QList<Chat>& chats, const QList<Folder>& folders,
+                             const QString& openChatId, const QList<ChatMessage>& messages);
+
 private slots:
     void openNewChatDialog();
     void openSettings();
-    void showMainMenu();
+    void toggleAppMenu();
+    void closeAppMenu();
+    void buildAppMenu();
     void onChatsLoaded(const QList<Chat>& chats);
     void onMessagesLoaded(const QString& friendId, const QList<ChatMessage>& messages);
     void onMessageSent(const ChatMessage& msg, const QString& receiverId, const QString& tempId);
@@ -104,17 +133,30 @@ private:
     void createTopicDialog();
     int  indexOfChat(const QString& id) const;
     void openChat(const Chat& chat);
-    void addBubble(const ChatMessage& msg);
+    void addBubble(const ChatMessage& msg, bool prepend = false, bool animate = true);
     void showMessageMenu(QWidget* bubble, const QPoint& pos);
     void forwardMessage(const QString& text);
     void setReplyTo(const QString& id, const QString& author, const QString& text);
     void clearReplyTo();
     void reloadCurrentMessages();
     void clearMessages();
-    void applyMessages(const QList<ChatMessage>& messages);   // отсортировать + отрисовать
+    void applyMessages(const QList<ChatMessage>& messages, bool updateCache = true);
     void renderMessages(const QString& filter);   // отрисовать (с фильтром поиска)
     void updateGreeting();   // показать/скрыть пустой-чат приветствие
     void scrollToBottom();
+    // Локальный зашифрованный кэш истории (ChatCache): мгновенное открытие чата.
+    QString cacheKey() const;          // обычный чат — peerId, тема форума — «t:<id>»
+    void renderCached();               // показать кэш до ответа сервера
+    void cacheCurrent();               // сохранить текущую историю в кэш
+    void setBubbleImage(QLabel* img, const QByteArray& bytes);       // фото (кэш/сеть) → баббл
+    void showMediaMenu(QWidget* src, const QString& filePath,
+                       const QString& kind, const QPoint& pos);      // фото/ГС: сохранить/копировать/переслать
+    QByteArray mediaBytes(const QString& filePath) const;            // кэш → локальный файл → пусто
+    void sendPhotoBytesTo(const QString& receiverId, const QByteArray& bytes,
+                          const QString& fileName);                  // пересылка фото
+    void playVoiceBytes(const QString& serverPath, const QByteArray& bytes);  // голос → temp + play
+    void openSuperSearch();                                          // Ctrl+Shift+F
+    void jumpToMessage(const QString& messageId);                    // из результатов поиска
     void bumpChat(const QString& peerId, const QString& lastText, const QString& time, bool incrementUnread);
 
     ApiClient* api_;
@@ -138,11 +180,25 @@ private:
     ProfilePanel* profilePanel_ = nullptr;
     SettingsDialog* settings_ = nullptr;
     QPushButton* menuBtn_ = nullptr;
+    QWidget*     appMenu_ = nullptr;       // шторка меню (как .app-menu веба)
+    QWidget*     appMenuScrim_ = nullptr;
     QScrollArea* msgScroll_  = nullptr;
     QWidget*     msgContainer_ = nullptr;
     QVBoxLayout* msgLayout_  = nullptr;
+    // Якорь низа (как в Telegram): пока true, любой пересчёт раскладки
+    // (wordwrap-пасы, догрузка картинок, новые сообщения) держит вид снизу.
+    // Отпускается, когда пользователь сам уходит от низа.
+    bool         stickBottom_ = true;
+    // История грузится (кэш пуст, ответ сервера не пришёл): приветствие
+    // «Здесь пока ничего нет» не показываем — иначе оно мелькает.
+    bool         loadingChat_ = false;
     EmptyChatGreeting* greeting_ = nullptr;
     int          bubbleCount_ = 0;   // сколько сообщений сейчас в переписке
+    int          renderedFrom_ = 0;  // индекс первого ОТРИСОВАННОГО сообщения (хвост-рендер)
+    bool         loadingOlder_ = false;
+    quint64      renderGen_ = 0;    // поколение рендера: смена чата отменяет отложенные чанки
+    bool         initialRenderPhase_ = false;
+    bool         programmaticScroll_ = false;   // служебная прокрутка (не пользователь)
     QStackedWidget* composerStack_ = nullptr;  // 0 — ввод, 1 — запись
     ComposerEdit* composer_  = nullptr;
     QPushButton* sendBtn_    = nullptr;
@@ -157,6 +213,7 @@ private:
     QLabel*       replyBarText_ = nullptr;
     QString       replyToId_, replyToName_, replyToText_;
     QTimer*       peerReloadTimer_ = nullptr;
+    QTimer*       chatListDebounce_ = nullptr;   // пересборка списка чатов пачкой
 
     // Файлы: отложенная отправка/открытие
     QString pendingFileReceiver_;
@@ -197,8 +254,22 @@ private:
     QList<Topic> currentTopics_;
     QList<Folder> folders_;        // папки (синхр. с сервером)
     QString       activeFolderId_ = QStringLiteral("all");
-    QWidget*      folderStrip_ = nullptr;
-    QHBoxLayout*  folderTabs_  = nullptr;
+    QWidget*      folderRail_ = nullptr;        // вертикальный рейл папок (72px, как в вебе)
+    QScrollArea*  folderRailScroll_ = nullptr;
+    QVBoxLayout*  folderRailItems_  = nullptr;
+
+    // Функционал веб-клиента: сторис, супер-поиск, превью ссылок.
+    QPushButton*         scrollDownBtn_ = nullptr;  // кнопка «вниз» (плавает справа)
+    QVariantAnimation*   scrollAnim_ = nullptr;
+    QWidget*             sidebar_ = nullptr;       // сжимается 380→300 при узком окне
+    QWidget*             emptyPage_  = nullptr;   // тематизируемые страницы
+    QWidget*             topicsPage_ = nullptr;
+    StoriesBar*          storiesBar_ = nullptr;
+    QList<StoryUserGroup> storyGroups_;
+    StoriesViewer*       storiesViewer_ = nullptr;
+    StoryCreatorDialog*  storyCreator_ = nullptr;
+    SuperSearchDialog*   superSearch_ = nullptr;
+    LinkPreviewBar*      linkPreview_ = nullptr;
     QList<UserHit> searchHits_;   // глобальный поиск людей в сайдбаре
     QString     searchQuery_;
     QTimer*     searchTimer_ = nullptr;

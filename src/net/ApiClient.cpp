@@ -10,6 +10,10 @@
 #include <QUrl>
 #include <QDebug>
 #include <QHttpMultiPart>
+#include <QMutex>
+#include <memory>
+#include <QMutexLocker>
+#include <atomic>
 #include <QHttpPart>
 
 ApiClient::ApiClient(QObject* parent)
@@ -752,6 +756,8 @@ void ApiClient::getChatFolders() {
             Folder f;
             f.id   = o.value(QStringLiteral("id")).toString();
             f.name = o.value(QStringLiteral("name")).toString();
+            f.icon  = o.value(QStringLiteral("icon")).toString();
+            f.color = o.value(QStringLiteral("color")).toString();
             for (const QJsonValue& k : o.value(QStringLiteral("chat_keys")).toArray())
                 f.chatKeys << k.toString();
             list.append(f);
@@ -767,6 +773,8 @@ void ApiClient::setChatFolders(const QList<Folder>& folders) {
         for (const QString& k : f.chatKeys) keys.append(k);
         arr.append(QJsonObject{{QStringLiteral("id"), f.id},
                                {QStringLiteral("name"), f.name},
+                               {QStringLiteral("icon"), f.icon},
+                               {QStringLiteral("color"), f.color},
                                {QStringLiteral("chat_keys"), keys}});
     }
     // Сервер ждёт folders как СТРОКУ JSON (как в вебе).
@@ -1133,18 +1141,137 @@ void ApiClient::sendFile(const QString& receiverId, const QString& filePath, con
 }
 
 void ApiClient::fetchFile(const QString& filePath) {
+    if (fetchReplies_.contains(filePath)) return;   // уже скачивается
+    if (parallelReplies_.contains(filePath)) return;
+    // Файл, недавно отдавший ошибку (например, 404 — сервер чистит старые),
+    // не дёргаем повторно минуту: иначе любой ретрай-цикл UI превращается
+    // в шторм запросов.
+    if (failedFetches_.contains(filePath)) {
+        const qint64 until = failedFetches_.value(filePath);
+        if (QDateTime::currentMSecsSinceEpoch() < until) {
+            emit fileProgress(filePath, 0, 0);
+            return;
+        }
+        failedFetches_.remove(filePath);
+    }
     QNetworkRequest req(QUrl(base_ + filePath));
     req.setRawHeader("Authorization", "Bearer " + Session::instance().token.toUtf8());
     req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     QNetworkReply* reply = nam_->get(req);
-    QObject::connect(reply, &QNetworkReply::finished, this, [this, reply, filePath]() {
+    fetchReplies_.insert(filePath, reply);
+    auto* buffer = new QByteArray();
+    connect(reply, &QNetworkReply::downloadProgress, this,
+            [this, filePath](qint64 received, qint64 total) {
+        emit fileProgress(filePath, received, total);
+    });
+    connect(reply, &QNetworkReply::readyRead, this, [this, reply, filePath, buffer]() {
+        buffer->append(reply->readAll());
+        Q_UNUSED(filePath);
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, filePath, buffer]() {
+        fetchReplies_.remove(filePath);
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        if (ok) buffer->append(reply->readAll());
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
+        if (!ok) {
+            delete buffer;
+            failedFetches_.insert(filePath, QDateTime::currentMSecsSinceEpoch() + 60000);
             emit chatError(QStringLiteral("file"), reply->errorString());
+            emit fileProgress(filePath, 0, 0);   // «сброшено»
             return;
         }
-        emit fileFetched(filePath, reply->readAll());
+        const QByteArray bytes = *buffer;
+        delete buffer;
+        emit fileFetched(filePath, bytes);
     });
+}
+
+void ApiClient::fetchFileParallel(const QString& filePath, qint64 total, int chunks) {
+    if (total <= 0) { fetchFile(filePath); return; }
+    if (parallelReplies_.contains(filePath)) return;   // уже идёт
+    if (chunks < 2) { fetchFile(filePath); return; }
+
+    // Чанки по Range, параллельно; собираем в общий буфер по смещениям.
+    // ВСЁ общее — только shared_ptr: отмена/обрыв одного чанка не должны
+    // оставлять уже поставленные в очередь события на мёртвой памяти.
+    auto parts = std::make_shared<QVector<QByteArray>>(chunks);
+    auto done = std::make_shared<std::atomic<int>>(0);
+    auto failed = std::make_shared<std::atomic<bool>>(false);
+    auto mtx = std::make_shared<QMutex>();
+    auto received = std::make_shared<std::atomic<qint64>>(0);
+    parallelReplies_.insert(filePath, {});   // слот занят
+
+    const qint64 chunk = (total + chunks - 1) / chunks;
+
+    for (int i = 0; i < chunks; ++i) {
+        const qint64 s0 = qint64(i) * chunk;
+        const qint64 s1 = qMin(total - 1, s0 + chunk - 1);
+        if (s0 > s1) { ++(*done); continue; }
+        QNetworkRequest req(QUrl(base_ + filePath));
+        req.setRawHeader("Authorization", "Bearer " + Session::instance().token.toUtf8());
+        req.setRawHeader(QByteArrayLiteral("Range"),
+                         QByteArrayLiteral("bytes=") + QByteArray::number(s0)
+                         + "-" + QByteArray::number(s1));
+        req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+        QNetworkReply* reply = nam_->get(req);
+        parallelReplies_[filePath].append(reply);
+
+        connect(reply, &QNetworkReply::readyRead, this, [this, reply, filePath, parts, i, received, mtx, total]() {
+            const QByteArray data = reply->readAll();
+            {
+                QMutexLocker lk(mtx.get());
+                parts->operator[](i).append(data);
+            }
+            received->fetch_add(data.size());
+            emit fileProgress(filePath, received->load(), total);
+        });
+        connect(reply, &QNetworkReply::finished, this, [this, reply, filePath, parts, i, done, failed, received, total, mtx, chunks]() {
+            const bool ok = reply->error() == QNetworkReply::NoError
+                || reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 206;
+            if (!ok) failed->store(true);
+            else {
+                const QByteArray tail = reply->readAll();
+                if (!tail.isEmpty()) {
+                    QMutexLocker lk(mtx.get());
+                    parts->operator[](i).append(tail);
+                    received->fetch_add(tail.size());
+                }
+            }
+            reply->deleteLater();
+            if (auto lstIt = parallelReplies_.find(filePath); lstIt != parallelReplies_.end())
+                lstIt->removeAll(reply);
+            if (++(*done) >= chunks) {
+                parallelReplies_.remove(filePath);
+                QByteArray full;
+                full.reserve(total);
+                const bool allOk = !failed->load();
+                if (allOk) for (const QByteArray& pt : *parts) full += pt;
+                if (allOk && full.size() > 0) {
+                    emit fileProgress(filePath, total, total);
+                    emit fileFetched(filePath, full);
+                } else {
+                    failedFetches_.insert(filePath, QDateTime::currentMSecsSinceEpoch() + 60000);
+                    emit fileProgress(filePath, 0, 0);
+                    emit chatError(QStringLiteral("file"), QStringLiteral("Не удалось загрузить файл"));
+                }
+                // parts/done/failed/mtx/received умрут вместе с последним shared_ptr
+            }
+        });
+    }
+}
+
+void ApiClient::cancelFetch(const QString& filePath) {
+    if (auto* reply = fetchReplies_.take(filePath)) {
+        reply->abort();   // finished придёт с ошибкой → подписчики сбросятся
+        reply->deleteLater();
+    }
+    if (parallelReplies_.contains(filePath)) {
+        for (QNetworkReply* r : parallelReplies_.take(filePath)) {
+            r->abort();
+            r->deleteLater();
+        }
+        emit fileProgress(filePath, 0, 0);
+    }
 }
 
 // ── Звонки (сигналинг) ────────────────────────────────────────────────────────
@@ -1327,5 +1454,123 @@ void ApiClient::rejectFriend(const QString& requestId) {
     postJson(QStringLiteral("/api/reject-friend"), body,
              [this, requestId](const QJsonObject& obj, bool ok, const QString&) {
         emit friendActionDone(requestId, false, ok && obj.value(QStringLiteral("success")).toBool(false));
+    });
+}
+
+// ── Супер-поиск / превью ссылок / сторис (1:1 с supersearch.js, link-preview и stories.src.js веба) ──
+
+void ApiClient::searchMessages(const QString& chatId, const QString& context,
+                               const QString& query, const QString& type,
+                               int offset, int limit) {
+    // requestId связывает запрос с ответом (новый запрос отменяет морально старый).
+    const QString reqId = QStringLiteral("ss_%1").arg(++searchSeq_);
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token},
+                     {QStringLiteral("chat_id"), chatId},
+                     {QStringLiteral("context"), context}};
+    if (!query.isEmpty()) body.insert(QStringLiteral("query"), query);
+    if (!type.isEmpty())  body.insert(QStringLiteral("type"), type);
+    if (offset > 0) body.insert(QStringLiteral("offset"), QString::number(offset));
+    if (limit > 0)  body.insert(QStringLiteral("limit"), QString::number(limit));
+    postJson(QStringLiteral("/api/search-messages"), body,
+             [this, reqId](const QJsonObject& obj, bool ok, const QString& netErr) {
+        if (!ok && obj.isEmpty()) { emit chatError(QStringLiteral("search"), netErr); return; }
+        emit messagesSearched(reqId, obj.value(QStringLiteral("messages")).toArray());
+    });
+}
+
+void ApiClient::fetchLinkPreview(const QString& url) {
+    postJson(QStringLiteral("/api/link-preview"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("url"), url}},
+             [this, url](const QJsonObject& obj, bool, const QString&) {
+        emit linkPreviewFetched(url, obj);
+    });
+}
+
+void ApiClient::loadStories() {
+    postJson(QStringLiteral("/api/stories/all"),
+             {{QStringLiteral("token"), Session::instance().token}},
+             [this](const QJsonObject& obj, bool, const QString&) {
+        emit storiesLoaded(obj);
+    });
+}
+
+void ApiClient::storyView(const QString& storyId) {
+    postJson(QStringLiteral("/api/stories/view"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("story_id"), storyId}},
+             [this](const QJsonObject&, bool, const QString&) {});
+}
+
+void ApiClient::storyDelete(const QString& storyId) {
+    postJson(QStringLiteral("/api/stories/delete"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("story_id"), storyId}},
+             [this, storyId](const QJsonObject& obj, bool, const QString&) {
+        emit storyDeleted(storyId, obj.value(QStringLiteral("success")).toBool(false));
+    });
+}
+
+void ApiClient::storyCreate(const QString& mediaUrl, const QString& mediaType,
+                            const QString& caption, const QString& privacy,
+                            const QString& keyB64, const QString& ivB64) {
+    postJson(QStringLiteral("/api/stories/create"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("media_url"), mediaUrl},
+              {QStringLiteral("media_type"), mediaType},
+              {QStringLiteral("caption"), caption},
+              {QStringLiteral("privacy"), privacy},
+              {QStringLiteral("encryption_key"), keyB64},
+              {QStringLiteral("encryption_iv"), ivB64}},
+             [this](const QJsonObject& obj, bool, const QString& netErr) {
+        const bool ok = obj.value(QStringLiteral("success")).toBool(false);
+        emit storyCreated(ok, ok ? QString() : (netErr.isEmpty()
+            ? QStringLiteral("Не удалось опубликовать историю")
+            : netErr));
+    });
+}
+
+void ApiClient::exportData() {
+    // Ответ — JSON-файл целиком (может быть большой): читаем поток в QByteArray.
+    QNetworkRequest req(QUrl(base_ + QStringLiteral("/api/export-data")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    const QByteArray payload = QJsonDocument(
+        QJsonObject{{QStringLiteral("token"), Session::instance().token}}).toJson(QJsonDocument::Compact);
+    QNetworkReply* reply = nam_->post(req, payload);
+    QObject::connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) { emit dataExported(false, {}); return; }
+        const QByteArray bytes = reply->readAll();
+        emit dataExported(!bytes.isEmpty(), bytes);
+    });
+}
+
+// ── Xipher Pulse: платёж и статус подписки (как pulse.js + chat.js веба) ─────
+
+void ApiClient::premiumCreatePayment(const QString& plan, const QString& provider) {
+    postJson(QStringLiteral("/api/premium/create-payment"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("plan"), plan},
+              {QStringLiteral("provider"), provider}},
+             [this](const QJsonObject& obj, bool ok, const QString& netErr) {
+        const QJsonObject data = obj.value(QStringLiteral("data")).toObject();
+        const bool success = ok && obj.value(QStringLiteral("success")).toBool(false);
+        emit premiumPaymentReady(success, data, success
+            ? QString()
+            : (netErr.isEmpty()
+               ? obj.value(QStringLiteral("message")).toString(QStringLiteral("Не удалось создать платёж"))
+               : netErr));
+    });
+}
+
+void ApiClient::premiumRefreshStatus() {
+    // Эндпоинт как в refreshPremiumStatus веба: /api/validate-token отдаёт
+    // is_premium / premium_plan / premium_expires_at в data.
+    postJson(QStringLiteral("/api/validate-token"),
+             {{QStringLiteral("token"), Session::instance().token}},
+             [this](const QJsonObject& obj, bool ok, const QString&) {
+        const AuthResult r = ok ? parseAuth(obj) : AuthResult{};
+        emit premiumStatusRefreshed(r.isPremium, r.premiumExpiresAt);
     });
 }

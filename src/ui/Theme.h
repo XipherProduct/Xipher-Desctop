@@ -1,6 +1,8 @@
 #pragma once
 #include <QColor>
+#include <QList>
 #include <QString>
+#include "net/Prefs.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Палитра и стили взяты 1:1 из веб-клиента (web/css/login.css, web/index.html).
@@ -147,4 +149,49 @@ QPushButton.linkSecondary:hover { color: #a78bfa; }
 )QSS");
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Темы оформления (вкладка «Оформление» в настройках; токены из tokens.css).
+//  Пресеты различаются фонами/поверхностями/акцентом. Выбор хранится в Prefs
+//  (xipher_theme) и применяется мгновенно: ChatPage/SettingsDialog
+//  перегенерируют свои QSS от токенов пресета.
+// ─────────────────────────────────────────────────────────────────────────────
 } // namespace Theme
+
+namespace ThemePreset {
+
+struct Tokens {
+    QString id;
+    QString name;
+    QColor  bgBase;      // --bg-base
+    QColor  surface1;    // --surface-1 (сайдбар, шапки)
+    QColor  surface2;    // --surface-2 (поля, бабблы-in, пилюля)
+    QColor  surface3;    // --surface-3 (ховеры)
+    QString accent;      // --accent (#rrggbb)
+    int     accentR, accentG, accentB;
+    bool    available;   // «Скоро»-пресеты недоступны
+};
+
+inline QList<Tokens> all() {
+    return {
+        {QStringLiteral("gray"),   QStringLiteral("Стандартная"), {0x0B,0x0A,0x0E}, {0x13,0x12,0x18}, {0x1A,0x18,0x22}, {0x22,0x1F,0x2C}, QStringLiteral("#8B5CF6"), 139, 92, 246, true},
+        {QStringLiteral("dark"),   QStringLiteral("Тёмная"),      {0x06,0x06,0x0A}, {0x0D,0x0D,0x12}, {0x14,0x14,0x1B}, {0x1C,0x1C,0x25}, QStringLiteral("#8B5CF6"), 139, 92, 246, true},
+        {QStringLiteral("amoled"), QStringLiteral("AMOLED"),      {0x00,0x00,0x00}, {0x08,0x08,0x0A}, {0x0F,0x0F,0x12}, {0x16,0x16,0x1A}, QStringLiteral("#8B5CF6"), 139, 92, 246, true},
+        {QStringLiteral("purple"), QStringLiteral("Фиолетовая"),  {0x0E,0x0A,0x18}, {0x17,0x10,0x26}, {0x1F,0x16,0x33}, {0x29,0x1E,0x45}, QStringLiteral("#A78BFA"), 167, 139, 250, true},
+        {QStringLiteral("blue"),   QStringLiteral("Синяя"),       {0x0B,0x0A,0x0E}, {0x13,0x12,0x18}, {0x1A,0x18,0x22}, {0x22,0x1F,0x2C}, QStringLiteral("#3B82F6"), 59, 130, 246, false},
+        {QStringLiteral("green"),  QStringLiteral("Изумрудная"),  {0x0B,0x0A,0x0E}, {0x13,0x12,0x18}, {0x1A,0x18,0x22}, {0x22,0x1F,0x2C}, QStringLiteral("#10B981"), 16, 185, 129, false},
+        {QStringLiteral("mocha"),  QStringLiteral("Мокко"),       {0x0F,0x0C,0x0A}, {0x1A,0x15,0x12}, {0x22,0x1B,0x16}, {0x2C,0x23,0x1D}, QStringLiteral("#D9A865"), 217, 168, 101, false},
+        {QStringLiteral("light"),  QStringLiteral("Светлая"),     {0xF6,0xF4,0xFB}, {0xFF,0xFF,0xFF}, {0xF3,0xF1,0xF9}, {0xEC,0xE9,0xF4}, QStringLiteral("#7C4AE6"), 124, 74, 230, false},
+    };
+}
+
+inline Tokens current() {
+    const QString saved = Prefs::getStr(QStringLiteral("xipher_theme"), QStringLiteral("gray"));
+    for (const Tokens& t : all())
+        if (t.id == saved && t.available) return t;
+    return all().first();
+}
+
+inline void save(const QString& id) { Prefs::setStr(QStringLiteral("xipher_theme"), id); }
+
+} // namespace ThemePreset

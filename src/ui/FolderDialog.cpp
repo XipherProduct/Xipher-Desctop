@@ -1,6 +1,7 @@
 #include "ui/FolderDialog.h"
 #include "ui/AvatarUtil.h"
 
+#include <QGridLayout>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -14,7 +15,7 @@
 FolderEditorDialog::FolderEditorDialog(const QList<Chat>& chats, const Folder& existing, QWidget* parent)
     : ModalOverlay(parent, 460), chats_(chats), folder_(existing),
       isNew_(existing.id.isEmpty()) {
-    card()->setFixedHeight(540);
+    card()->setFixedHeight(640);
     if (isNew_) folder_.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     for (const QString& k : folder_.chatKeys) selected_.insert(k);
 
@@ -77,6 +78,83 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
     nameEdit_->setMaxLength(64);
     nameEdit_->setText(folder_.name);
     v->addWidget(nameEdit_);
+
+    // Иконка и цвет — как в редакторе папок веба: сетка глифов + палитра.
+    if (folder_.icon.isEmpty())  folder_.icon  = QStringLiteral("chat");
+    if (folder_.color.isEmpty()) folder_.color = FolderIcons::colors().first();
+    auto* iconLbl = new QLabel(QStringLiteral("Иконка"));
+    iconLbl->setObjectName(QStringLiteral("rowName"));
+    v->addWidget(iconLbl);
+    auto* iconGrid = new QWidget();
+    auto* igl = new QGridLayout(iconGrid);
+    igl->setContentsMargins(0, 0, 0, 0);
+    igl->setSpacing(4);
+    const QStringList iconKeys = FolderIcons::keys();
+    QList<QPushButton*> iconBtns;
+    for (int i = 0; i < iconKeys.size(); ++i) {
+        auto* ib = new QPushButton(FolderIcons::glyph(iconKeys[i]));
+        ib->setCursor(Qt::PointingHandCursor);
+        ib->setFixedSize(34, 34);
+        ib->setToolTip(iconKeys[i]);
+        const QString key = iconKeys[i];
+        const bool sel = (key == folder_.icon);
+        ib->setStyleSheet(QStringLiteral(
+            "QPushButton{border:1px solid %1;background:%2;border-radius:9px;"
+            "font-size:16px;padding:0;}"
+            "QPushButton:hover{border:1px solid rgba(139,92,246,0.6);}")
+            .arg(sel ? QStringLiteral("rgba(139,92,246,0.9)") : QStringLiteral("transparent"))
+            .arg(sel ? QStringLiteral("rgba(139,92,246,0.16)") : QStringLiteral("transparent")));
+        connect(ib, &QPushButton::clicked, this, [this, ib, key, iconGrid]() {
+            folder_.icon = key;
+            // Переподсветить выбранную плитку.
+            const auto btns = iconGrid->findChildren<QPushButton*>();
+            for (QPushButton* b : btns)
+                b->setStyleSheet(QStringLiteral(
+                    "QPushButton{border:1px solid transparent;background:transparent;"
+                    "border-radius:9px;font-size:16px;padding:0;}"
+                    "QPushButton:hover{border:1px solid rgba(139,92,246,0.6);}"));
+            ib->setStyleSheet(QStringLiteral(
+                "QPushButton{border:1px solid rgba(139,92,246,0.9);"
+                "background:rgba(139,92,246,0.16);border-radius:9px;font-size:16px;padding:0;}"
+                "QPushButton:hover{border:1px solid rgba(139,92,246,0.6);}"));
+        });
+        iconBtns.append(ib);
+        igl->addWidget(ib, i / 8, i % 8);
+    }
+    v->addWidget(iconGrid);
+
+    auto* colorLbl = new QLabel(QStringLiteral("Цвет"));
+    colorLbl->setObjectName(QStringLiteral("rowName"));
+    v->addWidget(colorLbl);
+    auto* colorRow = new QWidget();
+    auto* crl = new QHBoxLayout(colorRow);
+    crl->setContentsMargins(0, 0, 0, 0);
+    crl->setSpacing(8);
+    for (const QString& col : FolderIcons::colors()) {
+        auto* cb = new QPushButton();
+        cb->setCursor(Qt::PointingHandCursor);
+        cb->setFixedSize(26, 26);
+        cb->setToolTip(col);
+        const bool sel = (col == folder_.color);
+        cb->setStyleSheet(QStringLiteral(
+            "QPushButton{border-radius:13px;background:%1;"
+            "border:2px solid %2;padding:0;}")
+            .arg(col, sel ? QStringLiteral("#F3F1F8") : QStringLiteral("transparent")));
+        connect(cb, &QPushButton::clicked, this, [this, cb, col, colorRow]() {
+            folder_.color = col;
+            const auto btns = colorRow->findChildren<QPushButton*>();
+            for (QPushButton* b : btns)
+                b->setStyleSheet(b->styleSheet().replace(
+                    QStringLiteral("border:2px solid #F3F1F8;"),
+                    QStringLiteral("border:2px solid transparent;")));
+            cb->setStyleSheet(cb->styleSheet().replace(
+                QStringLiteral("border:2px solid transparent;"),
+                QStringLiteral("border:2px solid #F3F1F8;")));
+        });
+        crl->addWidget(cb);
+    }
+    crl->addStretch();
+    v->addWidget(colorRow);
 
     auto* search = new QLineEdit();
     search->setPlaceholderText(QStringLiteral("Поиск чатов…"));

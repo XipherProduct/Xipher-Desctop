@@ -14,12 +14,18 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC OFF)
 
 # Qt 6 — Widgets (UI), Network (REST), WebSockets (realtime), Multimedia (голос).
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network WebSockets Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network WebSockets Multimedia MultimediaWidgets)
 
 set(SOURCES
     src/main.cpp
     src/app/MainWindow.cpp
     src/net/ApiClient.cpp
+    src/net/AesGcm.cpp
+    src/net/ChatCache.cpp
+    src/net/DownloadCenter.cpp
+    src/net/FileCache.cpp
+    src/net/MediaServer.cpp
+    src/net/SecretStore.cpp
     src/net/Session.cpp
     src/net/WsClient.cpp
     src/net/VoiceRecorder.cpp
@@ -31,6 +37,12 @@ set(SOURCES
     src/ui/RegisterPage.cpp
     src/ui/HomePage.cpp
     src/ui/ChatPage.cpp
+    src/ui/LinkPreviewBar.cpp
+    src/ui/Stories.cpp
+    src/ui/SuperSearchDialog.cpp
+    src/ui/DownloadBar.cpp
+    src/ui/TransferRing.cpp
+    src/ui/VideoMessageWidget.cpp
     src/ui/NewChatDialog.cpp
     src/ui/VoiceMessageWidget.cpp
     src/ui/RecordingBar.cpp
@@ -55,6 +67,12 @@ set(SOURCES
 set(HEADERS
     src/app/MainWindow.h
     src/net/ApiClient.h
+    src/net/AesGcm.h
+    src/net/ChatCache.h
+    src/net/DownloadCenter.h
+    src/net/FileCache.h
+    src/net/MediaServer.h
+    src/net/SecretStore.h
     src/net/Session.h
     src/net/Models.h
     src/net/WsClient.h
@@ -68,6 +86,12 @@ set(HEADERS
     src/ui/RegisterPage.h
     src/ui/HomePage.h
     src/ui/ChatPage.h
+    src/ui/LinkPreviewBar.h
+    src/ui/Stories.h
+    src/ui/SuperSearchDialog.h
+    src/ui/DownloadBar.h
+    src/ui/TransferRing.h
+    src/ui/VideoMessageWidget.h
     src/ui/NewChatDialog.h
     src/ui/VoiceMessageWidget.h
     src/ui/RecordingBar.h
@@ -88,6 +112,7 @@ if(WIN32)
     set(APP_RC ${CMAKE_CURRENT_BINARY_DIR}/app.rc)
 endif()
 
+
 qt_add_executable(Xipher
     WIN32                       # GUI-приложение без консоли
     ${SOURCES}
@@ -103,6 +128,7 @@ target_link_libraries(Xipher PRIVATE
     Qt6::Network
     Qt6::WebSockets
     Qt6::Multimedia
+    Qt6::MultimediaWidgets
 )
 
 if(WIN32)
@@ -110,8 +136,12 @@ if(WIN32)
 endif()
 
 # ── WebRTC (libdatachannel, собран в third_party) для звонков ──────────────────
+# Привязка к .dll.a — осознанная привязка к Windows: этот файл мог остаться
+# от виндовой сборки в общем рабочем каталоге, и линукс-линкер падал на
+# R_AMD64_IMAGEBASE. На других платформах звонки собираются из системной
+# libdatachannel либо отключаются.
 set(LIBDC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdatachannel")
-if(EXISTS "${LIBDC_DIR}/build/libdatachannel.dll.a")
+if(WIN32 AND EXISTS "${LIBDC_DIR}/build/libdatachannel.dll.a")
     target_include_directories(Xipher PRIVATE "${LIBDC_DIR}/include")
     target_link_libraries(Xipher PRIVATE "${LIBDC_DIR}/build/libdatachannel.dll.a")
     target_compile_definitions(Xipher PRIVATE XIPHER_HAVE_WEBRTC=1 RTC_ENABLE_MEDIA=1)
@@ -129,6 +159,20 @@ set_target_properties(Xipher PROPERTIES
     OUTPUT_NAME "Xipher"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+# ── Offscreen-верификация дизайна (tests/design-verify.cpp) ───────────────────
+# Тот же набор источников, что у приложения, но со своим main(): рендерит
+# реальный ChatPage без сети и сверяет пиксели/геометрию с CSS веб-клиента.
+if(NOT WIN32)
+    list(FILTER SOURCES EXCLUDE REGEX "src/main\\.cpp$")
+    qt_add_executable(design-verify ${SOURCES} ${HEADERS} tests/design-verify.cpp)
+    target_include_directories(design-verify PRIVATE src)
+    target_link_libraries(design-verify PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+    set_target_properties(design-verify PROPERTIES
+        OUTPUT_NAME "design-verify"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Подпись релиза (опционально). По умолчанию ВЫКЛ — для локальной разработки

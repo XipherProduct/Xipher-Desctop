@@ -37,7 +37,8 @@ public:
 
     void setPlaying(bool playing);
     void setProgress(qreal frac);     // двигает заливку waveform
-    void setElapsedMs(qint64 ms);     // обновляет таймер
+    void setElapsedMs(qint64 ms);
+    void setUnavailable(const QString& reason);   // файл недоступен/ошибка декодера     // обновляет таймер
     void setTotalMs(qint64 ms);
     bool isPlaying() const { return playing_; }
 

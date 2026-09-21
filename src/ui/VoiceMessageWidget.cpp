@@ -181,6 +181,14 @@ void VoiceMessageWidget::setElapsedMs(qint64 ms) {
     time_->setText(fmt(ms));
 }
 
+void VoiceMessageWidget::setUnavailable(const QString& reason) {
+    setPlaying(false);
+    setProgress(0.0);
+    time_->setText(QStringLiteral("—"));
+    setToolTip(QStringLiteral("%1\nФайл больше не доступен на сервере.").arg(reason));
+    setEnabled(false);   // визуально гасим, история остаётся
+}
+
 void VoiceMessageWidget::setTotalMs(qint64 ms) {
     totalMs_ = ms;
     if (!playing_) time_->setText(fmt(ms));

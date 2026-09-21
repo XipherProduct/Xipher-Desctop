@@ -28,6 +28,7 @@ protected:
 private:
     void play();
     void stop();
+    void startMovie(const QString& path);
 
     QString cp_;
     QString ch_;

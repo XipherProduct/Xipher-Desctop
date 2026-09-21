@@ -2,6 +2,8 @@
 <RCC version="1.0">
   <qresource prefix="/">
     <file>icons/xipher.png</file>
+    <file>icons/eye-open.svg</file>
+    <file>icons/eye-closed.svg</file>
     <!-- Анимированные эмодзи (Google Noto Animated Emoji, Apache-2.0) -->
     <file>emoji/1f44b.gif</file>
     <file>emoji/1f60a.gif</file>

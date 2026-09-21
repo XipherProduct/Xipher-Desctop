@@ -34,6 +34,10 @@ struct Folder {
     QString     id;
     QString     name;
     QStringList chatKeys;
+    // Как в вебе: у папки свои иконка (ключ из набора приложения) и цвет
+    // (#rrggbb) — рейл папок красит плитку в цвет папки.
+    QString     icon;
+    QString     color;
 };
 
 // Публичный элемент каталога (/api/public-directory → items[]).

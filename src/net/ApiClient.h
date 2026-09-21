@@ -2,7 +2,10 @@
 #include <QObject>
 #include <QString>
 #include <QList>
+#include <QHash>
 #include <QJsonObject>
+#include <QDateTime>
+#include <QJsonArray>
 #include <functional>
 
 #include "net/Models.h"
@@ -18,6 +21,8 @@ struct AuthResult {
     QString userId;
     QString username;
     bool    isPremium = false;
+    QString premiumPlan;         // trial | month | year
+    QString premiumExpiresAt;    // ISO срок подписки
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,7 +61,33 @@ public:
     void sendFile(const QString& receiverId, const QString& filePath, const QString& fileName,
                   long long fileSize, const QString& caption, const QString& tempId,
                   const QString& messageType = QStringLiteral("file"));
-    void fetchFile(const QString& filePath);   // GET /files/... с токеном
+    void fetchFile(const QString& filePath);   // GET /files/... с токеном (стриминг)
+    void cancelFetch(const QString& filePath); // прервать активную загрузку
+    void fetchFileParallel(const QString& filePath, qint64 total, int chunks = 6); // чанки параллельно
+
+    // Супер-поиск (как supersearch.js веба): /api/search-messages.
+    void searchMessages(const QString& chatId, const QString& context,
+                        const QString& query, const QString& type,
+                        int offset = 0, int limit = 50);
+
+    // Превью ссылок для композера: /api/link-preview.
+    void fetchLinkPreview(const QString& url);
+
+    // Экспорт данных: POST /api/export-data → JSON-файл.
+    void exportData();
+
+    // Xipher Pulse (подписка): создание платежа и обновление статуса.
+    void premiumCreatePayment(const QString& plan, const QString& provider);
+    void premiumRefreshStatus();
+    int  folderCount() const { return folderCount_; }
+
+    // Сторис (как stories.src.js веба): /api/stories/*.
+    void loadStories();
+    void storyView(const QString& storyId);
+    void storyDelete(const QString& storyId);
+    void storyCreate(const QString& mediaUrl, const QString& mediaType,
+                     const QString& caption, const QString& privacy,
+                     const QString& keyB64, const QString& ivB64);
 
     // Звонки (сигналинг)
     void getTurnConfig();
@@ -164,12 +195,23 @@ signals:
     void voiceUploaded(const QString& filePath, const QString& fileName, long long fileSize, const QString& tempId);
     void fileUploaded(const QString& filePath, const QString& fileName, long long fileSize, const QString& tempId);
     void fileFetched(const QString& filePath, const QByteArray& bytes);
+    void fileProgress(const QString& filePath, qint64 received, qint64 total);
 
     void usersFound(const QString& query, const QList<UserHit>& users);
     void friendsLoaded(const QList<UserHit>& friends);
     void contactActionDone(bool ok);
     void chatActionDone(bool ok);
     void profileLoaded(const QJsonObject& profile);
+
+    // Супер-поиск / превью ссылок / сторис.
+    void messagesSearched(const QString& requestId, const QJsonArray& messages);
+    void linkPreviewFetched(const QString& url, const QJsonObject& preview);
+    void storiesLoaded(const QJsonObject& data);
+    void storyCreated(bool ok, const QString& message);
+    void storyDeleted(const QString& storyId, bool ok);
+    void dataExported(bool ok, const QByteArray& bytes);
+    void premiumPaymentReady(bool ok, const QJsonObject& data, const QString& message);
+    void premiumStatusRefreshed(bool active, const QString& expiresAt);
 
     // Группы/каналы/каталог.
     void groupsLoaded(const QList<Chat>& groups);
@@ -210,17 +252,27 @@ signals:
     void friendRequestsLoaded(const QList<FriendRequest>& requests);
     void friendActionDone(const QString& requestId, bool accepted, bool ok);
 
+public:
+    // Доступ к сетевому менеджеру/базе — для загрузки медиа (сторис).
+    QNetworkAccessManager* nam() const { return nam_; }
+
 private:
     // Низкоуровневый POST JSON. callback(obj, ok, networkError).
     void postJson(const QString& path,
                   const QJsonObject& body,
                   std::function<void(const QJsonObject&, bool, const QString&)> callback);
 
+    QHash<QString, QNetworkReply*> fetchReplies_;   // активные загрузки (path → reply)
+    QHash<QString, QList<QNetworkReply*>> parallelReplies_;
+    QHash<QString, qint64> failedFetches_;   // path → retry-not-before (ms epoch)
+    int searchSeq_ = 0;   // последовательность запросов супер-поиска (сопоставление ответов)
+    int folderCount_ = 0; // папок в последнем getChatFolders
+
     static AuthResult parseAuth(const QJsonObject& obj);
 
     // Fallback на /api/turn-config (как у веба), если turn-credentials недоступен.
     void getTurnConfigFallback();
 
-    QNetworkAccessManager* nam_;
+    QNetworkAccessManager* nam_ = nullptr;
     QString base_ = QStringLiteral("https://messenger.xipher.pro");
 };

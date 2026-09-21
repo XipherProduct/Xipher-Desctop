@@ -12,6 +12,8 @@ public:
     QString userId;
     QString username;
     bool    isPremium = false;
+    QString premiumPlan;
+    QString premiumExpiresAt;
 
     bool isAuthenticated() const { return !token.isEmpty(); }
 

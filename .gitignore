@@ -9,3 +9,6 @@ CMakeFiles/
 # Сборка/деплой артефакты
 /dist/
 /installer/output/
+
+# Linux-сборка
+/build-linux/

@@ -9,6 +9,11 @@
 #include "ui/ImageViewer.h"
 #include "ui/ComposerEdit.h"
 #include "net/Prefs.h"
+#include "net/ChatCache.h"
+#include "net/FileCache.h"
+#include "ui/Stories.h"
+#include "ui/SuperSearchDialog.h"
+#include "ui/LinkPreviewBar.h"
 #include "ui/VoiceMessageWidget.h"
 #include "ui/RecordingBar.h"
 #include "ui/EmojiPicker.h"
@@ -18,12 +23,23 @@
 #include "ui/ModalOverlay.h"
 #include "ui/EmptyChatGreeting.h"
 #include "ui/AnimatedEmojiLabel.h"
+#include "ui/TransferRing.h"
+#include "ui/DownloadBar.h"
+#include "net/DownloadCenter.h"
+#include "ui/VideoMessageWidget.h"
 #include "ui/ProfilePanel.h"
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
 #include "net/Session.h"
 #include "net/VoiceRecorder.h"
+#include "ui/Theme.h"
 
+#include <QKeyEvent>
+#include <QPropertyAnimation>
+#include <QGraphicsOpacityEffect>
+#include <QPainter>
+#include <QTextDocument>
+#include <QtMath>
 #include <QMenu>
 #include <QAction>
 #include <QApplication>
@@ -71,6 +87,7 @@
 #include <QImage>
 #include <QDateTime>
 #include <QRegularExpression>
+#include <QMap>
 #include <algorithm>
 
 namespace {
@@ -169,6 +186,108 @@ QString chatPreview(const QString& content) {
 }
 
 // Человекочитаемый размер файла.
+// ── MessageTextLabel: rich-text метка с ТОЧНОЙ высотой.
+// QLabel с RichText+wordWrap врёт высоту в layout'е (зависит от шрифтов/платформы)
+// — из-за этого бабблы «плывут». Здесь высота считается через QTextDocument
+// при фактической ширине и фиксируется: раскладка становится детерминированной.
+class MessageTextLabel : public QLabel {
+public:
+    MessageTextLabel(const QString& html, QWidget* parent) : QLabel(parent) {
+        setTextFormat(Qt::RichText);
+        setWordWrap(true);
+        setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse);
+        setOpenExternalLinks(true);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        // Rich-text QLabel тянет минимальную ширину layout'а на ширину
+        // развёрнутого текста (длинные URL/base64) — контейнер становится
+        // шире вьюпорта, бабблы «уезжают» за край. Разрешаем сжиматься.
+        setMinimumWidth(1);
+        // Документ парсится ОДИН раз; при ресайзе меняется только ширина
+        // (дёшево). Иначе — HTML-парс на каждый пиксель ресайза на каждый
+        // баббл = фриз окна.
+        doc_.setDefaultFont(font());
+        doc_.setDocumentMargin(0);
+        doc_.setHtml(html);
+        setText(html);
+    }
+
+protected:
+    void resizeEvent(QResizeEvent* e) override {
+        if (width() != lastW_) {
+            lastW_ = width();
+            doc_.setTextWidth(qMax(1, width()));
+            setFixedHeight(qCeil(doc_.size().height()) + 2);
+        }
+        QLabel::resizeEvent(e);
+    }
+
+private:
+    QTextDocument doc_;
+    int lastW_ = -1;
+};
+
+static QString formatMessageHtml(const QString& raw);
+
+static QString escapeHtmlMin_(const QString& s) {
+    QString r = s;
+    r.replace(QLatin1Char('&'), QStringLiteral("&amp;"));
+    r.replace(QLatin1Char('<'), QStringLiteral("&lt;"));
+    r.replace(QLatin1Char('>'), QStringLiteral("&gt;"));
+    return r;
+}
+
+QString formatMessageHtml(const QString& raw) {
+    QString s = escapeHtmlMin_(raw);
+
+    // Ссылки — раньше остальных, прячем в токены, чтобы разметка их не трогала.
+    static const QRegularExpression urlRe(QStringLiteral("(https?://[^\\s<]+)"));
+    QMap<QString, QString> links;
+    int linkIdx = 0;
+    auto it = urlRe.globalMatch(s);
+    while (it.hasNext()) {
+        const auto m = it.next();
+        const QString token = QStringLiteral("\x01L%1\x01").arg(linkIdx++);
+        links.insert(token, m.captured(1));
+        s.replace(m.captured(1), token);
+    }
+
+    s.replace(QStringLiteral("||"), QStringLiteral("\x02S\x02"));   // спойлер-маркер
+    s.replace(QStringLiteral("**"), QStringLiteral("\x02B\x02"));
+    s.replace(QStringLiteral("__"), QStringLiteral("\x02U\x02"));
+    s.replace(QStringLiteral("~~"), QStringLiteral("\x02K\x02"));
+    s.replace(QStringLiteral("`"),  QStringLiteral("\x02M\x02"));
+
+    // Курсив — одиночная *, но не наш двойной маркер (после замены ** уже уехал).
+    static const QRegularExpression italicRe(QStringLiteral("(^|[^\\x02B])(\\*)([^\\x02]+)(\\*)"));
+    s.replace(italicRe, QStringLiteral("\\1<i>\\3</i>"));
+
+    auto wrap = [](QString& str, const QString& mark, const QString& open, const QString& close) {
+        const QStringList parts = str.split(mark);
+        QString out;
+        bool inside = false;
+        for (int i = 0; i < parts.size(); ++i) {
+            out += parts[i];
+            if (i + 1 < parts.size()) { out += inside ? close : open; inside = !inside; }
+        }
+        str = out;
+    };
+    wrap(s, QStringLiteral("\x02S\x02"),
+         QStringLiteral("<span style=\"background-color:#0B0A0E;color:#0B0A0E;border-radius:3px;\" title=\"Спойлер — выделите, чтобы прочитать\">"),
+         QStringLiteral("</span>"));
+    wrap(s, QStringLiteral("\x02B\x02"), QStringLiteral("<b>"), QStringLiteral("</b>"));
+    wrap(s, QStringLiteral("\x02U\x02"), QStringLiteral("<u>"), QStringLiteral("</u>"));
+    wrap(s, QStringLiteral("\x02K\x02"), QStringLiteral("<s>"), QStringLiteral("</s>"));
+    wrap(s, QStringLiteral("\x02M\x02"),
+         QStringLiteral("<span style=\"font-family:'JetBrains Mono','Consolas',monospace;background:rgba(255,255,255,0.07);border-radius:4px;\">"),
+         QStringLiteral("</span>"));
+
+    // Вернуть ссылки уже тегами.
+    for (auto it2 = links.cbegin(); it2 != links.cend(); ++it2)
+        s.replace(it2.key(), QStringLiteral("<a href=\"%1\">%1</a>").arg(it2.value()));
+    return s;
+}
+
+
 QString humanSize(long long bytes) {
     if (bytes <= 0) return QString();
     const char* u[] = {"Б", "КБ", "МБ", "ГБ"};
@@ -190,6 +309,15 @@ QString dateLabel(const QString& createdAt) {
                                                     : QStringLiteral("d MMMM yyyy"));
 }
 
+// Папка загрузок файлов: «Загрузки/Xipher Desktop» (как у Telegram Desktop).
+static QString downloadsDir() {
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (dir.isEmpty()) dir = QDir::homePath() + QStringLiteral("/Downloads");
+    dir += QStringLiteral("/Xipher Desktop");
+    QDir().mkpath(dir);
+    return dir;
+}
+
 // Центрированная «пилюля»-разделитель дат.
 QWidget* makeDateSeparator(const QString& label) {
     auto* row = new QWidget();
@@ -199,8 +327,8 @@ QWidget* makeDateSeparator(const QString& label) {
     l->addStretch();
     auto* pill = new QLabel(label);
     pill->setStyleSheet(QStringLiteral(
-        "background:rgba(255,255,255,0.07);color:#ACA6BD;font-size:12px;font-weight:600;"
-        "padding:4px 12px;border-radius:11px;"));
+        "background:rgba(255,255,255,0.07);color:#ACA6BD;font-size:13px;font-weight:600;"
+        "padding:4px 14px;border-radius:12px;"));
     l->addWidget(pill);
     l->addStretch();
     return row;
@@ -222,6 +350,21 @@ QLabel* makeAvatar(const QString& url, const QString& text, int size) {
 }
 
 } // namespace
+
+
+// Цвета бабблов зависят от активной темы («Оформление» в настройках).
+static QString bubbleOutQss() {
+    return QStringLiteral(
+        "#bubbleOut{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+        "stop:0 #4A3A72,stop:1 #3A2D5C);border-radius:18px;}");
+}
+static QString bubbleInQss() {
+    return QStringLiteral(
+        "#bubbleIn{background:%1;border:1px solid rgba(255,255,255,0.07);"
+        "border-radius:18px;}")
+        .arg(ThemePreset::current().surface2.name());
+}
+static QString chatQSS();   // единый шаблон стилей чата (определён ниже)
 
 ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
     : QWidget(parent), api_(api), ws_(ws) {
@@ -260,7 +403,7 @@ ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
         if (!currentTopicId_.isEmpty()) { currentTopics_ = topics; return; }   // внутри темы — не дёргаем вид
         currentForum_ = forum;
         if (forum) convStack_->setCurrentIndex(2), showTopicsList(topics);
-        else { convStack_->setCurrentIndex(1); clearMessages(); api_->getGroupMessages(gid); }
+        else { convStack_->setCurrentIndex(1); clearMessages(); renderCached(); api_->getGroupMessages(gid); }
     });
     connect(api_, &ApiClient::topicMessagesLoaded, this, [this](const QString& tid, const QList<ChatMessage>& msgs) {
         if (tid != currentTopicId_) return;
@@ -303,6 +446,29 @@ ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
     });
     connect(api_, &ApiClient::voiceUploaded,   this, &ChatPage::onVoiceUploaded);
     connect(api_, &ApiClient::fileFetched,     this, &ChatPage::onFileFetched);
+    // История не загрузилась (сеть/сервер): прекращаем «грузимся» — приветствие
+    // покажется, только если чат действительно пуст, без мелькания до ответа.
+    connect(api_, &ApiClient::chatError, this, [this](const QString& ctx, const QString&) {
+        loadingChat_ = false;
+        // Офлайн: если из кэша уже что-то показано — НЕ затираем, помечаем статус.
+        if (bubbleCount_ > 0 && !currentPeerId_.isEmpty())
+            peerStatus_->setText(QStringLiteral("офлайн · показана сохранённая переписка"));
+        updateGreeting();
+        Q_UNUSED(ctx);
+    });
+    // Файл голосового недоступен (404 — сервер чистит старые) → честно на виджете.
+    connect(api_, &ApiClient::fileProgress, this, [this](const QString& p, qint64 rec, qint64 tot) {
+        if (p == pendingPlayPath_ && tot <= 0 && rec == 0 && activeVoice_) {
+            pendingPlayPath_.clear();
+            activeVoice_->setUnavailable(QStringLiteral("Файл недоступен"));
+        }
+        // Неудачная загрузка: убираем «хвосты» ожидания — иначе карта
+        // pending* растёт весь сеанс (утечка памяти по словарю).
+        if (tot <= 0 && rec == 0) {
+            pendingImage_.remove(p);
+            pendingFileOpen_.remove(p);
+        }
+    });
     connect(recorder_, &VoiceRecorder::recordingFinished, this, &ChatPage::onVoiceRecorded);
     connect(recorder_, &VoiceRecorder::error, this, [this](const QString&) {
         cancelRecording();
@@ -325,107 +491,25 @@ ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
             activeVoice_->setElapsedMs(0);
         }
     });
+    connect(player_, &QMediaPlayer::errorOccurred, this, [this](int, const QString& err) {
+        if (activeVoice_) activeVoice_->setUnavailable(err);
+    });
 }
 
 void ChatPage::buildUi() {
-    setStyleSheet(QStringLiteral(R"QSS(
-#sidebar { background:#131218; border-right:1px solid rgba(255,255,255,0.10); }
-#sideHeader, #convHeader { background:#131218; border-bottom:1px solid rgba(255,255,255,0.10); }
-#peerHeader { border-radius:10px; }
-#peerHeader:hover { background:#1A1822; }
-#hdrBtn { border:none; background:transparent; min-width:40px; min-height:40px; border-radius:20px; }
-#hdrBtn:hover { background:#1A1822; }
-#searchBar { background:#131218; border-bottom:1px solid rgba(255,255,255,0.10); }
-#msgSearch { background:#1A1822; border:1px solid rgba(255,255,255,0.10); border-radius:12px;
-    min-height:38px; padding:0 14px; color:#F3F1F8; }
-#msgSearch:focus { border:1px solid #8B5CF6; }
-#brandTitle { font-size:18px; font-weight:800; color:#F3F1F8; }
-#searchBox {
-    background:#1A1822; border:1px solid rgba(255,255,255,0.10); border-radius:12px;
-    min-height:38px; padding:0 14px; color:#F3F1F8;
-}
-#searchBox:focus { border:1px solid #8B5CF6; }
-#chatList { background:#131218; border:none; outline:none; }
-#chatList::item { border:none; padding:0; }
-#chatList::item:hover { background:#1A1822; }
-#chatList::item:selected { background:rgba(139,92,246,0.16); }
-#msgArea { background:#0B0A0E; border:none; }
-#msgArea > QWidget > QWidget { background:#0B0A0E; }
-/* Тонкий ненавязчивый скроллбар (как в Telegram): без стрелок и фона */
-#msgArea QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
-#msgArea QScrollBar::handle:vertical {
-    background:rgba(255,255,255,0.12); border-radius:4px; min-height:36px;
-}
-#msgArea QScrollBar::handle:vertical:hover { background:rgba(255,255,255,0.22); }
-#msgArea QScrollBar::add-line:vertical, #msgArea QScrollBar::sub-line:vertical { height:0; }
-#msgArea QScrollBar::add-page:vertical, #msgArea QScrollBar::sub-page:vertical { background:transparent; }
-/* То же для списка чатов */
-#chatList QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
-#chatList QScrollBar::handle:vertical {
-    background:rgba(255,255,255,0.10); border-radius:4px; min-height:36px;
-}
-#chatList QScrollBar::handle:vertical:hover { background:rgba(255,255,255,0.20); }
-#chatList QScrollBar::add-line:vertical, #chatList QScrollBar::sub-line:vertical { height:0; }
-#chatList QScrollBar::add-page:vertical, #chatList QScrollBar::sub-page:vertical { background:transparent; }
-#composerBar { background:#131218; border-top:1px solid rgba(255,255,255,0.10); }
-#replyBar { background:#131218; border-top:1px solid rgba(255,255,255,0.06); }
-#replyBarText { color:#ACA6BD; font-size:13px; }
-#replyClose { background:transparent; border:none; color:#726C82; font-size:14px; }
-#replyClose:hover { color:#F3F1F8; }
-#composer {
-    background:#1A1822; border:1px solid rgba(255,255,255,0.10); border-radius:20px;
-    padding:9px 16px; color:#F3F1F8; font-size:15px;
-}
-#composer:focus { border:1px solid #8B5CF6; }
-#composer QScrollBar:vertical { background:transparent; width:7px; margin:4px 2px; }
-#composer QScrollBar::handle:vertical { background:rgba(255,255,255,0.18); border-radius:3px; }
-#composer QScrollBar::add-line:vertical, #composer QScrollBar::sub-line:vertical { height:0; }
-#sendBtn {
-    min-width:44px; max-width:44px; min-height:44px; max-height:44px; border:none;
-    border-radius:22px; color:#fff; font-size:18px; font-weight:700;
-    background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #8B5CF6,stop:1 #6D28D9);
-}
-#sendBtn:hover { background:#9B72F8; }
-#micBtn {
-    min-width:44px; max-width:44px; min-height:44px; max-height:44px; border:none;
-    border-radius:22px; background:#1A1822; color:#ACA6BD; font-size:16px;
-}
-#micBtn:hover { color:#F3F1F8; background:#221F2C; }
-#composerIcon {
-    min-width:38px; max-width:38px; min-height:38px; max-height:38px; border:none;
-    border-radius:19px; background:transparent; color:#ACA6BD; font-size:18px;
-}
-#composerIcon:hover { color:#F3F1F8; background:#221F2C; }
-QMenu {
-    background:#1A1822; border:1px solid rgba(255,255,255,0.12); border-radius:10px; padding:6px;
-    color:#F3F1F8;
-}
-QMenu::item { padding:8px 18px; border-radius:6px; }
-QMenu::item:selected { background:rgba(139,92,246,0.22); }
-QMenu::item:disabled { color:#55556a; }
-QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px; }
-#peerName { font-size:15px; font-weight:700; color:#F3F1F8; }
-#peerStatus { font-size:12px; color:#726C82; }
-#emptyHint { font-size:15px; color:#726C82; }
-#iconBtn { border:none; background:transparent; color:#ACA6BD; font-size:13px; }
-#iconBtn:hover { color:#F3F1F8; }
-#folderStrip { background:#131218; border-bottom:1px solid rgba(255,255,255,0.06); }
-#folderScroll { background:transparent; }
-#folderTab { background:transparent; border:none; color:#ACA6BD; font-size:13px; font-weight:600; padding:6px 12px; border-radius:9px; }
-#folderTab:hover { background:#1A1822; color:#F3F1F8; }
-#folderTabActive { background:rgba(139,92,246,0.20); border:none; color:#F3F1F8; font-size:13px; font-weight:700; padding:6px 12px; border-radius:9px; }
-#folderAdd { background:transparent; border:none; color:#8B5CF6; font-size:18px; font-weight:700; padding:4px 12px; border-radius:9px; }
-#folderAdd:hover { background:#1A1822; }
-)QSS"));
+    setStyleSheet(chatQSS());
 
     auto* root = new QHBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
     // ── Сайдбар ──────────────────────────────────────────────────────────────
-    auto* sidebar = new QWidget(this);
-    sidebar->setObjectName(QStringLiteral("sidebar"));
-    sidebar->setFixedWidth(340);
+    // Ширина и структура 1:1 с вебом: сайдбар 380px, внутри — вертикальный
+    // рейл папок 72px слева от списка чатов (chat.html .chats-body).
+    sidebar_ = new QWidget(this);
+    sidebar_->setObjectName(QStringLiteral("sidebar"));
+    sidebar_->setFixedWidth(380);
+    auto* sidebar = sidebar_;
     auto* side = new QVBoxLayout(sidebar);
     side->setContentsMargins(0, 0, 0, 0);
     side->setSpacing(0);
@@ -463,54 +547,87 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
 
     auto* searchWrap = new QWidget(sidebar);
     auto* swl = new QVBoxLayout(searchWrap);
-    swl->setContentsMargins(12, 10, 12, 10);
+    // Отступы как .chats-search веба: 0.75rem 1.5rem.
+    swl->setContentsMargins(16, 12, 16, 12);
     search_ = new QLineEdit(searchWrap);
     search_->setObjectName(QStringLiteral("searchBox"));
     search_->setPlaceholderText(QStringLiteral("Поиск"));
     swl->addWidget(search_);
 
-    // Полоса папок (как в Telegram): горизонтальные вкладки под поиском.
-    folderStrip_ = new QWidget(sidebar);
-    folderStrip_->setObjectName(QStringLiteral("folderStrip"));
-    auto* fsl = new QVBoxLayout(folderStrip_);
-    fsl->setContentsMargins(0, 0, 0, 0);
-    auto* fScroll = new QScrollArea(folderStrip_);
-    fScroll->setObjectName(QStringLiteral("folderScroll"));
-    fScroll->setWidgetResizable(true);
-    fScroll->setFixedHeight(44);
-    fScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    fScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    fScroll->setFrameShape(QFrame::NoFrame);
-    auto* tabsW = new QWidget();
-    folderTabs_ = new QHBoxLayout(tabsW);
-    folderTabs_->setContentsMargins(8, 4, 8, 4);
-    folderTabs_->setSpacing(4);
-    folderTabs_->addStretch();
-    fScroll->setWidget(tabsW);
-    fsl->addWidget(fScroll);
-    folderStrip_->setVisible(false);   // показываем, только если есть папки
+    // Сторис-бар (как .stories-bar веба): кольца-плитки над списком чатов.
+    storiesBar_ = new StoriesBar(sidebar);
+    storiesBar_->setObjectName(QStringLiteral("storiesBar"));
 
-    chatList_ = new QListWidget(sidebar);
+    // Рейл папок (как в Telegram/вебе): вертикальная полоса слева от списка
+    // чатов, плитка = иконка 38px + подпись, бейдж непрочитанных на углу.
+    folderRail_ = new QWidget(sidebar);
+    folderRail_->setObjectName(QStringLiteral("folderRail"));
+    folderRail_->setFixedWidth(72);
+    auto* frl = new QVBoxLayout(folderRail_);
+    frl->setContentsMargins(0, 12, 0, 12);
+    frl->setSpacing(6);
+    folderRailScroll_ = new QScrollArea(folderRail_);
+    folderRailScroll_->setObjectName(QStringLiteral("folderRailScroll"));
+    folderRailScroll_->setWidgetResizable(true);
+    folderRailScroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    folderRailScroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    folderRailScroll_->setFrameShape(QFrame::NoFrame);
+    auto* railW = new QWidget();
+    railW->setStyleSheet(QStringLiteral("background:transparent;"));
+    folderRailItems_ = new QVBoxLayout(railW);
+    folderRailItems_->setContentsMargins(0, 0, 0, 8);
+    folderRailItems_->setSpacing(6);
+    folderRailItems_->addStretch();
+    folderRailScroll_->setWidget(railW);
+    frl->addWidget(folderRailScroll_, 1);
+    folderRail_->setVisible(false);   // показываем, только если есть папки
+
+    // Список чатов (правее рейла) + рамка, как .chats-body в вебе.
+    auto* chatsBody = new QWidget(sidebar);
+    chatsBody->setObjectName(QStringLiteral("chatsBody"));
+    auto* cbl2 = new QHBoxLayout(chatsBody);
+    cbl2->setContentsMargins(0, 0, 0, 0);
+    cbl2->setSpacing(0);
+
+    chatList_ = new QListWidget(chatsBody);
     chatList_->setObjectName(QStringLiteral("chatList"));
     chatList_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
 
+    cbl2->addWidget(folderRail_);
+    cbl2->addWidget(chatList_, 1);
+
     side->addWidget(sideHeader);
     side->addWidget(searchWrap);
-    side->addWidget(folderStrip_);
-    side->addWidget(chatList_, 1);
+    side->addWidget(storiesBar_);
+    side->addWidget(chatsBody, 1);
 
     // ── Область переписки ──────────────────────────────────────────────────────
     convStack_ = new QStackedWidget(this);
+    // Не даём внутренним минимумам переписки держать окно широким:
+    // настоящий минимум (680×480) задаёт MainWindow.
+    convStack_->setMinimumSize(QSize(1, 1));   // (0,0) в Qt = «не задано»
 
-    // Пустое состояние
-    auto* empty = new QWidget(convStack_);
+    // Пустое состояние 1:1 с .empty-chat веба: крупная иконка + заголовок + подсказка.
+    emptyPage_ = new QWidget(convStack_);
+    auto* empty = emptyPage_;
     empty->setStyleSheet(QStringLiteral("background:#0B0A0E;"));
     auto* el = new QVBoxLayout(empty);
+    el->setContentsMargins(32, 32, 32, 32);
     el->addStretch();
-    auto* hint = new QLabel(QStringLiteral("Выберите чат, чтобы начать переписку"), empty);
-    hint->setObjectName(QStringLiteral("emptyHint"));
-    hint->setAlignment(Qt::AlignCenter);
-    el->addWidget(hint);
+    auto* emptyIcon = new QLabel(QStringLiteral("💬"), empty);
+    emptyIcon->setAlignment(Qt::AlignCenter);
+    emptyIcon->setStyleSheet(QStringLiteral("font-size:64px;opacity:0.5;"));
+    el->addWidget(emptyIcon);
+    auto* emptyTitle = new QLabel(QStringLiteral("Выберите чат"), empty);
+    emptyTitle->setAlignment(Qt::AlignCenter);
+    emptyTitle->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:24px;font-weight:600;"));
+    el->addWidget(emptyTitle);
+    auto* emptyHint = new QLabel(
+        QStringLiteral("Выберите чат из списка слева, чтобы начать общение"), empty);
+    emptyHint->setObjectName(QStringLiteral("emptyHint"));
+    emptyHint->setAlignment(Qt::AlignCenter);
+    emptyHint->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:15px;"));
+    el->addWidget(emptyHint);
     el->addStretch();
 
     // Диалог
@@ -563,8 +680,14 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
     chl->addWidget(peerHeader_);
     chl->addStretch();
 
-    // Действия в шапке (как в Telegram): поиск, звонок, «ещё».
+    // Действия в шапке (как в Telegram): супер-поиск, поиск, звонок, «ещё».
     const QColor hdrIcon(0xAC, 0xA6, 0xBD);
+    auto* superBtn = new QPushButton(convHeader);
+    superBtn->setObjectName(QStringLiteral("hdrBtn"));
+    superBtn->setCursor(Qt::PointingHandCursor);
+    superBtn->setIcon(Icons::icon(Icons::Search, 20, QColor(0x8B, 0x5C, 0xF6)));
+    superBtn->setIconSize(QSize(20, 20));
+    superBtn->setToolTip(QStringLiteral("Супер-поиск (Ctrl+Shift+F)"));
     auto* searchBtn = new QPushButton(convHeader);
     searchBtn->setObjectName(QStringLiteral("hdrBtn"));
     searchBtn->setCursor(Qt::PointingHandCursor);
@@ -582,9 +705,11 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
     moreBtn_->setCursor(Qt::PointingHandCursor);
     moreBtn_->setIcon(Icons::icon(Icons::More, 20, hdrIcon));
     moreBtn_->setIconSize(QSize(20, 20));
+    chl->addWidget(superBtn);
     chl->addWidget(searchBtn);
     chl->addWidget(callBtn);
     chl->addWidget(moreBtn_);
+    connect(superBtn, &QPushButton::clicked, this, &ChatPage::openSuperSearch);
     connect(searchBtn, &QPushButton::clicked, this, &ChatPage::toggleSearch);
     connect(callBtn, &QPushButton::clicked, this, &ChatPage::startCall);
     connect(moreBtn_, &QPushButton::clicked, this, &ChatPage::showChatMenu);
@@ -593,17 +718,52 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
     msgScroll_->setObjectName(QStringLiteral("msgArea"));
     msgScroll_->setWidgetResizable(true);
     msgScroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // Вертикальный скроллбар ВСЕГДА резервирует ширину: иначе на границе
+    // «высота контента ≈ высота вьюпорта» он появляется/прячется в цикле,
+    // ширина перепосчитывается, бабблы плывут, поток встаёт (GNOME: «не отвечает»).
+    msgScroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     msgContainer_ = new QWidget(msgScroll_);
-    msgContainer_->setStyleSheet(QStringLiteral("background:#0B0A0E;"));
+    msgContainer_->setObjectName(QStringLiteral("msgContainer"));
+    msgContainer_->setStyleSheet(QStringLiteral("#msgContainer{background:#0B0A0E;}"));
     msgLayout_ = new QVBoxLayout(msgContainer_);
     msgLayout_->setContentsMargins(18, 14, 18, 14);
     msgLayout_->setSpacing(6);
     msgLayout_->addStretch();   // прижимаем сообщения к низу
     msgScroll_->setWidget(msgContainer_);
 
+    // Якорь низа. Раскладка (wordwrap, картинки, новый чат после очистки)
+    // успокаивается за несколько проходов, каждый меняет диапазон скролла —
+    // держим вид снизу на каждом изменении, пока пользователь не ушёл вверх.
+    // Собственный пересчёт всегда ставит value == maximum, поэтому сам себя
+    // якорь не отпускает; кламп при сжатии диапазона тоже даёт value == maximum.
+    auto* msgSb = msgScroll_->verticalScrollBar();
+    connect(msgSb, &QAbstractSlider::rangeChanged, this, [this, msgSb](int, int max) {
+        if (stickBottom_) msgSb->setValue(max);
+    });
+    connect(msgSb, &QAbstractSlider::valueChanged, this, [this, msgSb](int v) {
+        if (msgSb->maximum() - v > 24) stickBottom_ = false;   // пользователь ушёл от низа
+        else if (!stickBottom_)        stickBottom_ = true;    // вернулся к низу — следим снова
+    });
+
     // Приветствие пустого чата — оверлей поверх области сообщений.
     greeting_ = new EmptyChatGreeting(msgScroll_);
     greeting_->hide();
+
+    // Кнопка «вниз» (как в Telegram): плавает справа, видна при прокрутке вверх.
+    scrollDownBtn_ = new QPushButton(msgScroll_);
+    scrollDownBtn_->setObjectName(QStringLiteral("scrollDownBtn"));
+    scrollDownBtn_->setCursor(Qt::PointingHandCursor);
+    scrollDownBtn_->setFixedSize(44, 44);
+    scrollDownBtn_->setText(QStringLiteral("▼"));
+    scrollDownBtn_->setIconSize(QSize(22, 22));
+    scrollDownBtn_->hide();
+    connect(scrollDownBtn_, &QPushButton::clicked, this, [this]() { smoothScrollTo(msgScroll_->verticalScrollBar()->maximum()); });
+    scrollAnim_ = new QVariantAnimation(this);
+    scrollAnim_->setDuration(320);
+    scrollAnim_->setEasingCurve(QEasingCurve::OutCubic);
+    connect(scrollAnim_, &QVariantAnimation::valueChanged, this, [this](const QVariant& v) {
+        msgScroll_->verticalScrollBar()->setValue(v.toInt());
+    });
     msgScroll_->viewport()->installEventFilter(this);
     connect(greeting_, &EmptyChatGreeting::greetingClicked, this, [this](const QString& e) {
         if (currentPeerId_.isEmpty()) return;
@@ -614,7 +774,11 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
     auto* composerBar = new QWidget(conv);
     composerBar->setObjectName(QStringLiteral("composerBar"));
     auto* cblOuter = new QVBoxLayout(composerBar);
-    cblOuter->setContentsMargins(0, 0, 0, 0);
+    cblOuter->setContentsMargins(12, 8, 12, 8);   // как .chat-input-area веба
+
+    // Превью ссылки при вводе URL (как composerLinkPreview в вебе).
+    linkPreview_ = new LinkPreviewBar(api_, composerBar);
+    cblOuter->addWidget(linkPreview_);
 
     // Полоса «ответ на …» над вводом.
     replyBar_ = new QWidget(composerBar);
@@ -640,11 +804,13 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
     composerStack_ = new QStackedWidget(composerBar);
     cblOuter->addWidget(composerStack_);
 
-    // Страница 0 — обычный ввод [⏱][📎][текст][😀][🎤][➤]
+    // Страница 0 — обычный ввод, всё внутри одной пилюли (как .tg-input-bar):
+    // [⏱][📎][текст][😀][🎤/➤]
     auto* normal = new QWidget();
+    normal->setObjectName(QStringLiteral("tgInputBar"));
     auto* cbl = new QHBoxLayout(normal);
-    cbl->setContentsMargins(12, 10, 12, 10);
-    cbl->setSpacing(6);
+    cbl->setContentsMargins(8, 4, 4, 4);
+    cbl->setSpacing(2);
 
     const QColor iconClr(0xAC, 0xA6, 0xBD);
     timerBtn_ = new QPushButton(normal);
@@ -688,15 +854,24 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
     sendBtn_ = new QPushButton(normal);
     sendBtn_->setObjectName(QStringLiteral("sendBtn"));
     sendBtn_->setCursor(Qt::PointingHandCursor);
-    sendBtn_->setIcon(Icons::icon(Icons::Send, 20, QColor(0xFF, 0xFF, 0xFF)));
+    sendBtn_->setIcon(Icons::icon(Icons::Send, 20, QColor(0x8B, 0x5C, 0xF6)));
     sendBtn_->setIconSize(QSize(20, 20));
+    sendBtn_->setVisible(false);   // как в вебе: ➤ появляется при вводе текста, 🎤 уходит
 
-    cbl->addWidget(timerBtn_);
     cbl->addWidget(attachBtn_);
+    cbl->addWidget(timerBtn_);
     cbl->addWidget(composer_, 1);
     cbl->addWidget(emojiBtn_);
     cbl->addWidget(micBtn_);
     cbl->addWidget(sendBtn_);
+
+    // Тоггл «🎤 ↔ ➤» по наличию текста — 1:1 с поведением композера веба.
+    connect(composer_, &ComposerEdit::textChanged, this, [this]() {
+        const bool hasText = !composer_->toPlainText().isEmpty();
+        sendBtn_->setVisible(hasText);
+        micBtn_->setVisible(!hasText);
+        linkPreview_->updateForText(composer_->toPlainText());   // превью ссылки
+    });
 
     // Страница 1 — запись (стиль Discord): пульс + waveform + таймер.
     recBar_ = new RecordingBar();
@@ -736,8 +911,17 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
     cvl->addWidget(msgScroll_, 1);
     cvl->addWidget(composerBar);
 
+    // Глобальная панель загрузок (как в Telegram): переживает смену чата.
+    auto* dlBar = new DownloadBar(conv);
+    cvl->addWidget(dlBar);
+    connect(dlBar, &DownloadBar::cancelRequested, this, [this](const QString& p) {
+        api_->cancelFetch(p);
+        DownloadCenter::instance().cancel(p);
+    });
+
     // ── Страница списка тем форума (index 2) ────────────────────────────────────
-    auto* topicsPage = new QWidget(convStack_);
+    topicsPage_ = new QWidget(convStack_);
+    auto* topicsPage = topicsPage_;
     topicsPage->setStyleSheet(QStringLiteral("background:#0B0A0E;"));
     auto* tpl = new QVBoxLayout(topicsPage);
     tpl->setContentsMargins(0, 0, 0, 0);
@@ -785,7 +969,7 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
     root->addWidget(convStack_, 1);
 
     connect(newChatBtn, &QPushButton::clicked, this, &ChatPage::openNewChatDialog);
-    connect(menuBtn_, &QPushButton::clicked, this, &ChatPage::showMainMenu);
+    connect(menuBtn_, &QPushButton::clicked, this, &ChatPage::toggleAppMenu);
     connect(chatList_, &QListWidget::itemClicked, this, &ChatPage::onChatClicked);
     chatList_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(chatList_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& p) {
@@ -826,6 +1010,9 @@ QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px
         if (idx >= 0) { chats_[idx].displayName = name; rebuildChatList(); }
         if (cid == currentPeerId_) { currentPeerName_ = name; peerName_->setText(name); }
     });
+
+    // Тема из настроек («Оформление»): перегенерировать QSS и инлайн-фоны.
+    applyTheme();
 }
 
 void ChatPage::load() {
@@ -833,8 +1020,136 @@ void ChatPage::load() {
     api_->getGroups();
     api_->getChannels();
     api_->getChatFolders();
+    loadStoriesUi();
     if (!Session::instance().token.isEmpty())
         ws_->start(Session::instance().token);
+}
+
+// ── Супер-поиск (Ctrl+Shift+F, как supersearch.js веба) ──────────────────────
+
+void ChatPage::openSuperSearch() {
+    if (currentPeerId_.isEmpty()) return;
+    if (!superSearch_) {
+        superSearch_ = new SuperSearchDialog(api_, this);
+        superSearch_->setGeometry(rect());
+        connect(superSearch_, &SuperSearchDialog::resultPicked,
+                this, &ChatPage::jumpToMessage);
+    }
+    // Группа (форум-темы считаем группой) или личка.
+    const QString ctx = (currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel)
+        ? QStringLiteral("group") : QStringLiteral("dm");
+    superSearch_->openFor(currentTopicId_.isEmpty() ? currentPeerId_ : currentTopicId_, ctx);
+}
+
+void ChatPage::jumpToMessage(const QString& messageId) {
+    // Ищем виджет баббла по msgId и прокручиваем к нему с подсветкой.
+    const auto bubbles = msgContainer_->findChildren<QFrame*>();
+    QFrame* target = nullptr;
+    for (QFrame* b : bubbles)
+        if (b->property("msgId").toString() == messageId) { target = b; break; }
+    if (!target) return;
+    auto* sb = msgScroll_->verticalScrollBar();
+    const int y = target->mapTo(msgContainer_, QPoint(0, 0)).y();
+    programmaticScroll_ = true;
+    sb->setValue(qBound(sb->minimum(), y - msgScroll_->height() / 3, sb->maximum()));
+    programmaticScroll_ = false;
+    // Короткая подсветка, как ss-highlight-pulse в вебе.
+    stickBottom_ = false;   // прыжок в историю — якорь низа отпускаем
+    target->setStyleSheet(target->styleSheet()
+        + QStringLiteral("QFrame{border:2px solid #8B5CF6;}"));
+    QTimer::singleShot(2200, this, [this, target]() {
+        if (!target) return;
+        const bool sent = target->objectName() == QStringLiteral("bubbleOut");
+        target->setStyleSheet(sent ? bubbleOutQss() : bubbleInQss());
+    });
+}
+
+// ── Сторис (как stories.src.js веба) ─────────────────────────────────────────
+
+void ChatPage::loadStoriesUi() {
+    connect(api_, &ApiClient::storiesLoaded, this, [this](const QJsonObject& data) {
+        bool premium = false;
+        storyGroups_ = groupStoriesPayload(data, Session::instance().userId, &premium);
+        storiesBar_->applyData(storyGroups_);
+    });
+    connect(storiesBar_, &StoriesBar::userClicked, this, [this](int idx) {
+        if (!storiesViewer_) storiesViewer_ = new StoriesViewer(api_, window());
+        storiesViewer_->open(storyGroups_, idx);
+    });
+    connect(storiesBar_, &StoriesBar::addRequested, this, [this]() {
+        if (!storyCreator_) storyCreator_ = new StoryCreatorDialog(api_, window());
+        storyCreator_->show();
+    });
+    // После публикации — обновить бар (успех приходит сигналом storyCreated).
+    connect(api_, &ApiClient::storyCreated, this,
+            [this](bool ok, const QString&) { if (ok) api_->loadStories(); },
+            static_cast<Qt::ConnectionType>(Qt::UniqueConnection));
+    api_->loadStories();
+}
+
+void ChatPage::resizeEvent(QResizeEvent* e) {
+    // Узкое окно: сайдбар сжимается до 300px (как minmax(300px, 380px) в вебе).
+    if (sidebar_) {
+        const int target = qBound(300, width() * 30 / 100, 380);
+        if (sidebar_->width() != target) sidebar_->setFixedWidth(target);
+    }
+    clampBubbleWidths();
+    // Повтор после layout-прохода: контейнер сообщений меняет ширину с отставанием.
+    QTimer::singleShot(0, this, &ChatPage::clampBubbleWidths);
+    updateScrollDownButton();
+    QWidget::resizeEvent(e);
+}
+
+void ChatPage::updateScrollDownButton() {
+    if (!scrollDownBtn_ || !msgScroll_) return;
+    auto* sb = msgScroll_->verticalScrollBar();
+    const bool show = sb->maximum() - sb->value() > 300;
+    scrollDownBtn_->setVisible(show);
+    if (show)
+        scrollDownBtn_->move(msgScroll_->width() - 60,
+                             msgScroll_->height() - 64);
+}
+
+void ChatPage::smoothScrollTo(int target) {
+    if (!msgScroll_) return;
+    auto* sb = msgScroll_->verticalScrollBar();
+    if (scrollAnim_->state() == QAbstractAnimation::Running) scrollAnim_->stop();
+    programmaticScroll_ = true;
+    scrollAnim_->setStartValue(sb->value());
+    scrollAnim_->setEndValue(qBound(sb->minimum(), target, sb->maximum()));
+    scrollAnim_->start(QAbstractAnimation::DeleteWhenStopped);
+    scrollAnim_ = new QVariantAnimation(this);
+    scrollAnim_->setDuration(320);
+    scrollAnim_->setEasingCurve(QEasingCurve::OutCubic);
+    connect(scrollAnim_, &QVariantAnimation::valueChanged, this, [this](const QVariant& v) {
+        msgScroll_->verticalScrollBar()->setValue(v.toInt());
+    });
+    connect(scrollAnim_, &QAbstractAnimation::finished, this, [this]() {
+        programmaticScroll_ = false;
+        updateScrollDownButton();
+    });
+}
+
+void ChatPage::clampBubbleWidths() {
+    if (!msgContainer_) return;
+    const int maxW = qBound(260, msgContainer_->width() * 72 / 100, 480);
+    const auto bubbles = msgContainer_->findChildren<QFrame*>();
+    for (QFrame* b : bubbles)
+        if (b->objectName() == QStringLiteral("bubbleIn")
+            || b->objectName() == QStringLiteral("bubbleOut"))
+            b->setMaximumWidth(maxW);
+}
+
+void ChatPage::keyPressEvent(QKeyEvent* e) {
+    // Супер-поиск: Ctrl+Shift+F — как в веб-клиенте.
+    if ((e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))
+            == (Qt::ControlModifier | Qt::ShiftModifier)
+        && e->key() == Qt::Key_F) {
+        e->accept();
+        openSuperSearch();
+        return;
+    }
+    QWidget::keyPressEvent(e);
 }
 
 int ChatPage::indexOfChat(const QString& id) const {
@@ -860,24 +1175,63 @@ void ChatPage::mergeAllChats() {
 
 // ── Папки ─────────────────────────────────────────────────────────────────────
 void ChatPage::rebuildFolderStrip() {
-    if (!folderTabs_) return;
-    folderStrip_->setVisible(!folders_.isEmpty());
+    if (!folderRailItems_) return;
+    folderRail_->setVisible(!folders_.isEmpty());
 
-    // Очистить вкладки (оставив финальный stretch).
-    while (folderTabs_->count() > 1) {
-        QLayoutItem* it = folderTabs_->takeAt(0);
+    // Очистить плитки полностью (кнопка «＋» и stretch тоже — строим заново).
+    while (folderRailItems_->count() > 0) {
+        QLayoutItem* it = folderRailItems_->takeAt(0);
         if (it->widget()) it->widget()->deleteLater();
         delete it;
     }
+    folderRailItems_->addStretch();   // растяжка между плитками и кнопкой «＋»
     if (folders_.isEmpty()) return;
 
-    auto makeTab = [this](const QString& id, const QString& title, int count) {
+    // Плитка рейла 1:1 с .folder-rail-item веба: иконка-плитка 38px (r12,
+    // подкрашивается цветом папки) + подпись; непрочитанные — бейдж на углу.
+    auto makeRailItem = [this](const QString& id, const QString& title,
+                               const QString& icon, const QString& color, int unread) {
         const bool active = (id == activeFolderId_);
-        QString text = title;
-        if (count > 0) text += QStringLiteral("  %1").arg(count);
-        auto* b = new QPushButton(text);
-        b->setObjectName(active ? QStringLiteral("folderTabActive") : QStringLiteral("folderTab"));
+        auto* b = new QPushButton();
+        b->setObjectName(active ? QStringLiteral("folderRailItemActive")
+                                : QStringLiteral("folderRailItem"));
         b->setCursor(Qt::PointingHandCursor);
+        b->setToolTip(title);
+        // Фиксированный размер: QPushButton со стилем не считает layout-минимум
+        // детей — без фиксации кнопка сжимается и плитки обрезаются.
+        b->setFixedSize(62, 74);
+        auto* v = new QVBoxLayout(b);
+        v->setContentsMargins(2, 6, 2, 6);
+        v->setSpacing(4);
+
+        auto* iconTile = new QLabel(FolderIcons::glyph(icon), b);
+        iconTile->setObjectName(QStringLiteral("folderRailIcon"));
+        iconTile->setAlignment(Qt::AlignCenter);
+        iconTile->setFixedSize(38, 38);
+        const QString base = color.isEmpty() ? QStringLiteral("#8B5CF6") : color;
+        iconTile->setStyleSheet(QStringLiteral(
+            "background:rgba(%1,%2,%3,0.18);border-radius:12px;font-size:17px;"
+            "border:1px solid rgba(%1,%2,%3,0.30);")
+            .arg(base.mid(1,2).toInt(nullptr,16))
+            .arg(base.mid(3,2).toInt(nullptr,16))
+            .arg(base.mid(5,2).toInt(nullptr,16)));
+        v->addWidget(iconTile, 0, Qt::AlignHCenter);
+
+        auto* label = new QLabel(title, b);
+        label->setObjectName(QStringLiteral("folderRailLabel"));
+        label->setAlignment(Qt::AlignCenter);
+        v->addWidget(label);
+
+        if (unread > 0) {
+            auto* badge = new QLabel(unread > 99 ? QStringLiteral("99+")
+                                                 : QString::number(unread), iconTile);
+            badge->setObjectName(QStringLiteral("folderRailCount"));
+            badge->setAlignment(Qt::AlignCenter);
+            badge->move(22, -4);
+            badge->adjustSize();
+            badge->raise();
+        }
+
         connect(b, &QPushButton::clicked, this, [this, id]() { setActiveFolder(id); });
         if (id != QStringLiteral("all")) {
             b->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -899,20 +1253,29 @@ void ChatPage::rebuildFolderStrip() {
         return b;
     };
 
+    int unreadAll = 0;
+    for (const Chat& c : chats_) unreadAll += c.unread;
     int idx = 0;
-    folderTabs_->insertWidget(idx++, makeTab(QStringLiteral("all"), QStringLiteral("Все"), 0));
+    folderRailItems_->insertWidget(idx++, makeRailItem(
+        QStringLiteral("all"), QStringLiteral("Все"), QStringLiteral("chat"), QString(), unreadAll));
     for (const Folder& f : folders_) {
-        int cnt = 0;
+        int unread = 0, cnt = 0;
         const QSet<QString> keys(f.chatKeys.begin(), f.chatKeys.end());
-        for (const Chat& c : chats_) if (keys.contains(chatKeyFor(c))) ++cnt;
-        folderTabs_->insertWidget(idx++, makeTab(f.id, f.name, cnt));
+        for (const Chat& c : chats_)
+            if (keys.contains(chatKeyFor(c))) { ++cnt; unread += c.unread; }
+        Q_UNUSED(cnt);
+        folderRailItems_->insertWidget(idx++,
+            makeRailItem(f.id, f.name, f.icon, f.color, unread));
     }
-    auto* add = new QPushButton(QStringLiteral("+"));
-    add->setObjectName(QStringLiteral("folderAdd"));
+
+    // Кнопка «правка папок» внизу рейла — как .folder-rail-edit в вебе.
+    auto* add = new QPushButton(QStringLiteral("＋"));
+    add->setObjectName(QStringLiteral("folderRailEdit"));
     add->setCursor(Qt::PointingHandCursor);
-    add->setToolTip(QStringLiteral("Новая папка"));
+    add->setToolTip(QStringLiteral("Настроить папки"));
+    add->setFixedSize(38, 38);
     connect(add, &QPushButton::clicked, this, [this]() { openFolderEditor(QString()); });
-    folderTabs_->insertWidget(idx++, add);
+    folderRailItems_->addWidget(add, 0, Qt::AlignHCenter);
 }
 
 void ChatPage::setActiveFolder(const QString& id) {
@@ -1012,6 +1375,8 @@ void ChatPage::openTopic(const Topic& topic) {
     peerStatus_->setText(QStringLiteral("тема • %1").arg(currentPeerName_));
     convStack_->setCurrentIndex(1);
     clearMessages();
+    loadingChat_ = true;   // приветствие не мелькает, пока тема грузится
+    renderCached();
     api_->getTopicMessages(topic.id);
 }
 
@@ -1058,8 +1423,9 @@ static QWidget* buildContactRow(const QString& url, const QString& avatarText,
     auto* row = new QWidget();
     row->setStyleSheet(QStringLiteral("background:transparent;"));
     auto* rl = new QHBoxLayout(row);
-    rl->setContentsMargins(12, 8, 12, 8);
-    rl->setSpacing(10);
+    // Отступы 1:1 с .chat-item веба: 0.875rem 1.5rem (14px × 24px).
+    rl->setContentsMargins(16, 10, 16, 10);
+    rl->setSpacing(12);
 
     auto* av = new QLabel();
     Avatar::setRound(av, url, avatarText, 48);
@@ -1070,29 +1436,30 @@ static QWidget* buildContactRow(const QString& url, const QString& avatarText,
     auto* topRow = new QHBoxLayout();
     topRow->setSpacing(6);
     auto* name = new QLabel(row);
-    name->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:14px;font-weight:600;"));
+    name->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:15px;font-weight:600;"));
     name->setText(elide(title, name->font(), 200));
     topRow->addWidget(name);
     topRow->addStretch();
     if (!time.isEmpty()) {
         auto* t = new QLabel(time, row);
-        t->setStyleSheet(QStringLiteral("color:#726C82;font-size:11px;"));
+        t->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
         topRow->addWidget(t);
     }
 
     auto* botRow = new QHBoxLayout();
     botRow->setSpacing(6);
     auto* last = new QLabel(row);
-    last->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:13px;"));
+    last->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:14px;"));
     last->setText(elide(subtitle, last->font(), 210));
     botRow->addWidget(last);
     botRow->addStretch();
     if (unread > 0) {
+        // Бейдж 1:1 с .chat-unread: accent, r12, min-width 20.
         auto* badge = new QLabel(QString::number(unread), row);
         badge->setAlignment(Qt::AlignCenter);
         badge->setStyleSheet(QStringLiteral(
-            "background:#8B5CF6;color:#fff;font-size:11px;font-weight:700;"
-            "border-radius:9px;min-width:18px;min-height:18px;padding:0 5px;"));
+            "background:#8B5CF6;color:#fff;font-size:12px;font-weight:600;"
+            "border-radius:12px;min-width:20px;padding:2px 8px;"));
         botRow->addWidget(badge);
     }
     mid->addLayout(topRow);
@@ -1129,7 +1496,7 @@ void ChatPage::rebuildChatList() {
                                     avatarText, c.displayName, chatPreview(c.lastMessage), time, c.unread);
 
         auto* item = new QListWidgetItem(chatList_);
-        item->setSizeHint(QSize(0, 64));
+        item->setSizeHint(QSize(0, 72));
         item->setData(Qt::UserRole, c.id);
         item->setData(Qt::UserRole + 1, false);   // не результат поиска
         chatList_->addItem(item);
@@ -1157,7 +1524,7 @@ void ChatPage::rebuildChatList() {
                                         u.displayName.isEmpty() ? u.username : u.displayName,
                                         QStringLiteral("@") + u.username, QString(), 0);
             auto* item = new QListWidgetItem(chatList_);
-            item->setSizeHint(QSize(0, 64));
+            item->setSizeHint(QSize(0, 72));
             item->setData(Qt::UserRole, u.id);
             item->setData(Qt::UserRole + 1, true);   // результат поиска
             item->setData(Qt::UserRole + 2, u.displayName.isEmpty() ? u.username : u.displayName);
@@ -1184,6 +1551,17 @@ void ChatPage::onChatClicked() {
 }
 
 void ChatPage::openChat(const Chat& chat) {
+    // Тот же чат уже открыт — не перерисовываем (без дёрганья), просто к низу.
+    if (currentPeerId_ == chat.id && currentKind_ == chat.kind
+        && convStack_->currentIndex() != 0 && currentTopicId_.isEmpty()) {
+        scrollToBottom();
+        const int idxSame = indexOfChat(chat.id);
+        if (idxSame >= 0 && chats_[idxSame].unread > 0) {
+            chats_[idxSame].unread = 0;
+            rebuildChatList();
+        }
+        return;
+    }
     clearReplyTo();
     currentPeerId_   = chat.id;
     currentPeerName_ = chat.displayName;
@@ -1206,13 +1584,17 @@ void ChatPage::openChat(const Chat& chat) {
                          || chat.role == QStringLiteral("admin"));
     if (topicBackBtn_) topicBackBtn_->setVisible(false);
 
+    // Пока нет ни кэша, ни ответа сервера — приветствие не мелькает.
+    loadingChat_ = true;
     if (chat.kind == ChatKind::Group) {
         // Группа: сначала узнаём, форум ли это (тогда покажем список тем).
         api_->getGroupTopics(chat.id);
     } else if (chat.kind == ChatKind::Channel) {
-        convStack_->setCurrentIndex(1); clearMessages(); api_->getChannelMessages(chat.id);
+        convStack_->setCurrentIndex(1); clearMessages(); renderCached();
+        api_->getChannelMessages(chat.id);
     } else {
-        convStack_->setCurrentIndex(1); clearMessages(); api_->getMessages(chat.id);
+        convStack_->setCurrentIndex(1); clearMessages(); renderCached();
+        api_->getMessages(chat.id);
     }
 
     // Сброс непрочитанных в списке
@@ -1227,6 +1609,9 @@ void ChatPage::clearMessages() {
     // Останавливаем воспроизведение — виджеты ниже будут удалены.
     player_->stop();
     activeVoice_ = nullptr;
+    // Видео: гасим плееры ДО deleteLater — иначе доигрывают «в невидимости».
+    for (auto* vm : msgContainer_->findChildren<VideoMessageWidget*>())
+        vm->stopPlayback();
     pendingPlayPath_.clear();
 
     QLayoutItem* it;
@@ -1245,7 +1630,9 @@ void ChatPage::clearMessages() {
 
 void ChatPage::updateGreeting() {
     if (!greeting_) return;
-    const bool show = !currentPeerId_.isEmpty() && bubbleCount_ == 0;
+    // Пока история грузится (кэш пуст, ответ не пришёл) — не показываем:
+    // приветствие мелькает на доли секунды и бесит. Только подтверждённо пустой чат.
+    const bool show = !currentPeerId_.isEmpty() && bubbleCount_ == 0 && !loadingChat_;
     if (show) {
         greeting_->setGeometry(msgScroll_->viewport()->rect());
         greeting_->raise();
@@ -1256,6 +1643,10 @@ void ChatPage::updateGreeting() {
 }
 
 bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
+    if (obj == appMenuScrim_ && e->type() == QEvent::MouseButtonPress) {
+        closeAppMenu();
+        return true;
+    }
     if (greeting_ && obj == msgScroll_->viewport() && e->type() == QEvent::Resize) {
         if (greeting_->isVisible()) greeting_->setGeometry(msgScroll_->viewport()->rect());
     }
@@ -1264,8 +1655,23 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
         && static_cast<QMouseEvent*>(e)->button() == Qt::LeftButton) {
         if (auto* w = qobject_cast<QWidget*>(obj)) {
             const QVariant fv = w->property("imgFull");
-            if (fv.isValid() && fv.canConvert<QPixmap>()) {
-                ImageViewer::show(window(), fv.value<QPixmap>());
+            const QVariant fp = w->property("filePath");
+            if (fv.isValid() && fv.canConvert<QPixmap>() && !fv.value<QPixmap>().isNull()) {
+                // Как в Telegram: клик по фото — вся галерея чата с этой позиции.
+                QStringList paths;
+                int startIdx = 0;
+                for (const ChatMessage& m : currentMessages_) {
+                    if ((m.messageType == QStringLiteral("image")
+                         || m.messageType == QStringLiteral("photo"))
+                        && !m.filePath.isEmpty()) {
+                        if (m.filePath == fp.toString()) startIdx = paths.size();
+                        paths.append(m.filePath);
+                    }
+                }
+                if (paths.size() <= 1) { ImageViewer::show(window(), fv.value<QPixmap>()); return true; }
+                ImageViewer::showGallery(window(), paths, startIdx,
+                    [this](const QString& p) { return mediaBytes(p); },
+                    [this](const QString& p) { api_->fetchFile(p); });
                 return true;
             }
             // Клик по теме форума.
@@ -1349,13 +1755,35 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
     return QWidget::eventFilter(obj, e);
 }
 
-void ChatPage::applyMessages(const QList<ChatMessage>& messages) {
-    // Сервер отдаёт историю DESC — разворачиваем в хронологию (старые сверху).
+void ChatPage::applyMessages(const QList<ChatMessage>& messages, bool updateCache) {
+    // Сервер — источник истины: сортируем, рисуем, обновляем локальный кэш
+    // (при показе из кэша повторно не сохраняем).
+    loadingChat_ = false;
     currentMessages_ = messages;
     std::sort(currentMessages_.begin(), currentMessages_.end(),
               [](const ChatMessage& a, const ChatMessage& b) { return a.createdAt < b.createdAt; });
     renderMessages(msgSearch_ && searchBar_->isVisible() ? msgSearch_->text().trimmed() : QString());
-    scrollToBottom();
+    if (updateCache) cacheCurrent();
+}
+
+QString ChatPage::cacheKey() const {
+    // Тема форума — отдельный поток сообщений со своим ключом кэша.
+    return currentTopicId_.isEmpty() ? currentPeerId_
+                                     : QStringLiteral("t:") + currentTopicId_;
+}
+
+void ChatPage::renderCached() {
+    // Мгновенное открытие: показываем зашифрованный локальный кэш, не дожидаясь
+    // ответа сервера; при приходе истории applyMessages перерисует поверх.
+    const QString key = cacheKey();
+    if (key.isEmpty()) return;
+    const QList<ChatMessage> cached = ChatCache::instance().load(key);
+    if (!cached.isEmpty()) applyMessages(cached, /*updateCache*/ false);
+}
+
+void ChatPage::cacheCurrent() {
+    const QString key = cacheKey();
+    if (!key.isEmpty()) ChatCache::instance().save(key, currentMessages_);
 }
 
 void ChatPage::onMessagesLoaded(const QString& friendId, const QList<ChatMessage>& messages) {
@@ -1369,7 +1797,19 @@ void ChatPage::renderMessages(const QString& filter) {
     const QString f = filter.toLower();
     int matches = 0;
     QString lastDay;
-    for (const ChatMessage& m : currentMessages_) {
+    // Как в Telegram: в виджетах — только ХВОСТ истории (50 сообщений).
+    // Остальное догружается виджетами при прокрутке к верху (prependOlderMessages),
+    // данные при этом и так целиком в currentMessages_.
+    const int total = currentMessages_.size();
+    const int from = f.isEmpty() ? qMax(0, total - 50) : 0;
+    // tdesktop-style: СИНХРОННО строим только видимый хвост, остальной хвост —
+    // чанками в простое (прерывается при смене чата).
+    const int firstShown = f.isEmpty() ? qMax(from, total - 14) : from;
+    renderedFrom_ = firstShown;
+    for (int i = 0; i < total; ++i) {
+        const ChatMessage& m = currentMessages_[i];
+        if (!m.id.isEmpty()) shownIds_.insert(m.id);   // дедуп работаем по всей истории
+        if (i < firstShown) continue;
         if (!f.isEmpty() && !m.content.toLower().contains(f)) continue;
         ++matches;
         const QString day = m.createdAt.left(10);
@@ -1378,16 +1818,82 @@ void ChatPage::renderMessages(const QString& filter) {
             if (!lbl.isEmpty()) msgLayout_->addWidget(makeDateSeparator(lbl));
             lastDay = day;
         }
-        if (!m.id.isEmpty()) shownIds_.insert(m.id);
         addBubble(m);
     }
     if (searchCount_)
         searchCount_->setText(f.isEmpty() ? QString() : QStringLiteral("Найдено: %1").arg(matches));
-    if (f.isEmpty()) updateGreeting();
+    if (f.isEmpty()) {
+        updateGreeting();
+        // Достройка хвоста чанками (tdesktop: ленивое построение за границей экрана).
+        if (renderedFrom_ > from) {
+            const quint64 gen = ++renderGen_;
+            QTimer::singleShot(0, this, [this, gen, from] { continueTail(from, gen); });
+        }
+    }
     scrollToBottom();
 }
 
-void ChatPage::addBubble(const ChatMessage& msg) {
+void ChatPage::continueTail(int targetFrom, quint64 gen) {
+    if (gen != renderGen_) return;                 // чат сменился — цепочка отменена
+    if (renderedFrom_ <= targetFrom) return;       // хвост достроен
+    prependOlderBatch(targetFrom, 12);
+    QTimer::singleShot(0, this, [this, targetFrom, gen] { continueTail(targetFrom, gen); });
+}
+
+// Порция prepend'а старых сообщений. Контент растёт СВЕРХУ — без якоря
+// позиция просмотра уезжает вниз ровно на высоту порции (тот самый «съезд»
+// при листании сразу после входа в чат). Якорь: value += прирост высоты.
+void ChatPage::prependOlderBatch(int floorFrom, int batch) {
+    if (renderedFrom_ <= floorFrom) return;
+    auto* sb = msgScroll_->verticalScrollBar();
+    const int oldMax = sb->maximum();
+    const int oldVal = sb->value();
+
+    const int from = qMax(floorFrom, renderedFrom_ - batch);
+    QString lastDay = currentMessages_.value(renderedFrom_).createdAt.left(10);
+    for (int i = from; i < renderedFrom_; ++i) {
+        const ChatMessage& m = currentMessages_[i];
+        if (!m.id.isEmpty()) shownIds_.insert(m.id);
+        if (!m.createdAt.isEmpty()) {
+            const QString day = m.createdAt.left(10);
+            if (day != lastDay) {
+                const QString lbl = dateLabel(m.createdAt);
+                if (!lbl.isEmpty()) msgLayout_->insertWidget(1, makeDateSeparator(lbl));
+                lastDay = day;
+            }
+        }
+        addBubble(m, /*prepend=*/true);
+        if (!m.createdAt.isEmpty()) lastDay = m.createdAt.left(10);
+    }
+    renderedFrom_ = from;
+
+    const int grown = sb->maximum() - oldMax;
+    if (grown > 0) {
+        programmaticScroll_ = true;
+        sb->setValue(oldVal + grown);
+        programmaticScroll_ = false;
+    }
+}
+
+// Догрузка старых сообщений при прокрутке к верху (Telegram-style):
+// добавляем виджеты ПЕРЕД существующими и якорим скролл — вид не дёргается.
+void ChatPage::prependOlderMessages() {
+    if (loadingOlder_ || renderedFrom_ <= 0) return;
+    loadingOlder_ = true;
+    auto* sb = msgScroll_->verticalScrollBar();
+    const int oldMax = sb->maximum();
+    const int oldVal = sb->value();
+
+    prependOlderBatch(qMax(0, renderedFrom_ - 50), 50);
+
+    // Якорь: контент вырос сверху — компенсируем, чтобы глаз не дёрнулся.
+    programmaticScroll_ = true;
+    sb->setValue(sb->maximum() - oldMax + oldVal);
+    programmaticScroll_ = false;
+    loadingOlder_ = false;
+}
+
+void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     // Апдейт чек-листа — не рисуем бабблом, применяем к существующему виджету.
     if (msg.content.startsWith(ChecklistProto::kUpdatePrefix)) {
         const QJsonObject upd = parseChecklistUpdate(msg.content);
@@ -1401,23 +1907,31 @@ void ChatPage::addBubble(const ChatMessage& msg) {
     }
 
     auto* row = new QWidget(msgContainer_);
-    row->setStyleSheet(QStringLiteral("background:transparent;"));
+    row->setObjectName(QStringLiteral("msgRow"));
+    row->setStyleSheet(QStringLiteral("#msgRow{background:transparent;}"));
     auto* rl = new QHBoxLayout(row);
     rl->setContentsMargins(0, 0, 0, 0);
     rl->setSpacing(0);
 
     auto* bubble = new QFrame(row);
-    bubble->setMaximumWidth(480);
-    if (msg.sent) {
+    bubble->setObjectName(msg.sent ? QStringLiteral("bubbleOut") : QStringLiteral("bubbleIn"));
+    // Максимум 480px, но не более 72% ширины области сообщений (узкое окно).
+    bubble->setMaximumWidth(qBound(260, msgContainer_->width() * 72 / 100, 480));
+    // Чистое медиа без текста — без фона баббла (.is-media-only веба).
+    const bool mediaOnly = (msg.messageType == QStringLiteral("image")
+        || msg.messageType == QStringLiteral("photo")
+        || msg.messageType == QStringLiteral("video")
+        || msg.messageType == QStringLiteral("video_note"))
+        && msg.content.isEmpty();
+    if (mediaOnly)
         bubble->setStyleSheet(QStringLiteral(
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4A3A72,stop:1 #3A2D5C);"
-            "border-radius:18px;"));
-    } else {
-        bubble->setStyleSheet(QStringLiteral("background:#1A1822;border-radius:18px;"));
-    }
+            "#bubbleOut,#bubbleIn{background:transparent;border:none;padding:0;}"));
+    else
+        bubble->setStyleSheet(msg.sent ? bubbleOutQss() : bubbleInQss());
     auto* bl = new QVBoxLayout(bubble);
     bl->setContentsMargins(14, 8, 14, 6);
     bl->setSpacing(2);
+    if (mediaOnly) bl->setContentsMargins(0, 0, 0, 2);   // медиа без полей баббла
 
     // Контекстное меню сообщения (ответить / копировать / удалить).
     bubble->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -1475,6 +1989,10 @@ void ChatPage::addBubble(const ChatMessage& msg) {
         const QString path = msg.filePath;
         connect(voice, &VoiceMessageWidget::playPauseClicked, this,
                 [this, voice, path]() { onVoicePlayPause(voice, path); });
+        voice->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(voice, &QWidget::customContextMenuRequested, this, [this, voice, path](const QPoint& p) {
+            showMediaMenu(voice, path, QStringLiteral("voice"), p);
+        });
         connect(voice, &VoiceMessageWidget::seekRequested, this, [this, voice](qreal frac) {
             if (activeVoice_ == voice && player_->duration() > 0)
                 player_->setPosition(qint64(frac * player_->duration()));
@@ -1524,8 +2042,19 @@ void ChatPage::addBubble(const ChatMessage& msg) {
             }
             QDesktopServices::openUrl(QUrl(u));
         });
+    } else if (msg.messageType == QStringLiteral("video") ||
+               msg.messageType == QStringLiteral("video_note")) {
+        // Видео как в Telegram: плеер в баббле; играет сразу, пока файл ещё
+        // качается (стриминг через локальный Range-прокси с токеном), параллельно
+        // докачивается в кэш. Видео-заметки — круглые, с кольцом прогресса.
+        const bool isNote = msg.messageType == QStringLiteral("video_note");
+        auto* video = new VideoMessageWidget(api_, msg.filePath, msg.fileName,
+                                             msg.fileSize, isNote, bubble);
+        if (!isNote) bubble->setMinimumWidth(340);
+        bl->addWidget(video);
     } else if (msg.messageType == QStringLiteral("image") || msg.messageType == QStringLiteral("photo")) {
-        // Фото: показываем картинку (локально или тянем с /files).
+        // Фото 1:1 с .message-image веба: max-height 400px, радиус 8px,
+        // клик — просмотр на весь экран. Кэш — мгновенный показ.
         auto* img = new QLabel(bubble);
         img->setAlignment(Qt::AlignCenter);
         img->setMinimumSize(180, 120);
@@ -1533,46 +2062,123 @@ void ChatPage::addBubble(const ChatMessage& msg) {
         img->setText(QStringLiteral("Фото…"));
         img->setCursor(Qt::PointingHandCursor);
         img->installEventFilter(this);   // клик → просмотр на весь экран
+        const QString path = msg.filePath;
+        img->setProperty("filePath", path);
         bubble->setMinimumWidth(220);
         bl->addWidget(img);
-        const QString path = msg.filePath;
+        // Контекст-меню фото: копировать / сохранить / переслать / все фото чата.
+        img->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(img, &QWidget::customContextMenuRequested, this, [this, img](const QPoint& p) {
+            showMediaMenu(img, img->property("filePath").toString(), QStringLiteral("image"), p);
+        });
         if (!path.isEmpty()) {
             if (!path.startsWith(QStringLiteral("/files"))) {
-                QPixmap pm(path);
-                if (!pm.isNull()) {
-                    img->setProperty("imgFull", pm);
-                    img->setPixmap(pm.scaled(280, 360, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-                    img->setText(QString());
-                }
+                QFile lf(path);   // локальный (только что отправленный)
+                if (lf.open(QIODevice::ReadOnly)) setBubbleImage(img, lf.readAll());
             } else {
-                pendingImage_.insert(path, img);
-                api_->fetchFile(path);
+                // Мгновенно из локального зашифрованного кэша; с сервера — только
+                // при первом обращении к файлу.
+                QByteArray imgBytes;
+                if (FileCache::instance().lookup(path, &imgBytes)) {
+                    setBubbleImage(img, imgBytes);
+                } else {
+                    pendingImage_.insert(path, img);
+                    api_->fetchFile(path);
+                }
             }
         }
     } else if (msg.messageType == QStringLiteral("file")) {
-        // Файл: 📎 имя + размер, клик — скачать и открыть.
-        auto* fbtn = new QPushButton(bubble);
-        fbtn->setCursor(Qt::PointingHandCursor);
-        fbtn->setFlat(true);
-        const QString nm = msg.fileName.isEmpty() ? QStringLiteral("файл") : msg.fileName;
+        // Файл как в Telegram: кольцо загрузки вокруг иконки (скачать/отменить/
+        // открыть), имя, размер, проценты. Сохраняется в «Загрузки/Xipher Desktop».
+        const QString name = msg.fileName.isEmpty() ? QStringLiteral("файл") : msg.fileName;
         const QColor fclr = msg.sent ? QColor(0xF0, 0xEC, 0xFA) : QColor(0xF3, 0xF1, 0xF8);
-        fbtn->setIcon(Icons::icon(Icons::File, 18, fclr));
-        fbtn->setIconSize(QSize(18, 18));
-        fbtn->setText(QStringLiteral("  %1   %2").arg(nm, humanSize(msg.fileSize)));
-        fbtn->setStyleSheet(QString(
-            "QPushButton{border:none;background:transparent;text-align:left;font-size:14px;color:%1;}"
-            "QPushButton:hover{text-decoration:underline;}")
-            .arg(msg.sent ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
-        bl->addWidget(fbtn);
-        const QString path = msg.filePath, name = nm;
-        connect(fbtn, &QPushButton::clicked, this, [this, path, name]() {
-            if (path.isEmpty()) return;
-            if (!path.startsWith(QStringLiteral("/files"))) {   // локальный (только что отправленный)
-                QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-                return;
+
+        auto* rowWrap = new QWidget(bubble);
+        auto* wrap = new QHBoxLayout(rowWrap);
+        wrap->setContentsMargins(0, 0, 0, 0);
+        wrap->setSpacing(12);
+
+        auto* ring = new TransferRing(48, rowWrap);
+        wrap->addWidget(ring, 0, Qt::AlignVCenter);
+
+        auto* textCol = new QVBoxLayout();
+        textCol->setSpacing(2);
+        auto* nmL = new QLabel(name, rowWrap);
+        nmL->setWordWrap(false);
+        nmL->setStyleSheet(QString("border:none;background:transparent;font-size:14px;font-weight:600;color:%1;")
+                               .arg(fclr.name()));
+        auto* stL = new QLabel(humanSize(msg.fileSize), rowWrap);
+        stL->setStyleSheet(QStringLiteral("border:none;background:transparent;font-size:12px;color:#ACA6BD;"));
+        textCol->addWidget(nmL);
+        textCol->addWidget(stL);
+        wrap->addLayout(textCol, 1);
+        bubble->setMinimumWidth(260);
+        bl->addWidget(rowWrap);
+
+        // Состояние загрузки конкретного файла (по пути).
+        const QString fpath = msg.filePath;
+        const QString savePath = QDir(downloadsDir()).filePath(name);
+        ring->setState(QFile::exists(savePath) ? TransferRing::State::Done
+                                               : TransferRing::State::Idle);
+        auto startDownload = [this, ring, stL, fpath, savePath, name, size = msg.fileSize]() {
+            ring->setState(TransferRing::State::Loading);
+            stL->setText(QStringLiteral("0%  ·  ") + humanSize(size));
+            DownloadCenter::instance().start(fpath, name, size);
+            auto progConn = std::make_shared<QMetaObject::Connection>();
+            *progConn = connect(api_, &ApiClient::fileProgress, this,
+                [this, ring, stL, fpath, savePath, progConn, size](const QString& p, qint64 rec, qint64 tot) {
+                    if (p != fpath) return;
+                    if (tot <= 0) {                       // отмена/ошибка
+                        QObject::disconnect(*progConn);
+                        ring->setState(TransferRing::State::Idle);
+                        stL->setText(humanSize(size));
+                        return;
+                    }
+                    const int pct = int(rec * 100 / tot);
+                    ring->setProgress(pct);
+                    stL->setText(QStringLiteral("%1%  ·  %2 / %3")
+                                     .arg(pct).arg(humanSize(rec), humanSize(tot)));
+                    DownloadCenter::instance().progress(fpath, rec, tot);
+                    if (rec >= tot && tot > 0) QObject::disconnect(*progConn);
+                });
+            auto doneConn = std::make_shared<QMetaObject::Connection>();
+            *doneConn = connect(api_, &ApiClient::fileFetched, this,
+                [this, doneConn, fpath, savePath, ring, stL](const QString& p, const QByteArray& bytes) {
+                    if (p != fpath) return;
+                    QObject::disconnect(*doneConn);
+                    if (bytes.isEmpty()) return;
+                    QFile out(savePath);
+                    if (out.open(QIODevice::WriteOnly)) {
+                        out.write(bytes);
+                        out.close();
+                    }
+                    ring->setState(TransferRing::State::Done);
+                    ring->setProgress(100);
+                    stL->setText(humanSize(bytes.size()));
+                    DownloadCenter::instance().finish(fpath, savePath);
+                    QDesktopServices::openUrl(QUrl::fromLocalFile(savePath));
+                });
+            // Большие файлы — параллельными чанками (умножает скорость),
+            // маленькие — обычным стримингом.
+            if (size > 2 * 1024 * 1024)
+                api_->fetchFileParallel(fpath, size, 6);
+            else
+                api_->fetchFile(fpath);
+        };
+        connect(ring, &TransferRing::clicked, this,
+                [this, ring, stL, fpath, savePath, startDownload]() {
+            switch (ring->state()) {
+                case TransferRing::State::Idle:
+                    startDownload();
+                    break;
+                case TransferRing::State::Loading:
+                    api_->cancelFetch(fpath);
+                    DownloadCenter::instance().cancel(fpath);
+                    break;
+                case TransferRing::State::Done:
+                    QDesktopServices::openUrl(QUrl::fromLocalFile(savePath));
+                    break;
             }
-            pendingFileOpen_.insert(path, name);
-            api_->fetchFile(path);
         });
     } else if (QStringList big = emojiOnlyClusters(msg.content); !big.isEmpty()) {
         // Только эмодзи (1-3) → крупно и анимированно, без баббла (как в Telegram).
@@ -1591,9 +2197,7 @@ void ChatPage::addBubble(const ChatMessage& msg) {
         if (!msg.sent) el->addStretch();
         bl->addWidget(erow);
     } else {
-        auto* text = new QLabel(msg.content, bubble);
-        text->setWordWrap(true);
-        text->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        auto* text = new MessageTextLabel(formatMessageHtml(msg.content), bubble);
         text->setContextMenuPolicy(Qt::NoContextMenu);   // ПКМ → меню баббла, не дефолтное
         text->setStyleSheet(QString("color:%1;font-size:15px;")
                                 .arg(msg.sent ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
@@ -1655,18 +2259,39 @@ void ChatPage::addBubble(const ChatMessage& msg) {
     if (msg.sent) { rl->addStretch(); rl->addWidget(bubble); }
     else          { rl->addWidget(bubble); rl->addStretch(); }
 
-    msgLayout_->addWidget(row);   // после стартового stretch → прижато к низу
+    if (prepend)
+        msgLayout_->insertWidget(1, row);   // после stretch, ПЕРЕД существующими
+    else
+        msgLayout_->addWidget(row);         // после стартового stretch → прижато к низу
+
+    // Появление нового сообщения — плавное (fade), как в Telegram/Discord.
+    // Только для ЖИВЫХ добавлений: на начальном рендере 50 бабблов анимация
+    // = лишние эффекты и лаг.
+    if (animate && isVisible()) {
+        auto* eff = new QGraphicsOpacityEffect(row);
+        eff->setOpacity(0.0);
+        row->setGraphicsEffect(eff);
+        auto* a = new QPropertyAnimation(eff, "opacity", row);
+        a->setDuration(160);
+        a->setStartValue(0.0);
+        a->setEndValue(1.0);
+        a->setEasingCurve(QEasingCurve::OutCubic);
+        a->start(QAbstractAnimation::DeleteWhenStopped);
+    }
     ++bubbleCount_;
     if (greeting_ && greeting_->isVisible()) greeting_->hide();
 }
 
 void ChatPage::scrollToBottom() {
+    stickBottom_ = true;
     auto* sb = msgScroll_->verticalScrollBar();
-    // Диапазон скролла пересчитывается ПОСЛЕ раскладки бабблов (wordwrap и т.п.),
-    // поэтому прыгаем в самый низ по сигналу rangeChanged — один раз.
-    connect(sb, &QAbstractSlider::rangeChanged, this,
-            [sb]() { sb->setValue(sb->maximum()); }, Qt::SingleShotConnection);
-    sb->setValue(sb->maximum());
+    programmaticScroll_ = true;
+    // Далеко от низа — плавно, как в Telegram; рядом — мгновенно.
+    if (sb->maximum() - sb->value() > 700 && sb->maximum() > 0)
+        smoothScrollTo(sb->maximum());
+    else
+        sb->setValue(sb->maximum());
+    programmaticScroll_ = false;
 }
 
 void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
@@ -1755,6 +2380,7 @@ void ChatPage::onSendClicked() {
     currentMessages_.append(m);
     addBubble(m);
     scrollToBottom();
+    cacheCurrent();   // отправленное сразу в локальном кэше
     composer_->clear();
     clearReplyTo();
 
@@ -1772,6 +2398,104 @@ void ChatPage::onMessageSent(const ChatMessage& msg, const QString& receiverId, 
     if (!msg.id.isEmpty()) shownIds_.insert(msg.id);   // чтобы WS-эхо не задублировало
 }
 
+
+
+// ── Медиа: байты файла (кэш → локальный файл → пусто) ────────────────────────
+QByteArray ChatPage::mediaBytes(const QString& filePath) const {
+    QByteArray bytes;
+    if (FileCache::instance().lookup(filePath, &bytes) && !bytes.isEmpty()) return bytes;
+    if (!filePath.startsWith(QStringLiteral("/files"))) {
+        QFile f(filePath);
+        if (f.open(QIODevice::ReadOnly)) return f.readAll();
+    }
+    return {};
+}
+
+// ── Контекст-меню фото/голосового (сохранить / копировать / переслать / все) ──
+void ChatPage::showMediaMenu(QWidget* src, const QString& filePath,
+                             const QString& kind, const QPoint& pos) {
+    QMenu menu(src);
+    QAction* copyAct  = (kind == QStringLiteral("image"))
+        ? menu.addAction(QStringLiteral("Копировать")) : nullptr;
+    QAction* saveAct  = menu.addAction(QStringLiteral("Сохранить как…"));
+    QAction* fwdAct   = menu.addAction(QStringLiteral("Переслать…"));
+    QAction* allAct   = (kind == QStringLiteral("image"))
+        ? menu.addAction(QStringLiteral("Все фото чата")) : nullptr;
+    QAction* chosen = menu.exec(src->mapToGlobal(pos));
+    if (!chosen) return;
+
+    const QByteArray bytes = mediaBytes(filePath);
+
+    if (chosen == copyAct) {
+        QPixmap pm;
+        if (pm.loadFromData(bytes)) QApplication::clipboard()->setPixmap(pm);
+        return;
+    }
+    if (chosen == saveAct) {
+        QString name = QFileInfo(filePath).fileName();
+        if (name.isEmpty()) name = kind == QStringLiteral("voice")
+            ? QStringLiteral("voice.webm") : QStringLiteral("photo.png");
+        const QString target = QDir(downloadsDir()).filePath(name);
+        const QString dest = QFileDialog::getSaveFileName(this, QStringLiteral("Сохранить"), target);
+        if (dest.isEmpty()) return;
+        if (bytes.isEmpty()) {                       // ещё не скачано → скачаем и сохраним
+            auto conn = std::make_shared<QMetaObject::Connection>();
+            *conn = connect(api_, &ApiClient::fileFetched, this,
+                [conn, dest](const QString& p, const QByteArray& b) {
+                    if (p.isEmpty() || b.isEmpty()) return;
+                    QObject::disconnect(*conn);
+                    QFile out(dest);
+                    if (out.open(QIODevice::WriteOnly)) out.write(b);
+                });
+            api_->fetchFile(filePath);
+        } else {
+            QFile out(dest);
+            if (out.open(QIODevice::WriteOnly)) out.write(bytes);
+        }
+        return;
+    }
+    if (chosen == fwdAct) {
+        // Пересылка = повторная отправка того же медиа выбранным чатам.
+        auto* picker = new ChatPickerDialog(chats_, QStringLiteral("Переслать в…"), window());
+        connect(picker, &ChatPickerDialog::picked, this,
+                [this, filePath, bytes, kind](const Chat& c) {
+            if (kind == QStringLiteral("voice")) {
+                const QString tmp = QDir::temp().filePath(
+                    QStringLiteral("fwd_%1").arg(QFileInfo(filePath).fileName()));
+                QFile f(tmp);
+                if (!f.open(QIODevice::WriteOnly)) return;
+                f.write(bytes); f.close();
+                api_->sendVoice(c.id, tmp, QFileInfo(filePath).fileName(),
+                                bytes.size(), QString(),
+                                QStringLiteral("fw_%1").arg(++tempCounter_));
+            } else {
+                sendPhotoBytesTo(c.id, bytes,
+                                 QFileInfo(filePath).fileName().isEmpty()
+                                     ? QStringLiteral("photo.png")
+                                     : QFileInfo(filePath).fileName());
+            }
+        }, Qt::UniqueConnection);
+        picker->showAnimated();
+        return;
+    }
+    if (chosen == allAct) {
+        // Галерея: все фото текущего чата в хронологическом порядке.
+        QStringList paths;
+        int startIdx = 0;
+        for (const ChatMessage& m : currentMessages_) {
+            if ((m.messageType == QStringLiteral("image")
+                 || m.messageType == QStringLiteral("photo")) && !m.filePath.isEmpty()) {
+                if (m.filePath == filePath) startIdx = paths.size();
+                paths.append(m.filePath);
+            }
+        }
+        ImageViewer::showGallery(window(), paths, startIdx,
+            [this](const QString& p) { return mediaBytes(p); },
+            [this](const QString& p) { api_->fetchFile(p); });
+    }
+}
+
+
 void ChatPage::onWsMessage(const QString& peerId, const ChatMessage& msgIn, const QString& tempId) {
     ChatMessage msg = msgIn;
     msg.sent = (msg.senderId == Session::instance().userId);
@@ -1781,15 +2505,16 @@ void ChatPage::onWsMessage(const QString& peerId, const ChatMessage& msgIn, cons
 
     // Внутри темы форума root-сообщения группы не подмешиваем в открытую тему.
     if (peerId == currentPeerId_ && !dupTemp && !dupId && currentTopicId_.isEmpty()) {
-        auto* sb = msgScroll_->verticalScrollBar();
-        const bool nearBottom = (sb->maximum() - sb->value()) < 140;
         if (!msg.id.isEmpty()) shownIds_.insert(msg.id);
         if (!msg.content.startsWith(ChecklistProto::kUpdatePrefix)) {
             if (msg.createdAt.isEmpty()) msg.createdAt = QDateTime::currentDateTime().toString(Qt::ISODate);
             currentMessages_.append(msg);
         }
         addBubble(msg);
-        if (nearBottom || msg.sent) scrollToBottom();   // не дёргаем, если читаешь историю
+        // stickBottom_ уже держит низ (якорь на rangeChanged); если пользователь
+        // читает историю — не дёргаем. Своё сообщение — всегда к низу.
+        if (msg.sent) scrollToBottom();
+        cacheCurrent();   // кэш живой: новое сообщение уже в локальной истории
     }
 
     bumpChat(peerId, msg.content, msg.time,
@@ -1814,7 +2539,15 @@ void ChatPage::bumpChat(const QString& peerId, const QString& lastText,
     chats_[idx].lastMessage = lastText;
     if (!time.isEmpty()) chats_[idx].time = time;
     if (incrementUnread) chats_[idx].unread += 1;
-    rebuildChatList();
+    // Полная пересборка списка на КАЖДОЕ сообщение (Active-чат = шторм) —
+    // дебаунсим: данные уже в chats_, виджет обновится пачкой.
+    if (!chatListDebounce_) {
+        chatListDebounce_ = new QTimer(this);
+        chatListDebounce_->setSingleShot(true);
+        chatListDebounce_->setInterval(250);
+        connect(chatListDebounce_, &QTimer::timeout, this, &ChatPage::rebuildChatList);
+    }
+    chatListDebounce_->start();
 }
 
 void ChatPage::onSearchChanged(const QString& text) {
@@ -1829,54 +2562,225 @@ void ChatPage::onSearchChanged(const QString& text) {
     }
 }
 
-void ChatPage::showMainMenu() {
-    QMenu menu(this);
-    const QColor ic(0xF3, 0xF1, 0xF8);
-    QAction* newGroup   = menu.addAction(Icons::icon(Icons::User, 18, QColor(0x46,0xB9,0x8A)),
-                                         QStringLiteral("Создать группу"));
-    QAction* newChannel = menu.addAction(Icons::icon(Icons::Bell, 18, QColor(0x4C,0x9A,0xF5)),
-                                         QStringLiteral("Создать канал"));
-    QAction* catalog    = menu.addAction(Icons::icon(Icons::Search, 18, QColor(0xF0,0xC8,0x4C)),
-                                         QStringLiteral("Каталог каналов и групп"));
-    QAction* newFolder  = menu.addAction(Icons::icon(Icons::Checklist, 18, QColor(0x7E,0x8B,0xF0)),
-                                         QStringLiteral("Создать папку"));
-    menu.addSeparator();
-    QAction* settings = menu.addAction(Icons::icon(Icons::Gear, 18, ic), QStringLiteral("Настройки"));
-    QAction* saved    = menu.addAction(Icons::icon(Icons::Checklist, 18, ic), QStringLiteral("Сохранённое"));
-    QAction* contacts = menu.addAction(Icons::icon(Icons::User, 18, ic), QStringLiteral("Контакты"));
-    menu.addSeparator();
-    QAction* logout = menu.addAction(Icons::icon(Icons::Logout, 18, QColor(0xE5,0x68,0x7A)),
-                                     QStringLiteral("Выйти"));
+static QString chatQSS() {
+    const auto th = ThemePreset::current();
+    return QStringLiteral(
+        "#sidebar { background:%1; border-right:1px solid rgba(255,255,255,0.10); }"
+        "#sideHeader, #convHeader { background:%1; border-bottom:1px solid rgba(255,255,255,0.10); }"
+        "#peerHeader { border-radius:10px; }"
+        "#peerHeader:hover { background:%2; }"
+        "#hdrBtn { border:none; background:transparent; min-width:40px; min-height:40px; border-radius:20px; }"
+        "#hdrBtn:hover { background:%2; }"
+        "#searchBar { background:%1; border-bottom:1px solid rgba(255,255,255,0.10); }"
+        "#msgSearch { background:%2; border:1px solid rgba(255,255,255,0.10); border-radius:12px;"
+        "  min-height:38px; padding:0 14px; color:#F3F1F8; }"
+        "#msgSearch:focus { border:1px solid %5; }"
+        "#brandTitle { font-size:18px; font-weight:800; color:#F3F1F8; }"
+        "#searchBox { background:%2; border:1px solid rgba(255,255,255,0.10); border-radius:12px;"
+        "  min-height:38px; padding:0 14px; color:#F3F1F8; }"
+        "#searchBox:focus { border:1px solid %5; }"
+        "#chatList { background:%1; border:none; outline:none; }"
+        "#chatList::item { border:none; padding:0; }"
+        "#chatList::item:hover { background:%2; border-left:3px solid %5; }"
+        "#chatList::item:selected { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        "  stop:0 rgba(%6,%7,%8,0.16), stop:1 rgba(%6,%7,%8,0.06)); border-left:3px solid %5; }"
+        "#msgArea { background:%4; border:none; }"
+        "#msgArea > QWidget > QWidget { background:%4; }"
+        "#msgArea QScrollBar:vertical { background:transparent; width:8px; margin:2px; }"
+        "#msgArea QScrollBar::handle:vertical { background:rgba(255,255,255,0.12); border-radius:4px; min-height:36px; }"
+        "#msgArea QScrollBar::handle:vertical:hover { background:rgba(255,255,255,0.22); }"
+        "#msgArea QScrollBar::add-line:vertical, #msgArea QScrollBar::sub-line:vertical { height:0; }"
+        "#msgArea QScrollBar::add-page:vertical, #msgArea QScrollBar::sub-page:vertical { background:transparent; }"
+        "#chatList QScrollBar:vertical { background:transparent; width:8px; margin:2px; }"
+        "#chatList QScrollBar::handle:vertical { background:rgba(255,255,255,0.10); border-radius:4px; min-height:36px; }"
+        "#chatList QScrollBar::handle:vertical:hover { background:rgba(255,255,255,0.20); }"
+        "#chatList QScrollBar::add-line:vertical, #chatList QScrollBar::sub-line:vertical { height:0; }"
+        "#chatList QScrollBar::add-page:vertical, #chatList QScrollBar::sub-page:vertical { background:transparent; }"
+        "#composerBar { background:%1; border-top:1px solid rgba(255,255,255,0.10); }"
+        "#tgInputBar { background:%2; border:1px solid rgba(255,255,255,0.07); border-radius:22px; }"
+        "#composer { background:transparent; border:none; color:#F3F1F8; font-size:15px; padding:0 4px; }"
+        "#composer QScrollBar:vertical { background:transparent; width:7px; margin:4px 2px; }"
+        "#composer QScrollBar::handle:vertical { background:rgba(255,255,255,0.18); border-radius:3px; }"
+        "#composer QScrollBar::add-line:vertical, #composer QScrollBar::sub-line:vertical { height:0; }"
+        "#replyBarText { color:#ACA6BD; font-size:13px; }"
+        "#replyClose { background:transparent; border:none; color:#726C82; font-size:14px; }"
+        "#replyClose:hover { color:#F3F1F8; }"
+        "#replyBar { background:%1; border-top:1px solid rgba(255,255,255,0.06); }"
+        "#sendBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px; border:none;"
+        "  border-radius:18px; background:transparent; color:%5; padding:0; }"
+        "#sendBtn:hover { background:rgba(%6,%7,%8,0.10); }"
+        "#composerIcon, #micBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px;"
+        "  border:none; border-radius:18px; background:transparent; color:#ACA6BD; padding:0; }"
+        "#composerIcon:hover, #micBtn:hover { background:rgba(255,255,255,0.06); color:#F3F1F8; }"
+        "QMenu { background:%2; border:1px solid rgba(255,255,255,0.12); border-radius:10px; color:#F3F1F8; }"
+        "QMenu::item { padding:8px 18px; border-radius:6px; }"
+        "QMenu::item:selected { background:rgba(%6,%7,%8,0.22); }"
+        "#peerName { font-size:15px; font-weight:700; color:#F3F1F8; }"
+        "#peerStatus { font-size:12px; color:#726C82; }"
+        "#emptyHint { font-size:15px; color:#726C82; }"
+        "#iconBtn { border:none; background:transparent; color:#ACA6BD; font-size:13px; }"
+        "#chatsBody { background:%1; }"
+        "#folderRail { background:%1; border-right:1px solid rgba(255,255,255,0.10); }"
+        "#folderRailItem { background:transparent; border:none; border-radius:16px; padding:0; }"
+        "#folderRailItem:hover { background:%2; }"
+        "#folderRailItemActive { background:rgba(%6,%7,%8,0.14); border:none; border-radius:16px; padding:0; }"
+        "#folderRailLabel { color:#ACA6BD; font-size:11px; }"
+        "#folderRailItemActive #folderRailLabel { color:#F3F1F8; font-weight:600; }"
+        "#folderRailCount { background:%5; color:#fff; font-size:10px; font-weight:700;"
+        "  border-radius:9px; min-width:18px; padding:1px 4px; }"
+        "#folderRailEdit { border:none; border-radius:12px; background:transparent; color:#ACA6BD;"
+        "  font-size:16px; padding:0; }"
+        "#folderRailEdit:hover { background:%2; color:#F3F1F8; }"
+        "#scrollDownBtn { background:#221F2C; border:1px solid rgba(255,255,255,0.10);"
+        "  border-radius:22px; color:#F3F1F8; font-size:14px; padding:0; }"
+        "#scrollDownBtn:hover { background:#2B2737; }"
+    ).arg(th.surface1.name(), th.surface2.name(), th.surface3.name(), th.bgBase.name(), th.accent)
+     .arg(th.accentR).arg(th.accentG).arg(th.accentB);
+}
 
-    QAction* chosen = menu.exec(menuBtn_->mapToGlobal(QPoint(0, menuBtn_->height() + 6)));
-    if (chosen == newGroup) {
+void ChatPage::applyTheme() {
+    setStyleSheet(chatQSS());
+
+    // Инлайн-фоны сообщений/пустой страницы/тем форума.
+    const auto th = ThemePreset::current();
+    if (msgContainer_) msgContainer_->setStyleSheet(QStringLiteral("#msgContainer{background:%1;}").arg(th.bgBase.name()));
+    if (emptyPage_)    emptyPage_->setStyleSheet(QStringLiteral("background:%1;").arg(th.bgBase.name()));
+    if (topicsPage_)   topicsPage_->setStyleSheet(QStringLiteral("background:%1;").arg(th.bgBase.name()));
+    // Перерисовать бабблы под новую поверхность входящих.
+    for (QFrame* b : msgContainer_->findChildren<QFrame*>()) {
+        if (b->objectName() == QStringLiteral("bubbleIn"))  b->setStyleSheet(bubbleInQss());
+        else if (b->objectName() == QStringLiteral("bubbleOut")) b->setStyleSheet(bubbleOutQss());
+    }
+}
+
+
+// ── App-меню: шторка слева 304px, 1:1 с .app-menu веба ────────────────────────
+void ChatPage::toggleAppMenu() {
+    if (appMenu_ && appMenu_->isVisible()) { closeAppMenu(); return; }
+    if (!appMenu_) buildAppMenu();
+    appMenuScrim_->setGeometry(0, 0, width(), height());
+    appMenuScrim_->show();
+    appMenuScrim_->raise();
+    appMenu_->setGeometry(-304, 0, 304, height());
+    appMenu_->show();
+    appMenu_->raise();
+    auto* anim = new QPropertyAnimation(appMenu_, "pos", appMenu_);
+    anim->setDuration(220);
+    anim->setStartValue(QPoint(-304, 0));
+    anim->setEndValue(QPoint(0, 0));
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void ChatPage::closeAppMenu() {
+    if (!appMenu_ || !appMenu_->isVisible()) return;
+    auto* anim = new QPropertyAnimation(appMenu_, "pos", appMenu_);
+    anim->setDuration(180);
+    anim->setStartValue(QPoint(0, 0));
+    anim->setEndValue(QPoint(-304, 0));
+    anim->setEasingCurve(QEasingCurve::InCubic);
+    connect(anim, &QPropertyAnimation::finished, appMenu_, &QWidget::hide);
+    connect(anim, &QPropertyAnimation::finished, appMenuScrim_, &QWidget::hide);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void ChatPage::buildAppMenu() {
+    appMenuScrim_ = new QWidget(this);
+    appMenuScrim_->setObjectName(QStringLiteral("appMenuScrim"));
+    appMenuScrim_->setStyleSheet(QStringLiteral("background:rgba(4,3,8,0.35);"));
+    appMenuScrim_->installEventFilter(this);
+    appMenuScrim_->hide();
+
+    appMenu_ = new QWidget(this);
+    appMenu_->setObjectName(QStringLiteral("appMenu"));
+    appMenu_->setStyleSheet(QStringLiteral(R"QSS(
+#appMenu { background:#131218; }
+#appMenuHeader { border-bottom:1px solid rgba(255,255,255,0.06); }
+#appMenuName { color:#F3F1F8; font-size:15px; font-weight:600; }
+#appMenuStatus { color:#726C82; font-size:12px; }
+#appMenuClose { border:none; background:transparent; color:#ACA6BD; font-size:16px; padding:0; border-radius:8px; }
+#appMenuClose:hover { background:rgba(255,255,255,0.05); color:#F3F1F8; }
+#appMenuItem { text-align:left; border:none; background:transparent; color:#F3F1F8;
+    font-size:15px; font-weight:400; padding:10px 12px; border-radius:10px; }
+#appMenuItem:hover { background:rgba(255,255,255,0.05); }
+)QSS"));
+    auto* root = new QVBoxLayout(appMenu_);
+    root->setContentsMargins(10, 10, 10, 14);
+    root->setSpacing(2);
+
+    // Шапка: аватар + имя + «в сети» + ✕ (как .app-menu-header веба).
+    auto* head = new QWidget(appMenu_);
+    head->setObjectName(QStringLiteral("appMenuHeader"));
+    auto* hl = new QHBoxLayout(head);
+    hl->setContentsMargins(8, 8, 4, 14);
+    hl->setSpacing(12);
+    auto* av = new QLabel(head);
+    Avatar::setRound(av, QString(), Session::instance().username, 44);
+    hl->addWidget(av);
+    auto* idCol = new QVBoxLayout();
+    idCol->setSpacing(1);
+    auto* nm = new QLabel(Session::instance().username, head);
+    nm->setObjectName(QStringLiteral("appMenuName"));
+    auto* stl = new QLabel(QStringLiteral("в сети"), head);
+    stl->setObjectName(QStringLiteral("appMenuStatus"));
+    idCol->addWidget(nm);
+    idCol->addWidget(stl);
+    hl->addLayout(idCol, 1);
+    auto* close = new QPushButton(QStringLiteral("✕"), head);
+    close->setObjectName(QStringLiteral("appMenuClose"));
+    close->setFixedSize(32, 32);
+    connect(close, &QPushButton::clicked, this, &ChatPage::closeAppMenu);
+    hl->addWidget(close, 0, Qt::AlignTop);
+    root->addWidget(head);
+
+    // Пункты — как app-menu-item веба (Профиль/группа/канал/Контакты/
+    // Сохранённые/Настройки/Каталог). Созданные диалоги — ModalOverlay:
+    // при закрытии удаляются через deleteLater (утечек нет).
+    auto addItem = [&](const QString& text, std::function<void()> act) {
+        auto* btn = new QPushButton(text, appMenu_);
+        btn->setObjectName(QStringLiteral("appMenuItem"));
+        btn->setCursor(Qt::PointingHandCursor);
+        connect(btn, &QPushButton::clicked, this, [this, act]() {
+            closeAppMenu();
+            act();
+        });
+        root->addWidget(btn);
+    };
+    addItem(QStringLiteral("Профиль"), [this]() { openSettings(); });
+    addItem(QStringLiteral("Создать группу"), [this]() {
         auto* d = new CreateGroupDialog(api_, window());
         connect(d, &CreateGroupDialog::created, this, [this]() { api_->getGroups(); });
         d->showAnimated();
-    } else if (chosen == newChannel) {
+    });
+    addItem(QStringLiteral("Создать канал"), [this]() {
         auto* d = new CreateChannelDialog(api_, window());
         connect(d, &CreateChannelDialog::created, this, [this]() { api_->getChannels(); });
         d->showAnimated();
-    } else if (chosen == catalog) {
+    });
+    addItem(QStringLiteral("Контакты"), [this]() { openNewChatDialog(); });
+    addItem(QStringLiteral("Сохранённые сообщения"), [this]() {
+        for (const Chat& c : chats_) if (c.isSaved) { openChat(c); return; }
+        openChatWith(Session::instance().userId, QStringLiteral("Избранное"),
+                     Session::instance().username);
+    });
+    addItem(QStringLiteral("Настройки"), [this]() { openSettings(); });
+    addItem(QStringLiteral("Каталог"), [this]() {
         auto* d = new CatalogDialog(api_, window());
         connect(d, &CatalogDialog::joined, this, [this]() { api_->getGroups(); api_->getChannels(); });
         d->showAnimated();
-    } else if (chosen == newFolder) {
-        openFolderEditor(QString());
-    }
-    else if (chosen == settings) openSettings();
-    else if (chosen == saved) {
-        for (const Chat& c : chats_) if (c.isSaved) { openChat(c); return; }
-        openChatWith(Session::instance().userId, QStringLiteral("Избранное"), Session::instance().username);
-    }
-    else if (chosen == contacts) openNewChatDialog();
-    else if (chosen == logout) emit logoutRequested();
+    });
+    root->addStretch();
+    appMenu_->hide();
 }
 
 void ChatPage::openSettings() {
     if (settings_) return;   // уже открыто — не плодим копии
     settings_ = new SettingsDialog(api_, window());
     connect(settings_, &ModalOverlay::closed, this, [this]() { settings_ = nullptr; });
+    // «Выйти из аккаунта» из ⋮-меню настроек → штатный logout (чистка кэшей).
+    connect(settings_, &SettingsDialog::logoutRequested, this, &ChatPage::logoutRequested);
+    // Смена темы «Оформления» — мгновенная перегенерация стилей чата.
+    connect(settings_, &SettingsDialog::themeChanged, this, &ChatPage::applyTheme);
     settings_->showAnimated();
 }
 
@@ -1903,6 +2807,19 @@ void ChatPage::openChatWith(const QString& userId, const QString& displayName, c
     c.name = username;
     c.displayName = displayName.isEmpty() ? username : displayName;
     openChat(c);
+}
+
+void ChatPage::injectForDesignTest(const QList<Chat>& chats, const QList<Folder>& folders,
+                                   const QString& openChatId, const QList<ChatMessage>& messages) {
+    personalChats_ = chats;
+    folders_ = folders;
+    if (folders.isEmpty()) activeFolderId_ = QStringLiteral("all");
+    mergeAllChats();
+    const int idx = indexOfChat(openChatId);
+    if (idx >= 0) {
+        openChat(chats_[idx]);        // сетевые запросы уйдут в offline и тихо зафейлятся
+        applyMessages(messages);      // мгновенно рисуем историю без сети
+    }
 }
 
 // ── Эмодзи ───────────────────────────────────────────────────────────────────
@@ -2035,6 +2952,16 @@ void ChatPage::pickAndSendPhoto() {
     scrollToBottom();
 
     api_->uploadFile(bytes, base, tempId);
+}
+
+void ChatPage::sendPhotoBytesTo(const QString& receiverId, const QByteArray& bytes,
+                                const QString& fileName) {
+    if (bytes.isEmpty() || receiverId.isEmpty()) return;
+    const QString tempId = QStringLiteral("tmpf_%1").arg(++tempCounter_);
+    pendingPhotoIds_.insert(tempId);
+    pendingFileReceiver_ = receiverId;
+    shownIds_.insert(tempId);
+    api_->uploadFile(bytes, fileName, tempId);
 }
 
 void ChatPage::sendPhotoBytes(const QByteArray& bytes, const QString& fileName) {
@@ -2359,21 +3286,64 @@ void ChatPage::playVoice(const QString& path) {
         player_->play();
         return;
     }
+    // Уже скачивали раньше (в т.ч. в прошлых запусках) — мгновенно из кэша.
+    QByteArray vc;
+    if (FileCache::instance().lookup(path, &vc)) {
+        playVoiceBytes(path, vc);
+        return;
+    }
     pendingPlayPath_ = path;
     api_->fetchFile(path);   // скачаем с токеном, потом сыграем
+}
+
+void ChatPage::playVoiceBytes(const QString& serverPath, const QByteArray& bytes) {
+    // Контейнер может быть webm/opus (браузерный MediaRecorder) — расширение
+    // берём из серверного пути, иначе QMediaPlayer не откроет демуксер.
+    QString suffix = QFileInfo(serverPath).suffix();
+    if (suffix.isEmpty()) suffix = QStringLiteral("webm");
+    const QString local = QDir::temp().filePath(
+        QStringLiteral("xipher_dl_%1.%2").arg(qHash(serverPath)).arg(suffix));
+    QFile f(local);
+    if (!f.open(QIODevice::WriteOnly)) return;
+    f.write(bytes);
+    f.close();
+    voiceCache_.insert(serverPath, local);
+    if (serverPath == pendingPlayPath_) {
+        pendingPlayPath_.clear();
+        player_->setSource(QUrl::fromLocalFile(local));
+        player_->play();
+    }
+}
+
+void ChatPage::setBubbleImage(QLabel* img, const QByteArray& bytes) {
+    QPixmap pm;
+    if (!img || !pm.loadFromData(bytes)) return;
+    img->setProperty("imgFull", pm);
+    // 1:1 с .message-image img веба: max-width 100%, max-height 400px,
+    // радиус 8px — картинка ВПИСЫВАЕТСЯ в границы, а не обрезается/раздувается.
+    const int maxW = qBound(240, msgContainer_ ? msgContainer_->width() * 72 / 100 : 452, 480);
+    QPixmap scaled = pm.scaled(maxW, 400, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    QPixmap rounded(scaled.size());
+    rounded.fill(Qt::transparent);
+    QPainter pt(&rounded);
+    pt.setRenderHint(QPainter::Antialiasing);
+    QPainterPath clip;
+    clip.addRoundedRect(0, 0, scaled.width(), scaled.height(), 8, 8);
+    pt.setClipPath(clip);
+    pt.drawPixmap(0, 0, scaled);
+    pt.end();
+    img->setPixmap(rounded);
+    img->setText(QString());
+    img->setMinimumSize(0, 0);
+    img->setFixedSize(scaled.size());
 }
 
 void ChatPage::onFileFetched(const QString& filePath, const QByteArray& bytes) {
     // Картинка для сообщения-фото.
     if (pendingImage_.contains(filePath)) {
         QPointer<QLabel> lbl = pendingImage_.take(filePath);
-        QPixmap pm;
-        if (lbl && pm.loadFromData(bytes)) {
-            lbl->setProperty("imgFull", pm);
-            lbl->setPixmap(pm.scaled(280, 360, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            lbl->setText(QString());
-            lbl->setMinimumSize(0, 0);
-        }
+        setBubbleImage(lbl, bytes);
+        FileCache::instance().store(filePath, bytes);   // повторно не качаем
         return;
     }
 
@@ -2392,18 +3362,8 @@ void ChatPage::onFileFetched(const QString& filePath, const QByteArray& bytes) {
         return;
     }
 
-    // Иначе — голосовое: кэшируем и проигрываем.
-    const QString local = QDir::temp().filePath(
-        QStringLiteral("xipher_dl_%1.m4a").arg(qHash(filePath)));
-    QFile f(local);
-    if (f.open(QIODevice::WriteOnly)) {
-        f.write(bytes);
-        f.close();
-        voiceCache_.insert(filePath, local);
-        if (filePath == pendingPlayPath_) {
-            pendingPlayPath_.clear();
-            player_->setSource(QUrl::fromLocalFile(local));
-            player_->play();
-        }
-    }
+    // Иначе — голосовое: в зашифрованный кэш (мгновенный повтор, и после
+    // перезапуска) и проигрываем.
+    FileCache::instance().store(filePath, bytes);
+    playVoiceBytes(filePath, bytes);
 }

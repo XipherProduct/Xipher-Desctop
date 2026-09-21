@@ -4,6 +4,7 @@
 #include <QMouseEvent>
 #include <QEnterEvent>
 #include <QShowEvent>
+#include <QPointer>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -83,15 +84,25 @@ AnimatedEmojiLabel::AnimatedEmojiLabel(const QString& codepoints, int size, bool
 
 void AnimatedEmojiLabel::play() {
     if (movie_) { movie_->start(); return; }
-    loader().fetch(cp_, [this](const QString& path) {
-        if (movie_) return;
-        if (!autoplay_ && !underMouse()) return;   // курсор уже ушёл
-        movie_ = new QMovie(path, QByteArray(), this);
-        if (!movie_->isValid()) { movie_->deleteLater(); movie_ = nullptr; return; }
-        movie_->setScaledSize(QSize(size_, size_));
-        setMovie(movie_);
-        movie_->start();
+    // Ответ с CDN приходит асинхронно, а лейбл к этому моменту может быть уже
+    // уничтожен (перерисовка чата, закрытие пикера). QPointer в колбэке —
+    // единственная защита от висячего this: сырой указатель здесь падает
+    // в QLabel::setMovie → QObject::connect.
+    QPointer<AnimatedEmojiLabel> guard(this);
+    loader().fetch(cp_, [guard](const QString& path) {
+        if (AnimatedEmojiLabel* self = guard.data())
+            self->startMovie(path);
     });
+}
+
+void AnimatedEmojiLabel::startMovie(const QString& path) {
+    if (movie_) return;
+    if (!autoplay_ && !underMouse()) return;   // курсор уже ушёл
+    movie_ = new QMovie(path, QByteArray(), this);
+    if (!movie_->isValid()) { movie_->deleteLater(); movie_ = nullptr; return; }
+    movie_->setScaledSize(QSize(size_, size_));
+    setMovie(movie_);
+    movie_->start();
 }
 
 void AnimatedEmojiLabel::stop() {

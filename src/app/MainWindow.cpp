@@ -2,6 +2,8 @@
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
 #include "net/Session.h"
+#include "net/ChatCache.h"
+#include "net/FileCache.h"
 #include "ui/LoginPage.h"
 #include "ui/RegisterPage.h"
 #include "ui/ChatPage.h"
@@ -106,10 +108,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         if (Session::instance().isAuthenticated()) api_->checkIncomingCalls();
     });
 
-    // Выход → останавливаем realtime/поллинг, чистим сессию, назад на вход.
+    // Выход → останавливаем realtime/поллинг, чистим сессию и локальные
+    // зашифрованные кэши (истории + медиа), назад на вход.
     connect(chat_, &ChatPage::logoutRequested, this, [this]() {
         ws_->stop();
         if (callPoll_) callPoll_->stop();
+        ChatCache::instance().clearAll();
+        FileCache::instance().clearAll();
         Session::instance().clear();
         stack_->setCurrentIndex(PageLogin);
     });
@@ -121,6 +126,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             if (!r.userId.isEmpty())   s.userId = r.userId;
             if (!r.username.isEmpty()) s.username = r.username;
             s.isPremium = r.isPremium;
+            s.premiumPlan = r.premiumPlan;
+            s.premiumExpiresAt = r.premiumExpiresAt;
             s.save();
             enterChat();
         } else {
@@ -129,6 +136,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         }
     });
 
+    // Минимальный размер окна: ниже раскладка не сжимается, а перестраивается.
+    setMinimumSize(680, 480);
+    resize(1280, 800);
     tryRestoreSession();
 }
 

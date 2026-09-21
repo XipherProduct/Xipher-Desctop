@@ -36,6 +36,7 @@ private:
     QWidget*     card_;
     QVBoxLayout* cardLayout_;
     int          cardWidth_;
+    int          cardPrefH_ = 0;   // желаемая высота карточки (до клампа)
     qreal        dim_ = 0.0;   // прозрачность затемнения 0..1 (анимируется)
     Q_PROPERTY(qreal dim READ dim WRITE setDim)
 public:

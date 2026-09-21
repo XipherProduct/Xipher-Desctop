@@ -10,6 +10,11 @@
 
 #include "app/MainWindow.h"
 #include "ui/Theme.h"
+#include "net/MediaServer.h"
+#include "net/Session.h"
+#include <QLocalServer>
+#include <QLocalSocket>
+#include "net/ApiClient.h"
 
 // Лог в файл рядом с exe (xipher.log) — GUI-приложение не имеет консоли,
 // поэтому диагностика (в т.ч. звонки [call] …) пишется сюда.
@@ -53,6 +58,23 @@ int main(int argc, char** argv) {
 
     // Глобальный стиль (палитра/QSS из веб-клиента).
     app.setStyleSheet(Theme::styleSheet());
+
+    // Один экземпляр приложения: второй запуск просто завершается.
+    QLocalSocket guard;
+    guard.connectToServer(QStringLiteral("xipher-desktop-instance"));
+    if (guard.waitForConnected(300)) {
+        fprintf(stderr, "Xipher Desktop уже запущен\n");
+        return 0;
+    }
+    QLocalServer::removeServer(QStringLiteral("xipher-desktop-instance"));
+    QLocalServer* instanceServer = new QLocalServer(&app);
+    instanceServer->listen(QStringLiteral("xipher-desktop-instance"));
+
+    // Стриминг медиа: локальный Range-прокси подставляет токен к /files/*.
+    MediaServer::instance().setRemoteBase(QStringLiteral("https://messenger.xipher.pro"));
+    MediaServer::instance().setAuthProvider([] {
+        return Session::instance().token.toUtf8();
+    });
 
     MainWindow w;
     w.show();

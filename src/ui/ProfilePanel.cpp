@@ -81,12 +81,13 @@ ProfilePanel::ProfilePanel(ApiClient* api, QWidget* parent) : QWidget(parent), a
     bl->addWidget(status_);
     bl->addSpacing(20);
 
+    // Кнопка «Написать» 1:1 с .xp-act веба: surface-2 фон, hover surface-3, акцент.
     auto* msgBtn = new QPushButton(QStringLiteral("Написать сообщение"), body);
     msgBtn->setCursor(Qt::PointingHandCursor);
     msgBtn->setStyleSheet(QStringLiteral(
-        "QPushButton{border:none;border-radius:12px;min-height:44px;color:#fff;font-weight:700;font-size:14px;"
-        "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #8B5CF6,stop:1 #6D28D9);}"
-        "QPushButton:hover{background:#9B72F8;}"));
+        "QPushButton{border:none;border-radius:20px;min-height:48px;color:#BBA4FF;"
+        "font-weight:600;font-size:14px;background:#1A1822;}"
+        "QPushButton:hover{background:#221F2C;}"));
     auto* msgWrap = new QHBoxLayout();
     msgWrap->setContentsMargins(20, 0, 20, 0);
     msgWrap->addWidget(msgBtn);
@@ -98,9 +99,19 @@ ProfilePanel::ProfilePanel(ApiClient* api, QWidget* parent) : QWidget(parent), a
     });
 
     infoBox_ = new QVBoxLayout();
-    infoBox_->setContentsMargins(0, 0, 0, 0);
-    infoBox_->setSpacing(0);
-    bl->addLayout(infoBox_);
+    infoBox_->setContentsMargins(16, 0, 16, 0);
+    infoBox_->setSpacing(12);
+    // Секция-карточка 1:1 с .xp-sec веба: surface-2, r20, паддинг 8.
+    auto* sec = new QWidget();
+    sec->setObjectName(QStringLiteral("profileSec"));
+    sec->setStyleSheet(QStringLiteral(
+        "#profileSec{background:#1A1822;border-radius:20px;}"));
+    auto* secL = new QVBoxLayout(sec);
+    secL->setContentsMargins(8, 8, 8, 8);
+    secL->setSpacing(0);
+    secL->addLayout(infoBox_);
+    secL->addStretch();
+    bl->addWidget(sec);
     bl->addStretch();
 
     scroll->setWidget(body);
@@ -112,18 +123,20 @@ ProfilePanel::ProfilePanel(ApiClient* api, QWidget* parent) : QWidget(parent), a
 
 void ProfilePanel::addInfoRow(const QString& value, const QString& caption) {
     if (value.isEmpty()) return;
+    // Строка 1:1 с .xp-row веба: hover surface-3 r12, значение .95rem, лейбл .75rem.
     auto* row = new QWidget();
     row->setStyleSheet(QStringLiteral(
-        "QWidget{background:transparent;} QWidget:hover{background:#1A1822;}"));
+        "QWidget{background:transparent;border-radius:12px;}"
+        "QWidget:hover{background:#221F2C;}"));
     auto* rl = new QVBoxLayout(row);
-    rl->setContentsMargins(20, 10, 20, 10);
+    rl->setContentsMargins(8, 8, 8, 8);
     rl->setSpacing(2);
     auto* v = new QLabel(value, row);
     v->setWordWrap(true);
     v->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    v->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:14px;"));
+    v->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:14px;"));   // .95rem
     auto* c = new QLabel(caption, row);
-    c->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+    c->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));   // .75rem
     rl->addWidget(v);
     rl->addWidget(c);
     infoBox_->addWidget(row);

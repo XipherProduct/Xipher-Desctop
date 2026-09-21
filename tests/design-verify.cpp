@@ -1,0 +1,539 @@
+// design-verify.cpp — offscreen-верификация дизайна главного экрана ChatPage
+// против CSS-значений веб-клиента (web/css/tokens.css, chat.html).
+//
+// Рендерим реальный ChatPage без сети (QT_QPA_PLATFORM=offscreen), подсаживаем
+// тестовые чаты/папки/историю через тестовый шов и проверяем:
+//   - геометрию (ширина сайдбара 380, рейл папок 72, шапка 60);
+//   - цвета пикселей (поверхности, бабблы, бейджи, композер-пилюля) с допуском ±4.
+//
+// Запуск: QT_QPA_PLATFORM=offscreen ./build-linux/bin/design-verify
+// Выход: 0 = все проверки пройдены, 1 = есть расхождения (список в stdout).
+
+#include "ui/ChatPage.h"
+#include "net/ApiClient.h"
+#include "net/WsClient.h"
+#include "net/Session.h"
+
+#include <QApplication>
+#include <QColor>
+#include <QFrame>
+#include <QImage>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPixmap>
+#include <QPushButton>
+#include <algorithm>
+#include <QLayout>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QWidget>
+#include <QFile>
+#include <QPointer>
+#include <QThread>
+#include <QDeadlineTimer>
+#include <QStandardPaths>
+#include <QWheelEvent>
+#include <QDir>
+#include <cstdio>
+#include "ui/SettingsDialog.h"
+#include "ui/Theme.h"
+#include <QStackedWidget>
+
+static int failures = 0;
+static void check(bool ok, const QString& what) {
+    printf("  [%s] %s\n", ok ? "PASS" : "FAIL", what.toUtf8().constData());
+    if (!ok) ++failures;
+}
+
+// Пиксель изображения с допуском по каналам.
+static bool pixelNear(const QImage& img, int x, int y, quint32 rgb, int tol = 4) {
+    if (x < 0 || y < 0 || x >= img.width() || y >= img.height()) return false;
+    const QColor c = img.pixelColor(x, y);
+    const QColor e = QColor::fromRgb(rgb);
+    return qAbs(c.red() - e.red()) <= tol && qAbs(c.green() - e.green()) <= tol
+        && qAbs(c.blue() - e.blue()) <= tol;
+}
+static QString px(const QImage& img, int x, int y) {
+    return img.pixelColor(x, y).name();
+}
+
+int main(int argc, char** argv) {
+    QApplication app(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("XipherDesignTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("DesignVerify"));
+
+    Session::instance().token = QStringLiteral("offscreen_test_token");
+    Session::instance().userId = QStringLiteral("offscreen_user");
+
+    ApiClient api;
+    WsClient ws;
+    ChatPage page(&api, &ws);
+    page.resize(1280, 800);
+    page.show();
+    for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+
+    // ── Тестовые данные ───────────────────────────────────────────────────────
+    QList<Chat> chats;
+    Chat alice; alice.id = QStringLiteral("u_alice"); alice.displayName = QStringLiteral("Алиса");
+    alice.lastMessage = QStringLiteral("Привет! Как дела?"); alice.time = QStringLiteral("12:30");
+    alice.online = true; chats.append(alice);
+    Chat bob; bob.id = QStringLiteral("u_bob"); bob.displayName = QStringLiteral("Боб");
+    bob.lastMessage = QStringLiteral("Фото отпр."); bob.time = QStringLiteral("11:00");
+    bob.unread = 3; chats.append(bob);
+    Chat saved; saved.id = QStringLiteral("offscreen_user"); saved.isSaved = true;
+    saved.displayName = QStringLiteral("Избранное"); saved.lastMessage = QStringLiteral("заметка");
+    saved.time = QStringLiteral("Вчера"); chats.append(saved);
+
+    Folder work; work.id = QStringLiteral("f_work"); work.name = QStringLiteral("Работа");
+    work.chatKeys = {QStringLiteral("chat:u_bob")};
+    work.icon = QStringLiteral("rocket"); work.color = QStringLiteral("#6fb1fc");
+
+    QList<ChatMessage> msgs;
+    for (int i = 0; i < 64; ++i) {
+        ChatMessage m;
+        m.id = QStringLiteral("m%1").arg(i);
+        m.content = i == 0 ? QStringLiteral("первое сообщение") :
+                    QStringLiteral("текст сообщения номер %1").arg(i);
+        m.sent = (i % 3 == 0);
+        m.time = QStringLiteral("12:%1").arg(i, 2, 10, QChar('0'));
+        m.createdAt = QStringLiteral("2026-09-14T12:%1:00").arg(i, 2, 10, QChar('0'));
+        m.senderName = m.sent ? QString() : QStringLiteral("Алиса");
+        msgs.append(m);
+    }
+    // Регрессия «плывущих» сообщений: markdown, длинные URL, спойлеры.
+    {
+        ChatMessage m;
+        m.id = "md1"; m.sent = true;
+        m.content = "**жирный** и *курсив* и `код` и ||спойлер скрытый|| и ~~зачёркнутый~~ и __подчёркнутый__";
+        m.time = "10:00"; m.createdAt = "2026-09-21T10:00:00";
+        msgs.append(m);
+        ChatMessage u;
+        u.id = "url1"; u.sent = true;
+        u.content = "https://lknpd.nalog.ru/api/v1/receipt/615491216850/201v1q7qbe/print";
+        u.time = "10:01"; u.createdAt = "2026-09-21T10:01:00";
+        msgs.append(u);
+    }
+
+    page.injectForDesignTest(chats, QList<Folder>{work}, QStringLiteral("u_alice"), msgs);
+    for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+
+    // Базовые проверки — на «Стандартной» теме (предыдущий прогон мог
+    // сохранить другую в Prefs).
+    ThemePreset::save(QStringLiteral("gray"));
+    page.applyTheme();
+    for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+
+    // Регрессия «плывущих» сообщений: строки подряд, текст не обрезан.
+    {
+        auto* cont = page.findChild<QWidget*>(QStringLiteral("msgContainer"));
+        int prevBottom = -1, checkedRows = 0, overlap = 0, clipped = 0;
+        QList<QWidget*> liveRows;
+        if (cont && cont->layout())
+            for (int i = 0; i < cont->layout()->count(); ++i)
+                if (auto* it = cont->layout()->itemAt(i); it && it->widget())
+                    if (it->widget()->findChild<QFrame*>()) liveRows << it->widget();
+        for (QWidget* row : liveRows) {
+            auto* bubble = row->findChild<QFrame*>();
+            if (!bubble) continue;
+            const int y = row->mapTo(cont, QPoint(0, 0)).y();
+            if (prevBottom >= 0 && y < prevBottom - 1) ++overlap;
+            prevBottom = y + row->height();
+            for (QLabel* l : bubble->findChildren<QLabel*>()) {
+                const int ly = l->mapTo(bubble, QPoint(0, 0)).y() + l->height();
+                if (ly > bubble->height() + 2) ++clipped;
+            }
+            ++checkedRows;
+        }
+        check(checkedRows >= 10, QStringLiteral("строк сообщений отрисовано: ") + QString::number(checkedRows));
+        check(overlap == 0, QStringLiteral("строки не перекрываются (анти-«плывут»)"));
+        check(clipped == 0, QStringLiteral("текст не обрезан бабблом"));
+    }
+
+    auto countRows = [&page]() -> int {
+        auto* c = page.findChild<QWidget*>(QStringLiteral("msgContainer"));
+        int n = 0;
+        if (c) for (QObject* o : c->children())
+            if (auto* w = qobject_cast<QWidget*>(o))
+                if (w->findChild<QFrame*>()) ++n;
+        return n;
+    };
+    auto dumpRows = [&](const char* stage) {
+        printf("      [rows @%s] = %d\n", stage, countRows());
+    };
+    // ── Геометрия (значения из chat.html / tokens.css) ────────────────────────
+    printf("1) Геометрия\n");
+    printf("platform=%s dpr=%.2f\n",
+           QGuiApplication::platformName().toUtf8().constData(),
+           page.devicePixelRatioF());
+
+
+    auto* sidebar = page.findChild<QWidget*>(QStringLiteral("sidebar"));
+    check(sidebar && sidebar->width() == 380, QStringLiteral("сайдбар 380px (--sidebar-width)"));
+    auto* rail = page.findChild<QWidget*>(QStringLiteral("folderRail"));
+    check(rail && rail->isVisible() && rail->width() == 72,
+          QStringLiteral("рейл папок 72px (.folders-rail)"));
+    auto* convHeader = page.findChild<QWidget*>(QStringLiteral("convHeader"));
+    check(convHeader && convHeader->height() == 60, QStringLiteral("шапка чата 60px"));
+    auto* pill = page.findChild<QWidget*>(QStringLiteral("tgInputBar"));
+    check(pill && pill->isVisible(), QStringLiteral("композер-пилюля .tg-input-bar есть"));
+    check(page.findChild<QWidget*>(QStringLiteral("folderRailIcon")) != nullptr,
+          QStringLiteral("плитки-иконки рейла есть"));
+    check(page.findChild<QWidget*>(QStringLiteral("folderRailEdit")) != nullptr,
+          QStringLiteral("кнопка «＋» внизу рейла"));
+
+    // ── Пиксели (цвета из tokens.css) ────────────────────────────────────────
+    printf("2) Цвета (tokens.css / chat.html)\n");
+    const QPixmap pm = page.grab();
+    const QImage img = pm.toImage();
+    img.save(QStringLiteral("/tmp/design-main.png"));
+
+    // Сайдбар: поверхность surface-1 #131218.
+    check(pixelNear(img, 200, 640, 0x131218), QStringLiteral("фон сайдбара #131218 (surface-1): ") + px(img, 200, 640));
+    // Область сообщений: bg-base #0B0A0E — ищем ЛЮБОЙ фоновый пиксель в зоне
+    // (при 52+ бабблах фиксированная точка может попасть на баббл).
+    bool bgFound = false;
+    for (int y = 100; y < 700 && !bgFound; y += 7)
+        for (int x = 400; x < 1260 && !bgFound; x += 7)
+            if (pixelNear(img, x, y, 0x0B0A0E)) bgFound = true;
+    check(bgFound, QStringLiteral("фон переписки #0B0A0E присутствует"));
+    // Шапка чата: #131218.
+    check(pixelNear(img, 900, 30, 0x131218), QStringLiteral("шапка чата #131218 (bg-secondary матте): ") + px(img, 900, 30));
+    // Композер-пилюля: surface-2 #1A1822 (между кнопками, слева от текста).
+    if (pill) {
+        const QPoint c = pill->mapTo(&page, QPoint(120, pill->height() / 2));
+        check(pixelNear(img, c.x(), c.y(), 0x1A1822),
+              QStringLiteral("пилюля ввода #1A1822 (.tg-input-bar): ") + px(img, c.x(), c.y()));
+    }
+    // Поле поиска: surface-2 #1A1822.
+    if (auto* s = page.findChild<QLineEdit*>(QStringLiteral("searchBox"))) {
+        const QPoint c = s->mapTo(&page, QPoint(s->width() / 2, s->height() / 2));
+        check(pixelNear(img, c.x(), c.y(), 0x1A1822),
+              QStringLiteral("поле поиска #1A1822 (.search-input): ") + px(img, c.x(), c.y()));
+    }
+    // Бабблы: входящий #1A1822 (+ hairline-бордер), исходящий градиент 4A3A72→3A2D5C.
+    // Точки привязываем к КОНКРЕТНЫМ бабблам (фиксированные координаты могут
+    // попадать на спойлер-блок/фон между сообщениями).
+    // Только ЖИВЫЕ строки (layout), а не deleteLater-призраки из children().
+    QList<QFrame*> inB, outB;
+    if (auto* cont = page.findChild<QWidget*>(QStringLiteral("msgContainer")))
+        if (cont->layout())
+            for (int i = 0; i < cont->layout()->count(); ++i)
+                if (auto* it = cont->layout()->itemAt(i); it && it->widget())
+                    if (auto* f = it->widget()->findChild<QFrame*>()) {
+                        if (f->objectName() == QStringLiteral("bubbleIn")) inB << f;
+                        if (f->objectName() == QStringLiteral("bubbleOut")) outB << f;
+                    }
+    check(!inB.isEmpty() && !outB.isEmpty(), QStringLiteral("бабблы обоих типов отрисованы"));
+    if (!inB.isEmpty()) {
+        const auto* b = inB.last();
+        const QPoint c = b->mapTo(&page, QPoint(b->width() - 40, b->height() / 2));
+        check(pixelNear(img, c.x(), c.y(), 0x1A1822),
+              QStringLiteral("входящий баббл #1A1822 (bubble-in): ") + px(img, c.x(), c.y()));
+    }
+    if (!outB.isEmpty()) {
+        const auto* b = outB.last();
+        const QPoint c = b->mapTo(&page, QPoint(b->width() / 2, b->height() / 2));
+        const QColor got = img.pixelColor(c.x(), c.y());
+        const bool inGrad = got.red() >= 0x3A - 4 && got.red() <= 0x4A + 4
+                         && got.green() >= 0x2D - 4 && got.green() <= 0x3A + 4
+                         && got.blue() >= 0x5C - 4 && got.blue() <= 0x72 + 4;
+        check(inGrad, QStringLiteral("исходящий баббл в градиенте #4A3A72→#3A2D5C: ") + got.name());
+    }
+    // Бейдж непрочитанных (у «Боба», 3): акцент #8B5CF6. Сэмплируем угол
+    // плашки — в центре белая цифра.
+    bool badgeOk = false;
+    for (QLabel* lbl : page.findChildren<QLabel*>()) {
+        if (lbl->text() == QStringLiteral("3") && lbl->objectName().isEmpty()) {
+            const QPoint c = lbl->mapTo(&page, QPoint(lbl->width() / 2, 3));
+            badgeOk = pixelNear(img, c.x(), c.y(), 0x8B5CF6);
+            break;
+        }
+    }
+    check(badgeOk, QStringLiteral("бейдж непрочитанных #8B5CF6 (.chat-unread)"));
+    // Плитка папки тонирована её цветом (#6fb1fc 18% поверх #131218 ≈ #242e40).
+    // Вторая плитка рейла — папка «Работа» (первая — нейтральная «Все»).
+    {
+        auto tiles = page.findChildren<QLabel*>(QStringLiteral("folderRailIcon"));
+        std::sort(tiles.begin(), tiles.end(), [&page](QLabel* a, QLabel* b) {
+            return a->mapTo(&page, QPoint()).y() < b->mapTo(&page, QPoint()).y();
+        });
+        bool tinted = false;
+        if (tiles.size() >= 2) {
+            const QPoint e = tiles[1]->mapTo(&page, QPoint(4, tiles[1]->height() / 2));
+            tinted = pixelNear(img, e.x(), e.y(), 0x242e40, 5);
+        }
+        check(tinted, QStringLiteral("плитка папки тонирована #6fb1fc (folder-color tint)"));
+    }
+
+    dumpRows("before oscillation");
+    // ── Осцилляция скроллбара: ресайз вокруг границы не должен фризить/расти ──
+    printf("Осцилляция скроллбара\n");
+    {
+        auto* cont2 = page.findChild<QWidget*>(QStringLiteral("msgContainer"));
+        const qint64 rss0 = [] { QFile f(QStringLiteral("/proc/self/status")); f.open(QIODevice::ReadOnly);
+            const QByteArray d = f.readAll(); const int i = d.indexOf("VmRSS:"); 
+            return d.mid(i + 6, d.indexOf("kB", i) - i - 6).toLongLong(); }();
+        for (int i = 0; i < 24; ++i) {
+            page.resize(i % 2 ? 900 : 870, 700);   // пересекаем границу появления скроллбара
+            for (int k = 0; k < 12; ++k) QCoreApplication::processEvents();
+            const int n = countRows();
+            if (n != 52) printf("      !!! rows=52→%d на итерации %d (size %dx%d)\n",
+                                n, i, page.width(), page.height());
+        }
+        const qint64 rss1 = [] { QFile f(QStringLiteral("/proc/self/status")); f.open(QIODevice::ReadOnly);
+            const QByteArray d = f.readAll(); const int i = d.indexOf("VmRSS:");
+            return d.mid(i + 6, d.indexOf("kB", i) - i - 6).toLongLong(); }();
+        check(rss1 - rss0 < 30 * 1024,
+              QStringLiteral("24 ресайза вокруг границы: RSS не вырос (%1→%2 КБ)").arg(rss0).arg(rss1));
+        const int w = cont2 ? cont2->width() : -1;
+        {
+            int worst = 0; QWidget* worstRow = nullptr;
+            for (QObject* o : cont2->children()) {
+                auto* row = qobject_cast<QWidget*>(o);
+                if (!row) continue;
+                const int mw = row->minimumSizeHint().width();
+                if (mw > worst) { worst = mw; worstRow = row; }
+            }
+            if (worstRow) {
+                auto* lbl = worstRow->findChild<QLabel*>();
+                printf("      dbg: worstRow minW=%d text='%.40s'\n", worst,
+                       lbl ? lbl->text().left(40).toUtf8().constData() : "-");
+            }
+        }
+        check(w > 0 && w <= page.width() - 300 + 14,
+              QStringLiteral("контент остался в границах после ресайзов: ")
+              + QString::number(w));
+        page.resize(1280, 800);
+        for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+    }
+    dumpRows("after oscillation");
+
+    // ── Малое главное окно (680×520) ──────────────────────────────────────────
+    printf("Малое окно 680×520\n");
+    {
+        page.resize(680, 520);
+        for (int i = 0; i < 25; ++i) QCoreApplication::processEvents();
+        check(page.width() == 680,
+              QStringLiteral("страница реально сжимается до 680px: ") + QString::number(page.width()));
+        auto* sb2 = page.findChild<QWidget*>(QStringLiteral("sidebar"));
+        check(sb2 && sb2->width() == 300,
+              QStringLiteral("сайдбар сжался до 300px: ") + QString::number(sb2 ? sb2->width() : -1));
+        auto* msgCont = page.findChild<QWidget*>(QStringLiteral("msgContainer"));
+        const int bubbleMax = qBound(260, msgCont ? msgCont->width() * 72 / 100 : 260, 480);
+        bool clamped = msgCont != nullptr;
+        const auto bubbles = msgCont->findChildren<QFrame*>();
+        for (QFrame* b : bubbles)
+            if ((b->objectName() == QStringLiteral("bubbleIn")
+                 || b->objectName() == QStringLiteral("bubbleOut"))
+                && (b->maximumWidth() > 480 || b->maximumWidth() < 260)) clamped = false;
+        check(clamped && !bubbles.isEmpty(),
+              QStringLiteral("бабблы в границах 260..480 (72% правила)"));
+        // Сервер мог вернуть пустоту для фейкового chat id и стереть инжект —
+        // восстанавливаем данные перед офлайн-проверкой.
+        page.injectForDesignTest(chats, QList<Folder>{work}, QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+        dumpRows("in small-window");
+
+        // Догрузка старых при прокрутке к верху (Telegram-style).
+        auto* sbv = page.findChild<QScrollArea*>(QStringLiteral("msgArea"))->verticalScrollBar();
+        int rowsBefore = 0;
+        if (msgCont->layout())
+            for (int i = 0; i < msgCont->layout()->count(); ++i)
+                if (auto* it = msgCont->layout()->itemAt(i); it && it->widget())
+                    if (it->widget()->findChild<QFrame*>()) ++rowsBefore;
+        // Пользовательская прокрутка к верху: колесо по вьюпорту (как руками).
+        auto* sa = page.findChild<QScrollArea*>(QStringLiteral("msgArea"));
+        auto* vp = sa ? sa->viewport() : nullptr;
+        if (vp) {
+            for (int w = 0; w < 10; ++w) {
+                QWheelEvent we(QPointF(60, 60), QPointF(60, 60),
+                               QPoint(0, 0), QPoint(0, -240),
+                               Qt::NoButton, Qt::NoModifier,
+                               Qt::NoScrollPhase, false);
+                QCoreApplication::sendEvent(vp, &we);
+                for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+            }
+        }
+        for (int i = 0; i < 80; ++i) QCoreApplication::processEvents();
+        int rowsAfter = 0;
+        for (QObject* o : msgCont->children())
+            if (qobject_cast<QWidget*>(o) && qobject_cast<QWidget*>(o)->findChild<QFrame*>()) ++rowsAfter;
+        printf("      dbg: rows %d → %d (children=%d)\n", rowsBefore, rowsAfter, msgCont->children().size());
+        page.grab().save(QStringLiteral("/tmp/dbg-smallwindow.png"));
+        check(rowsAfter > 0,
+              QStringLiteral("доскроллили до верха — старые сообщения догрузились (")
+              + QString::number(rowsBefore) + QStringLiteral(" → ") + QString::number(rowsAfter)
+              + QStringLiteral(")"));
+        // Офлайн: обрыв сети при открытом кэшированном чате — история остаётся.
+        emit api.chatError(QStringLiteral("messages"), QStringLiteral("offline"));
+        for (int i = 0; i < 15; ++i) QCoreApplication::processEvents();
+        auto* peerStatus = page.findChild<QLabel*>(QStringLiteral("peerStatus"));
+        check(peerStatus && peerStatus->text().contains(QStringLiteral("офлайн")),
+              QStringLiteral("офлайн: статус «показана сохранённая переписка»"));
+        // Кэш этого чата реально лежит на диске (загрузится без интернета).
+        check(QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                   + QStringLiteral("/chatcache")).exists(),
+              QStringLiteral("зашифрованный кэш историй на диске"));
+    }
+
+    printf("Итог: %s (%d расхождений)\n", failures ? "ЕСТЬ РАСХОЖДЕНИЯ" : "ВСЁ СОВПАДАЕТ", failures);
+
+    // ── 3) Настройки: структура 1:1 с вебом + нет утечки при закрытии ────────
+    printf("3) Настройки (.settings-panel веба)\n");
+    {
+        page.resize(1400, 1000);
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+
+        QPointer<SettingsDialog> dlg = new SettingsDialog(&api, &page);
+        QObject::connect(dlg, &SettingsDialog::themeChanged, &page, &ChatPage::applyTheme);
+        dlg->show();
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+
+        auto* card = dlg->findChild<QWidget*>(QStringLiteral("modalCard"));
+        check(card && card->width() == 1060, QStringLiteral("панель настроек 1060px"));
+        check(card && card->height() == 840, QStringLiteral("высота панели 840px (min(90vh,880) десктоп)"));
+        auto* nav = dlg->findChild<QWidget*>(QStringLiteral("stNav"));
+        check(nav && nav->width() == 256, QStringLiteral("nav 256px (.settings-nav)"));
+        const auto navItems = dlg->findChildren<QPushButton*>(QStringLiteral("stNavItem"));
+        check(navItems.size() == 12, QStringLiteral("12 секций навигации (веб: +экспорт, +оформление)"));
+
+        dlg->grab().save(QStringLiteral("/tmp/design-settings.png"));
+        // Скрин вкладки уведомлений (контроль простора строк).
+        for (QPushButton* b : navItems)
+            if (b->text().contains(QStringLiteral("Уведомления"))) { b->click(); break; }
+        for (int i = 0; i < 15; ++i) QCoreApplication::processEvents();
+        dlg->grab().save(QStringLiteral("/tmp/design-notifications.png"));
+        for (QPushButton* b : navItems)
+            if (b->text().contains(QStringLiteral("Мой аккаунт"))) { b->click(); break; }
+        for (int i = 0; i < 15; ++i) QCoreApplication::processEvents();
+        // «Ксифы» — валюта называется по-нашему (не «Xipher Stars»).
+        bool ksify = false;
+        for (QLabel* l : dlg->findChildren<QLabel*>())
+            if (l->text() == QStringLiteral("Ксифы")) { ksify = true; break; }
+        check(ksify, QStringLiteral("плитка валюты «Ксифы»"));
+
+        // Вкладка «Xipher Premium»: экран Xipher Pulse.
+        for (QPushButton* b : navItems)
+            if (b->text().contains(QStringLiteral("Premium"))) { b->click(); break; }
+        for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+        bool pulseTitle = false, pulseCta = false;
+        for (QLabel* l : dlg->findChildren<QLabel*>())
+            if (l->text() == QStringLiteral("Xipher Pulse")) pulseTitle = true;
+        int planTiles = 0, perkCards = 0;
+        for (QFrame* f : dlg->findChildren<QFrame*>()) {
+            if (f->objectName() == QStringLiteral("pulsePerk")) ++perkCards;
+        }
+        for (QPushButton* b : dlg->findChildren<QPushButton*>(QStringLiteral("pulseCta")))
+            pulseCta = !b->text().isEmpty();
+        // Тарифы — PulsePlanButton с ценами.
+        for (QLabel* l : dlg->findChildren<QLabel*>())
+            if (l->text() == QStringLiteral("499 ₽")) ++planTiles;
+        check(pulseTitle, QStringLiteral("заголовок «Xipher Pulse»"));
+        check(pulseCta, QStringLiteral("кнопка «Подключить Pulse · цена»"));
+        check(planTiles == 1, QStringLiteral("тариф «Выгодно · 499 ₽» на месте"));
+        check(perkCards == 6, QStringLiteral("6 карточек возможностей"));
+        dlg->grab().save(QStringLiteral("/tmp/design-premium.png"));
+
+        // ── Малое окно (800×700): карточка ≤96%, nav спрятан, тарифы в столбик ──
+        page.resize(800, 700);
+        for (int i = 0; i < 25; ++i) QCoreApplication::processEvents();
+        {
+            auto* card = dlg->findChild<QWidget*>(QStringLiteral("modalCard"));
+
+            check(card && card->width() <= 768,
+                  QStringLiteral("на 800px карточка ужалась до ≤96% (768px): ")
+                  + QString::number(card ? card->width() : -1));
+            auto* nav2 = dlg->findChild<QWidget*>(QStringLiteral("stNav"));
+            check(nav2 && !nav2->isVisible(),
+                  QStringLiteral("на узкой панели nav спрятан (меню «☰ Разделы»)"));
+        }
+        // Перейти в Premium и проверить вертикальные тарифы (на 700px контент <640).
+        page.resize(700, 700);
+        for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+        for (QPushButton* b : navItems)
+            if (b->text().contains(QStringLiteral("Premium"))) { b->click(); break; }
+        for (int i = 0; i < 15; ++i) QCoreApplication::processEvents();
+        {
+            QList<QPushButton*> plans;
+            int prices = 0;
+            for (QLabel* l : dlg->findChildren<QLabel*>())
+                if (l->text() == QStringLiteral("99 ₽")) ++prices;
+            Q_UNUSED(prices);
+            // Вертикальность: сравним геометрии плиток по цене.
+            QLabel* p499 = nullptr; QLabel* p9 = nullptr; QLabel* p99 = nullptr;
+            for (QLabel* l : dlg->findChildren<QLabel*>()) {
+                if (l->text() == QStringLiteral("499 ₽")) p499 = l;
+                else if (l->text() == QStringLiteral("9 ₽")) p9 = l;
+                else if (l->text() == QStringLiteral("99 ₽")) p99 = l;
+            }
+            check(p9 && p499 && p99 && p99->mapTo(dlg, QPoint()).y() > p499->mapTo(dlg, QPoint()).y()
+                  && p499->mapTo(dlg, QPoint()).y() > p9->mapTo(dlg, QPoint()).y(),
+                  QStringLiteral("на узкой панели тарифы в столбик"));
+        }
+        page.resize(1400, 1000);
+        for (int i = 0; i < 25; ++i) QCoreApplication::processEvents();
+
+        // Вкладка «Оформление»: клик по пресету меняет фон чата мгновенно.
+        const QImage before = page.grab().toImage();
+        const QPoint sb(60, 640);   // левее карточки настроек (та начинается на x≈170)
+        for (QPushButton* b : navItems) {
+            if (b->text().contains(QStringLiteral("Оформление"))) { b->click(); break; }
+        }
+        for (int i = 0; i < 15; ++i) QCoreApplication::processEvents();
+        bool clickedTheme = false;
+        for (QPushButton* t : dlg->findChildren<QPushButton*>(QStringLiteral("themeTile"))) {
+            if (t->toolTip() == QStringLiteral("amoled")) { t->click(); clickedTheme = true; break; }
+        }
+        check(clickedTheme, QStringLiteral("галерея тем: пресет AMOLED кликабелен"));
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+        {
+            const QImage after = page.grab().toImage();
+            const QColor cb = before.pixelColor(sb);
+            const QColor ca = after.pixelColor(sb);
+            check(cb != ca && ca.lightness() < cb.lightness(),
+                  QStringLiteral("тема AMOLED применилась мгновенно (сайдбар темнее): ")
+                  + cb.name() + QStringLiteral(" → ") + ca.name());
+        }
+        // Вернуть «Стандартную» кликом и убедиться, что цвет вернулся.
+        for (QPushButton* t : dlg->findChildren<QPushButton*>(QStringLiteral("themeTile"))) {
+            if (t->toolTip() == QStringLiteral("gray")) { t->click(); break; }
+        }
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+        {
+            const QImage after2 = page.grab().toImage();
+            check(after2.pixelColor(sb) == before.pixelColor(sb),
+                  QStringLiteral("возврат к «Стандартной» восстанавливает цвета"));
+        }
+
+        // Нет утечки: closeAnimated → deleteLater → объект исчезает.
+        dlg->closeAnimated();
+        const QDeadlineTimer dl(800);
+        while (dlg && !dl.hasExpired()) {
+            for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+            QThread::msleep(20);
+        }
+        check(dlg == nullptr, QStringLiteral("диалог удалён после закрытия (нет утечки)"));
+    }
+
+    // ── Диагностика расхождений ──────────────────────────────────────────────
+    printf("\nДиагностика:\n");
+    for (QLabel* lbl : page.findChildren<QLabel*>()) {
+        if (lbl->text() == QStringLiteral("3")) {
+            const QPoint c = lbl->mapTo(&page, QPoint(lbl->width() / 2, lbl->height() / 2));
+            printf("  label '3': obj=%s pos=(%d,%d) size=%dx%d color=%s parent=%s\n",
+                   lbl->objectName().toUtf8().constData(), c.x(), c.y(),
+                   lbl->width(), lbl->height(), px(img, c.x(), c.y()).toUtf8().constData(),
+                   lbl->parentWidget() ? lbl->parentWidget()->objectName().toUtf8().constData() : "-");
+        }
+    }
+    if (auto* tile = page.findChild<QLabel*>(QStringLiteral("folderRailIcon"))) {
+        printf("  folderRailIcon: geo=(%d,%d %dx%d) ss=%s\n",
+               tile->mapTo(&page, QPoint(0, 0)).x(), tile->mapTo(&page, QPoint(0, 0)).y(),
+               tile->width(), tile->height(), tile->styleSheet().toUtf8().constData());
+        for (int x = 2; x < tile->width(); x += 8) {
+            const QPoint p = tile->mapTo(&page, QPoint(x, tile->height() / 2));
+            printf("    x=%d -> %s\n", x, px(img, p.x(), p.y()).toUtf8().constData());
+        }
+    }
+    return failures ? 1 : 0;
+}

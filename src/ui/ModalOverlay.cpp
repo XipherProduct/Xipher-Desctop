@@ -6,6 +6,8 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QPropertyAnimation>
+#include <QResizeEvent>
+#include <QCoreApplication>
 #include <QGraphicsDropShadowEffect>
 
 ModalOverlay::ModalOverlay(QWidget* parent, int cardWidth)
@@ -44,7 +46,29 @@ ModalOverlay::ModalOverlay(QWidget* parent, int cardWidth)
 }
 
 void ModalOverlay::relayout() {
-    if (parentWidget()) setGeometry(parentWidget()->rect());
+    if (!parentWidget()) return;
+    setGeometry(parentWidget()->rect());
+
+    // Адаптация под маленькое окно (как min(1060px, 96vw) в вебе):
+    // карточка ≤ 96% ширины и ≤ 94% высоты родителя.
+    const int availW = qMax(120, int(width() * 0.96));
+    const int availH = qMax(120, int(height() * 0.94));
+    // Предпочтительная высота фиксируется при первом проходе (диалоги задают
+    // её через card()->setFixedHeight(...) в конструкторе).
+    if (cardPrefH_ == 0) cardPrefH_ = card_->minimumHeight();
+    card_->setFixedWidth(qMin(cardWidth_, availW));
+    const int h = cardPrefH_ > 0 ? qMin(cardPrefH_, availH) : 0;
+    if (h > 0) {
+        card_->setFixedHeight(h);
+    } else {
+        card_->setMinimumHeight(0);
+        card_->setMaximumHeight(availH);   // контент задаёт высоту, но не выше
+    }
+
+    // Диалоги перестраиваются под ФИНАЛЬНЫЙ размер карточки: событие ресайза
+    // самого оверлея могло прийти до клампа — досылаем его явно.
+    QResizeEvent re(size(), size());
+    QCoreApplication::sendEvent(this, &re);
 }
 
 bool ModalOverlay::eventFilter(QObject* obj, QEvent* e) {

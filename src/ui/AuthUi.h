@@ -4,6 +4,8 @@
 #include <QFrame>
 #include <QLabel>
 #include <QLineEdit>
+#include <QAction>
+#include <QIcon>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QGraphicsDropShadowEffect>
@@ -82,7 +84,24 @@ inline QLineEdit* makeInput(const QString& placeholder, QWidget* parent, bool pa
     e->setProperty("class", "loginInput");
     e->setPlaceholderText(placeholder);
     e->setClearButtonEnabled(false);
-    if (password) e->setEchoMode(QLineEdit::Password);
+    if (password) {
+        e->setEchoMode(QLineEdit::Password);
+        // Глазик: показать/скрыть пароль. Клик по иконке в правом краю поля
+        // переключает режим; подсказка меняется, фокус не крадётся.
+        auto* action = new QAction(e);
+        action->setIcon(QIcon(QStringLiteral(":/icons/eye-open.svg")));
+        action->setToolTip(QStringLiteral("Показать пароль"));
+        e->addAction(action, QLineEdit::TrailingPosition);
+        QObject::connect(action, &QAction::triggered, action, [e, action]() {
+            const bool hidden = e->echoMode() == QLineEdit::Password;
+            e->setEchoMode(hidden ? QLineEdit::Normal : QLineEdit::Password);
+            action->setIcon(QIcon(hidden ? QStringLiteral(":/icons/eye-closed.svg")
+                                         : QStringLiteral(":/icons/eye-open.svg")));
+            action->setToolTip(hidden ? QStringLiteral("Скрыть пароль")
+                                      : QStringLiteral("Показать пароль"));
+            e->setFocus(Qt::OtherFocusReason);
+        });
+    }
     return e;
 }
 
