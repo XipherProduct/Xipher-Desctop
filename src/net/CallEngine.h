@@ -33,6 +33,7 @@ public:
     void addRemoteCandidate(const QString& cand, const QString& mid);
     void hangup();
     void setMuted(bool muted);
+    void setDeaf(bool deaf);   // не слышать собеседника (динамик в 0)
 
 signals:
     void localOffer(const QString& sdp);
@@ -58,6 +59,7 @@ private:
     QList<IceServerCfg> iceServers_;
     bool caller_ = false;
     bool muted_ = false;
+    bool deaf_  = false;
     bool audioStarted_ = false;
     bool hasRemoteDesc_ = false;
     QList<QPair<QString, QString>> pendingCands_;   // кандидаты до remote-description

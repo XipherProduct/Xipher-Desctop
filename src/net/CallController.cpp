@@ -4,6 +4,7 @@
 #include "net/WsClient.h"
 #include "net/Session.h"
 #include "ui/CallOverlay.h"
+#include "ui/CallSounds.h"
 
 #include <QWidget>
 #include <QTimer>
@@ -31,7 +32,6 @@ QString unwrapSdp(const QString& payload) {
         const QString sdp = d.object().value(QStringLiteral("sdp")).toString();
         if (!sdp.isEmpty()) return sdp;
     }
-    // возможно base64
     if (!s.contains('\n') && !s.contains(' ')) {
         const QByteArray dec = QByteArray::fromBase64(s.toUtf8());
         QJsonDocument d2 = QJsonDocument::fromJson(dec);
@@ -64,7 +64,10 @@ QPair<QString, QString> unwrapCandidate(const QString& payload) {
     }
     return { s, QStringLiteral("0") };
 }
-}
+
+// Гудки длится не вечно: как в мобильных сетях, ~60 с без ответа — отбой.
+constexpr int kRingTimeoutMs = 60'000;
+} // namespace
 
 CallController::CallController(ApiClient* api, WsClient* ws, QWidget* window, QObject* parent)
     : QObject(parent), api_(api), ws_(ws), window_(window) {
@@ -77,8 +80,25 @@ CallController::CallController(ApiClient* api, WsClient* ws, QWidget* window, QO
             if (engine_ && !answerApplied_) api_->getCallAnswer(peerId_);
             if (engine_) api_->getCallIce(peerId_);
         } else {
-            if (!engine_ && !offerFetched_) api_->getCallOffer(peerId_);
+            if (!engine_ && !offerFetched_ && incomingOffer_.isEmpty()) api_->getCallOffer(peerId_);
             if (engine_) api_->getCallIce(peerId_);
+        }
+    });
+
+    ringTimeout_ = new QTimer(this);
+    ringTimeout_->setSingleShot(true);
+    ringTimeout_->setInterval(kRingTimeoutMs);
+    connect(ringTimeout_, &QTimer::timeout, this, [this]() {
+        // Вызывающий не дождался — вешаем трубку и пишем «без ответа» (в вебе
+        // это _wasCaller && !_wasAnswered → sendMissedCallMessage "missed").
+        if (peerId_.isEmpty() || connected_) return;
+        qInfo() << "[call] ring timeout";
+        if (caller_) {
+            finish(QStringLiteral("missed"));
+        } else {
+            // Входящий всё ещё звенит, а вызывающий пропал — тихо убираем.
+            ws_->sendCallEnd(peerId_);
+            cleanup();
         }
     });
 
@@ -97,6 +117,23 @@ CallController::CallController(ApiClient* api, WsClient* ws, QWidget* window, QO
     connect(ws_, &WsClient::callAnswerReceived, this, [this](const QString& from, const QString& sdp) { applyAnswer(from, sdp); });
     connect(ws_, &WsClient::callIceReceived, this, [this](const QString& from, const QString& cand) { addCandidates(from, {cand}); });
     connect(ws_, &WsClient::callEnded, this, [this](const QString& from) { if (from == peerId_) cleanup(); });
+    // Push входящего звонка: offer уже здесь — поллинг не нужен.
+    connect(ws_, &WsClient::callOfferArrived, this,
+            [this](const QString& from, const QString& fromName, const QString& avatar,
+                   const QString& callType, const QString& offer) {
+        onIncoming(from, fromName, callType, offer, avatar);
+    });
+    // Трубку взяли в другом клиенте (веб/Android) — убираем экран без лога.
+    connect(ws_, &WsClient::callAnsweredElsewhere, this, [this](const QString& peer) {
+        if (peer == peerId_ || peer.isEmpty()) {
+            qInfo() << "[call] answered elsewhere";
+            CallSounds::instance().stopRingtone();
+            cleanup();
+        }
+    });
+    connect(ws_, &WsClient::callMissed, this, [this](const QString& peer) {
+        Q_UNUSED(peer);   // бейдж пропущенных обновит список чатов своим ходом
+    });
 }
 
 CallEngine* CallController::createEngine() {
@@ -113,29 +150,60 @@ CallEngine* CallController::createEngine() {
         ws_->sendCallIce(peerId_, wrapCandidate(cand));
     });
     connect(e, &CallEngine::connected, this, [this]() {
+        if (connected_) return;
         connected_ = true;
-        if (overlay_) { overlay_->setStatus(QStringLiteral("00:00")); overlay_->startCallTimer(); }
+        ringTimeout_->stop();
+        CallSounds::instance().stopRingtone();
+        CallSounds::instance().playConnectChime();
+        if (overlay_) {
+            overlay_->setState(CallOverlay::State::Active);
+            overlay_->startCallTimer();
+        }
     });
     connect(e, &CallEngine::ended, this, [this]() { qInfo() << "[call] engine ended"; cleanup(); });
-    connect(e, &CallEngine::failed, this, [this](const QString& r) { qWarning() << "[call] engine FAILED:" << r; cleanup(); });
+    connect(e, &CallEngine::failed, this, [this](const QString& r) {
+        qWarning() << "[call] engine FAILED:" << r;
+        // Соединение не сложилось: вызывающий пишет «без ответа» (как в вебе),
+        // принимающему достаточно тихо убрать экран.
+        if (caller_ && !connected_) finish(QStringLiteral("missed"));
+        else cleanup();
+    });
     return e;
+}
+
+void CallController::wireOverlay() {
+    connect(overlay_, &CallOverlay::hangup, this, [this]() {
+        // Исходящий до соединения — «без ответа» при таймауте, «отменён»
+        // сознательно: веб в обоих случаях пишет статус "missed".
+        if (!connected_ && caller_) finish(QStringLiteral("missed"));
+        else if (!connected_) finish(QStringLiteral("rejected"));
+        else finish(QString());
+    });
+    connect(overlay_, &CallOverlay::accept, this, [this]() { acceptIncoming(); });
+    connect(overlay_, &CallOverlay::decline, this, [this]() {
+        finish(QStringLiteral("rejected"));
+    });
+    connect(overlay_, &CallOverlay::muteToggled, this, [this](bool m) { if (engine_) engine_->setMuted(m); });
+    connect(overlay_, &CallOverlay::deafToggled, this, [this](bool d) { if (engine_) engine_->setDeaf(d); });
+    connect(overlay_, &CallOverlay::minimizeRequested, this, [this]() {
+        if (!overlay_) return;
+        overlay_->hide();
+        overlay_->minimizedBar()->show();
+        overlay_->minimizedBar()->raise();
+    });
 }
 
 void CallController::startOutgoing(const QString& peerId, const QString& peerName, const QString& avatarUrl) {
     if (busy() || peerId.isEmpty()) return;
     if (peerId == Session::instance().userId) return;
     peerId_ = peerId; peerName_ = peerName; avatarUrl_ = avatarUrl; caller_ = true;
-    answerApplied_ = false; offerFetched_ = false; addedCandidates_.clear(); connected_ = false;
+    answerApplied_ = false; offerFetched_ = false; connected_ = false;
+    addedCandidates_.clear(); incomingOffer_.clear();
 
     overlay_ = new CallOverlay(window_);
     overlay_->setPeer(peerName, avatarUrl);
-    overlay_->setIncoming(false);
-    overlay_->setStatus(QStringLiteral("Вызов…"));
-    connect(overlay_, &CallOverlay::hangup, this, [this]() {
-        if (!connected_) sendCallEvent(QStringLiteral("cancelled"));   // лог «Звонок отменён»
-        ws_->sendCallEnd(peerId_); api_->callEnd(peerId_); cleanup();
-    });
-    connect(overlay_, &CallOverlay::muteToggled, this, [this](bool m) { if (engine_) engine_->setMuted(m); });
+    overlay_->setState(CallOverlay::State::Outgoing);
+    wireOverlay();
     overlay_->show();
     overlay_->raise();
 
@@ -147,49 +215,63 @@ void CallController::startOutgoing(const QString& peerId, const QString& peerNam
     };
     api_->getTurnConfig();
     poll_->start();
+    ringTimeout_->start();
 }
 
-void CallController::onIncoming(const QString& callerId, const QString& callerName, const QString&) {
+void CallController::onIncoming(const QString& callerId, const QString& callerName,
+                                const QString& /*callType*/, const QString& offerSdp,
+                                const QString& avatarUrl) {
     if (callerId.isEmpty() || peerId_ == callerId) return;
-    if (busy()) { api_->callEnd(callerId); return; }
-    qInfo() << "[call] incoming from" << callerId << callerName;
-
-    peerId_ = callerId; peerName_ = callerName.isEmpty() ? callerId : callerName; caller_ = false;
-    answerApplied_ = false; offerFetched_ = false; addedCandidates_.clear();
+    if (busy()) {
+        // Уже в звонке — сразу отбой (как «Already in call, rejecting» в вебе).
+        ws_->sendCallEnd(callerId);
+        api_->callEnd(callerId);
+        return;
+    }
+    qInfo() << "[call] incoming from" << callerId << callerName
+            << "offer attached:" << !offerSdp.isEmpty();
+    peerId_ = callerId;
+    peerName_ = callerName.isEmpty() ? callerId : callerName;
+    avatarUrl_ = avatarUrl;
+    caller_ = false;
+    answerApplied_ = false; offerFetched_ = false; connected_ = false;
+    addedCandidates_.clear();
+    incomingOffer_ = offerSdp;
 
     overlay_ = new CallOverlay(window_);
-    overlay_->setPeer(peerName_, QString());
-    overlay_->setIncoming(true);
-    overlay_->setStatus(QStringLiteral("Входящий звонок…"));
-    connect(overlay_, &CallOverlay::accept, this, [this]() { acceptIncoming(); });
-    connect(overlay_, &CallOverlay::decline, this, [this]() {
-        sendCallEvent(QStringLiteral("rejected"));
-        ws_->sendCallEnd(peerId_); api_->callEnd(peerId_); cleanup();
-    });
-    connect(overlay_, &CallOverlay::hangup, this, [this]() {
-        ws_->sendCallEnd(peerId_); api_->callEnd(peerId_); cleanup();
-    });
-    connect(overlay_, &CallOverlay::muteToggled, this, [this](bool m) { if (engine_) engine_->setMuted(m); });
+    overlay_->setPeer(peerName_, avatarUrl_);
+    overlay_->setState(CallOverlay::State::Incoming);
+    wireOverlay();
     overlay_->show();
     overlay_->raise();
+
+    // Рингтон — двухнотный chime, цикл 2.4 с (playCallRingtone веба).
+    CallSounds::instance().startRingtone();
+    ringTimeout_->start();
 }
 
 void CallController::acceptIncoming() {
     if (!overlay_) return;
-    overlay_->setIncoming(false);
-    overlay_->setStatus(QStringLiteral("Соединение…"));
-    poll_->start();              // начнём опрашивать offer
-    api_->getCallOffer(peerId_);
+    CallSounds::instance().stopRingtone();
+    overlay_->setState(CallOverlay::State::Active);
+    overlay_->setStatusHint(QStringLiteral("Соединение…"));
+    poll_->start();
+    // Offer уже пришёл с WS-push — сразу строим answer; иначе ждём поллинг.
+    if (!incomingOffer_.isEmpty()) applyOffer(peerId_, incomingOffer_);
+    else api_->getCallOffer(peerId_);
 }
 
 void CallController::applyOffer(const QString& callerId, const QString& payload) {
     if (caller_ || engine_ || callerId != peerId_ || payload.isEmpty()) return;
     const QString sdp = unwrapSdp(payload);
+    if (sdp.isEmpty()) return;
     qInfo() << "[call] got remote offer, sdp len" << sdp.size();
     offerFetched_ = true;
+    incomingOffer_.clear();
     engine_ = createEngine();
-    onIce_ = [this, sdp](const QList<IceServerCfg>& servers) {
-        if (engine_) { engine_->setIceServers(servers); engine_->startAsCallee(sdp); }
+    const QString sdpCopy = sdp;
+    onIce_ = [this, sdpCopy](const QList<IceServerCfg>& servers) {
+        if (engine_) { engine_->setIceServers(servers); engine_->startAsCallee(sdpCopy); }
     };
     api_->getTurnConfig();
 }
@@ -197,6 +279,7 @@ void CallController::applyOffer(const QString& callerId, const QString& payload)
 void CallController::applyAnswer(const QString& calleeId, const QString& payload) {
     if (!engine_ || answerApplied_ || calleeId != peerId_ || payload.isEmpty()) return;
     const QString sdp = unwrapSdp(payload);
+    if (sdp.isEmpty()) return;
     qInfo() << "[call] got remote answer, sdp len" << sdp.size();
     answerApplied_ = true;
     engine_->setRemoteAnswer(sdp);
@@ -223,15 +306,33 @@ void CallController::sendCallEvent(const QString& status) {
                   QStringLiteral("ce_%1").arg(ts));
 }
 
+void CallController::finish(const QString& logStatus) {
+    CallSounds::instance().stopRingtone();
+    ws_->sendCallEnd(peerId_);
+    api_->callEnd(peerId_);
+    if (!logStatus.isEmpty()) sendCallEvent(logStatus);
+    cleanup();
+}
+
 void CallController::cleanup() {
     static bool inCleanup = false;
     if (inCleanup) return;
     inCleanup = true;
+    CallSounds::instance().stopRingtone();
     if (poll_) poll_->stop();
+    if (ringTimeout_) ringTimeout_->stop();
     onIce_ = nullptr;
-    answerApplied_ = false; offerFetched_ = false; addedCandidates_.clear();
+    answerApplied_ = false; offerFetched_ = false; connected_ = false;
+    addedCandidates_.clear();
+    incomingOffer_.clear();
     if (engine_) { CallEngine* e = engine_; engine_ = nullptr; e->hangup(); e->deleteLater(); }
-    if (overlay_) { CallOverlay* o = overlay_; overlay_ = nullptr; o->hide(); o->deleteLater(); }
+    if (overlay_) {
+        CallOverlay* o = overlay_; overlay_ = nullptr;
+        // Бар — ребёнок ОКНА, а не оверлея: без явного удаления копился бы.
+        if (o->minimizedBar()) o->minimizedBar()->deleteLater();
+        o->hide();
+        o->deleteLater();
+    }
     peerId_.clear(); peerName_.clear(); avatarUrl_.clear();
     inCleanup = false;
 }

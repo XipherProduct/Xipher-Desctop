@@ -3,7 +3,11 @@
 #ifdef XIPHER_HAVE_WEBRTC
 
 #include <rtc/rtc.hpp>
-#include <opus.h>
+#if __has_include(<opus/opus.h>)
+#include <opus/opus.h>   // Linux: пакет кладёт заголовки в opus/
+#else
+#include <opus.h>        // Windows: путь добавлен в include-директории
+#endif
 
 #include <QAudioSource>
 #include <QAudioSink>
@@ -261,6 +265,11 @@ void CallEngine::flushCandidates() {
 
 void CallEngine::setMuted(bool muted) { muted_ = muted; }
 
+void CallEngine::setDeaf(bool deaf) {
+    deaf_ = deaf;
+    if (spk_) spk_->setVolume(deaf ? 0.0f : 1.0f);
+}
+
 // ── Аудио ввод/вывод ──────────────────────────────────────────────────────────
 
 void CallEngine::startAudioIo() {
@@ -356,5 +365,6 @@ void CallEngine::setRemoteAnswer(const QString&) {}
 void CallEngine::addRemoteCandidate(const QString&, const QString&) {}
 void CallEngine::hangup() {}
 void CallEngine::setMuted(bool) {}
+void CallEngine::setDeaf(bool) {}
 
 #endif
