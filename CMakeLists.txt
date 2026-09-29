@@ -32,6 +32,7 @@ set(SOURCES
     src/net/CallEngine.cpp
     src/net/CallController.cpp
     src/ui/CallOverlay.cpp
+    src/ui/CallSounds.cpp
     src/ui/BackgroundWidget.cpp
     src/ui/LoginPage.cpp
     src/ui/RegisterPage.cpp
@@ -62,6 +63,7 @@ set(SOURCES
     src/ui/ChatPickerDialog.cpp
     src/ui/ImageViewer.cpp
     src/ui/ComposerEdit.cpp
+    src/util/QrCode.cpp
 )
 
 set(HEADERS
@@ -96,6 +98,7 @@ set(HEADERS
     src/ui/VoiceMessageWidget.h
     src/ui/RecordingBar.h
     src/ui/EmojiPicker.h
+    src/ui/EmojiNames.h
     src/ui/AvatarUtil.h
     src/ui/Icons.h
     src/ui/Checklist.h
@@ -136,24 +139,42 @@ if(WIN32)
 endif()
 
 # ── WebRTC (libdatachannel, собран в third_party) для звонков ──────────────────
-# Привязка к .dll.a — осознанная привязка к Windows: этот файл мог остаться
-# от виндовой сборки в общем рабочем каталоге, и линукс-линкер падал на
-# R_AMD64_IMAGEBASE. На других платформах звонки собираются из системной
-# libdatachannel либо отключаются.
+# Windows: привязка к .dll.a (общий рабочий каталог с виндовой сборкой).
+# Linux: статическая сборка third_party/libdatachannel/build-linux (см.
+# BUILDING.md; cmake -B build-linux && cmake --build --target datachannel-static).
+# Переменные CALL_* применяются и к приложению, и к офлайн-инструментам ниже.
 set(LIBDC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdatachannel")
+set(CALL_INCLUDES "")
+set(CALL_LIBS "")
+set(CALL_DEFS "")
 if(WIN32 AND EXISTS "${LIBDC_DIR}/build/libdatachannel.dll.a")
-    target_include_directories(Xipher PRIVATE "${LIBDC_DIR}/include")
-    target_link_libraries(Xipher PRIVATE "${LIBDC_DIR}/build/libdatachannel.dll.a")
-    target_compile_definitions(Xipher PRIVATE XIPHER_HAVE_WEBRTC=1 RTC_ENABLE_MEDIA=1)
-    # Opus для кодирования голоса
+    list(APPEND CALL_INCLUDES "${LIBDC_DIR}/include")
+    list(APPEND CALL_LIBS "${LIBDC_DIR}/build/libdatachannel.dll.a")
+    list(APPEND CALL_DEFS XIPHER_HAVE_WEBRTC=1 RTC_ENABLE_MEDIA=1)
     find_library(OPUS_LIB opus REQUIRED)
     find_path(OPUS_INC opus/opus.h)
-    target_include_directories(Xipher PRIVATE "${OPUS_INC}" "${OPUS_INC}/opus")
-    target_link_libraries(Xipher PRIVATE "${OPUS_LIB}")
-    message(STATUS "Xipher: WebRTC (libdatachannel) + Opus подключены")
+    list(APPEND CALL_INCLUDES "${OPUS_INC}" "${OPUS_INC}/opus")
+    list(APPEND CALL_LIBS "${OPUS_LIB}")
+    message(STATUS "Xipher: WebRTC (libdatachannel/win) + Opus подключены")
+elseif(EXISTS "${LIBDC_DIR}/build-linux/libdatachannel-static.a")
+    list(APPEND CALL_INCLUDES "${LIBDC_DIR}/include")
+    list(APPEND CALL_DEFS XIPHER_HAVE_WEBRTC=1 RTC_ENABLE_MEDIA=1)
+    list(APPEND CALL_LIBS
+        "${LIBDC_DIR}/build-linux/libdatachannel-static.a"
+        "${LIBDC_DIR}/build-linux/deps/usrsctp/usrsctplib/libusrsctp.a"
+        "${LIBDC_DIR}/build-linux/deps/libjuice/libjuice-static.a"
+        "${LIBDC_DIR}/build-linux/deps/libsrtp/libsrtp2.a")
+    find_library(OPUS_LIB opus REQUIRED)
+    find_path(OPUS_INC opus/opus.h)
+    list(APPEND CALL_INCLUDES ${OPUS_INC})
+    list(APPEND CALL_LIBS ${OPUS_LIB} ssl crypto z pthread dl)
+    message(STATUS "Xipher: WebRTC (libdatachannel/linux) + Opus подключены")
 else()
     message(WARNING "Xipher: libdatachannel не собран — звонки будут отключены")
 endif()
+target_include_directories(Xipher PRIVATE ${CALL_INCLUDES})
+target_link_libraries(Xipher PRIVATE ${CALL_LIBS})
+target_compile_definitions(Xipher PRIVATE ${CALL_DEFS})
 
 set_target_properties(Xipher PROPERTIES
     OUTPUT_NAME "Xipher"
@@ -172,6 +193,32 @@ if(NOT WIN32)
     set_target_properties(design-verify PROPERTIES
         OUTPUT_NAME "design-verify"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+    # Живая проверка звонковой цепочки: TURN → SDP offer → WS → рингтон.
+    qt_add_executable(call-live ${SOURCES} ${HEADERS} tests/call-live.cpp)
+    target_include_directories(call-live PRIVATE src)
+    target_link_libraries(call-live PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+    set_target_properties(call-live PROPERTIES
+        OUTPUT_NAME "call-live"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+    # Живой рендер профиля на реальных данных (токен из QSettings приложения):
+    # те же классы, что в окне, но головой — скриншоты без GUI-автоматизации.
+    qt_add_executable(profile-live ${SOURCES} ${HEADERS} tests/profile-live.cpp)
+    target_include_directories(profile-live PRIVATE src)
+    target_link_libraries(profile-live PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+    set_target_properties(profile-live PROPERTIES
+        OUTPUT_NAME "profile-live"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+    # Звонковая сборка у инструментов та же, что у приложения.
+    foreach(t design-verify profile-live call-live)
+        target_include_directories(${t} PRIVATE ${CALL_INCLUDES})
+        target_link_libraries(${t} PRIVATE ${CALL_LIBS})
+        target_compile_definitions(${t} PRIVATE ${CALL_DEFS})
+    endforeach()
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────

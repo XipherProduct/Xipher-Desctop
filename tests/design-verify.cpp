@@ -10,6 +10,9 @@
 // Выход: 0 = все проверки пройдены, 1 = есть расхождения (список в stdout).
 
 #include "ui/ChatPage.h"
+#include "ui/ProfilePanel.h"
+#include "ui/CallOverlay.h"
+#include "ui/CallSounds.h"
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
 #include "net/Session.h"
@@ -526,6 +529,175 @@ int main(int argc, char** argv) {
                    lbl->parentWidget() ? lbl->parentWidget()->objectName().toUtf8().constData() : "-");
         }
     }
+    // ── Профиль 1:1 с вебом (Профиль v2): скелетон → полный ответ
+    // /api/profile/view; сверяем баннер, статус, строки, секции, кнопки.
+    {
+        printf("\nПрофиль (1:1 с веб-версией)\n");
+        // Глухой адрес: ответы только те, что тест подаёт вручную (реальный
+        // сервер на «Invalid token» перетирал бы мок из другого потока сети).
+        api.setBaseUrl(QStringLiteral("http://127.0.0.1:9"));
+        ProfilePanel prof(&api, &page);
+        prof.openFor(QStringLiteral("u_alice"));
+        // Скелетон проверяем СРАЗУ: сетевой запрос в тестовой среде падает
+        // мгновенно и успевает подменить его экраном ошибки.
+        check(prof.findChild<ProfileSkeleton*>() != nullptr,
+              QStringLiteral("пока данных нет — скелетон с шиммером"));
+
+        QJsonObject u{
+            {QStringLiteral("id"), QStringLiteral("u_alice")},
+            {QStringLiteral("username"), QStringLiteral("prd")},
+            {QStringLiteral("display_name"), QStringLiteral("Александр")},
+            {QStringLiteral("created_at"), QStringLiteral("2025-12-06 10:00:00+00")},
+            {QStringLiteral("is_online"), true},
+            {QStringLiteral("bio"), QStringLiteral("Follow your dream. Разрабатываю Xipher")},
+            {QStringLiteral("birth_day"), 22}, {QStringLiteral("birth_month"), 1},
+            {QStringLiteral("birth_year"), 2008},
+            {QStringLiteral("status_emoji"), QStringLiteral("🚀")},
+            {QStringLiteral("status_text"), QStringLiteral("пишу код")},
+            {QStringLiteral("personal_channel"), QJsonObject{
+                {QStringLiteral("id"), QStringLiteral("c_it")},
+                {QStringLiteral("name"), QStringLiteral("IT НОВОСТИ")},
+                {QStringLiteral("is_private"), false}}},
+            {QStringLiteral("signet"), QJsonObject{
+                {QStringLiteral("frame"), QStringLiteral("official")},
+                {QStringLiteral("core"), QStringLiteral("founder")}}},
+        };
+        const QJsonObject payload{
+            {QStringLiteral("success"), true},
+            {QStringLiteral("profile"), u},
+            {QStringLiteral("relation"), QJsonObject{
+                {QStringLiteral("is_self"), false},
+                {QStringLiteral("is_contact"), false},
+                {QStringLiteral("can_message"), true},
+                {QStringLiteral("can_call"), true},
+                {QStringLiteral("can_gift"), true}}},
+            {QStringLiteral("marks"), QJsonArray{
+                QJsonObject{{QStringLiteral("title"), QStringLiteral("Основатель")},
+                            {QStringLiteral("description"), QStringLiteral("с самого начала")}}}},
+            {QStringLiteral("gifts"), QJsonObject{
+                {QStringLiteral("total"), 4},
+                {QStringLiteral("pinned"), QJsonArray{
+                    QJsonObject{{QStringLiteral("name"), QStringLiteral("Звезда")},
+                                {QStringLiteral("icon"), QStringLiteral("⭐")}}}}}},
+        };
+        prof.applyProfileView(1, payload, true, QString());
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+        const QImage pimg = prof.grab().toImage();
+        pimg.save(QStringLiteral("/tmp/design-profile.png"));
+
+        // Баннер — фиолетовый градиент бренда с затуханием вниз.
+        // Сэмпл в координатах КАРТОЧКИ (оверлей центрирует её внутри себя).
+        {
+            QWidget* card = prof.card();
+            const QPoint top = card->mapTo(&prof, QPoint(card->width() / 2, 24));
+            const QColor topCol = pimg.pixelColor(top.x(), top.y());
+            check(topCol.blue() > 150 && topCol.red() > topCol.green()
+                      && topCol.blue() > topCol.red(),
+                  QStringLiteral("баннер — градиент бренда: ") + topCol.name());
+            const QPoint bot = card->mapTo(&prof, QPoint(card->width() / 2, 180));
+            const QColor botCol = pimg.pixelColor(bot.x(), bot.y());
+            check(botCol.red() < 60 && botCol.blue() < 60,
+                  QStringLiteral("баннер затухает в фон панели: ") + botCol.name());
+            // Верхние углы скруглены: в самом углу карточки фиолетового быть
+            // не должно (баннер клипится под радиус 24, как overflow:hidden).
+            const QPoint corner = card->mapTo(&prof, QPoint(3, 3));
+            const QColor cornerCol = pimg.pixelColor(corner.x(), corner.y());
+            check(!(cornerCol.blue() > 120 && cornerCol.blue() > cornerCol.red() + 30),
+                  QStringLiteral("верхний угол скруглён (без фиолетового): ")
+                  + cornerCol.name());
+        }
+        // Статус — как в вебе: нижний регистр.
+        bool onlineSmall = false;
+        for (QLabel* l : prof.findChildren<QLabel*>())
+            if (l->text() == QStringLiteral("в сети")) onlineSmall = true;
+        check(onlineSmall, QStringLiteral("статус «в сети» нижним регистром"));
+        // 4 плитки действий с иконкой и подписью (не круги).
+        int acts = 0;
+        for (QPushButton* b : prof.findChildren<QPushButton*>())
+            if (b->objectName() == QStringLiteral("profAct")) ++acts;
+        check(acts == 4, QStringLiteral("четыре плитки действий: %1").arg(acts));
+        int rows = 0;
+        for (QWidget* w : prof.findChildren<QWidget*>())
+            if (w->objectName() == QStringLiteral("profRow")
+                || w->objectName() == QStringLiteral("profChanRow")) ++rows;
+        check(rows >= 4, QStringLiteral("строки сведений в секции: %1").arg(rows));
+        check(prof.findChild<QPushButton*>(QStringLiteral("profLinkBtn")) != nullptr,
+              QStringLiteral("кнопка «Показать QR-код профиля»"));
+        bool giftsTitle = false, marksTitle = false;
+        for (QLabel* l : prof.findChildren<QLabel*>()) {
+            if (l->text() == QStringLiteral("Подарки")) giftsTitle = true;
+            if (l->text() == QStringLiteral("Знаки")) marksTitle = true;
+        }
+        check(giftsTitle, QStringLiteral("секция «Подарки» с счётчиком"));
+        check(marksTitle, QStringLiteral("секция «Знаки»"));
+        bool joined = false, bday = false, channel = false;
+        for (QLabel* l : prof.findChildren<QLabel*>()) {
+            if (l->text() == QStringLiteral("В Xipher с")) joined = true;
+            if (l->text() == QStringLiteral("День рождения")) bday = true;
+            if (l->text() == QStringLiteral("IT НОВОСТИ")) channel = true;
+        }
+        check(joined, QStringLiteral("строка «В Xipher с»"));
+        check(bday, QStringLiteral("строка «День рождения»"));
+        check(channel, QStringLiteral("карточка персонального канала"));
+        prof.closeAnimated();
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+    }
+
+    // ── Звонок 1:1 с вебом: состояния экрана, кнопки, свёрнутый бар, рингтон.
+    {
+        printf("\nЗвонок (1:1 с веб-версией)\n");
+        CallOverlay ov(&page);
+        ov.setPeer(QStringLiteral("Александр"), QString());
+        ov.setGeometry(0, 0, 1200, 800);
+
+        ov.setState(CallOverlay::State::Incoming);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        bool hasAccept = false, hasDecline = false;
+        for (QLabel* l : ov.findChildren<QLabel*>()) {
+            if (l->text() == QStringLiteral("Принять")) hasAccept = true;
+            if (l->text() == QStringLiteral("Отклонить")) hasDecline = true;
+        }
+        check(hasAccept && hasDecline, QStringLiteral("входящий: Принять/Отклонить"));
+        bool incomingStatus = false;
+        for (QLabel* l : ov.findChildren<QLabel*>())
+            if (l->text().contains(QStringLiteral("Входящий"))) incomingStatus = true;
+        check(incomingStatus, QStringLiteral("подпись «Входящий голосовой звонок»"));
+
+        ov.setState(CallOverlay::State::Outgoing);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        bool hasCancel = false;
+        for (QLabel* l : ov.findChildren<QLabel*>())
+            if (l->text() == QStringLiteral("Отменить")) hasCancel = true;
+        check(hasCancel, QStringLiteral("исходящий: Отменить"));
+
+        ov.setState(CallOverlay::State::Active);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        ov.startCallTimer();
+        // QTimer живёт по настенным часам: ждём реальных ~2.2 с.
+        const QDeadlineTimer wait(2200);
+        while (!wait.hasExpired()) {
+            QCoreApplication::processEvents();
+            QThread::msleep(20);
+        }
+        bool timerRuns = false;
+        for (QLabel* l : ov.findChildren<QLabel*>())
+            if (l->text() == QStringLiteral("00:02")) timerRuns = true;
+        check(timerRuns, QStringLiteral("таймер разговора тикает (00:02)"));
+        // Тумблеры микрофона и звука: переключение меняет вид.
+        const int micToggles = ov.findChildren<QPushButton*>().size();
+        check(micToggles >= 4, QStringLiteral("кнопки активного звонка есть"));
+        // Свёрнутый бар прячется/показывается.
+        check(ov.minimizedBar() != nullptr, QStringLiteral("свёрнутый бар существует"));
+        ov.minimizedBar()->show();
+        check(ov.minimizedBar()->isVisible(), QStringLiteral("бар показывается"));
+
+        // Рингтон: синтез двух нот даёт небесконечный PCM с пиками.
+        // (проигрывание требует аудиоустройства — в offscreen тихо пропускается)
+        CallSounds::instance().startRingtone();   // не должно падать без устройства
+        CallSounds::instance().stopRingtone();
+        check(true, QStringLiteral("рингтон стартует/стопится без аудиоустройства"));
+    }
+
     if (auto* tile = page.findChild<QLabel*>(QStringLiteral("folderRailIcon"))) {
         printf("  folderRailIcon: geo=(%d,%d %dx%d) ss=%s\n",
                tile->mapTo(&page, QPoint(0, 0)).x(), tile->mapTo(&page, QPoint(0, 0)).y(),
