@@ -92,6 +92,16 @@ jobs:
             qt6-base-dev qt6-multimedia-dev qt6-websockets-dev \
             libopus-dev libssl-dev zlib1g-dev
 
+      # third_party/ не в git (там же лежат локальные сборки): WebRTC берём
+      # пиненным tarballом той же версии, с которой собран локальный стенд.
+      - name: Fetch libdatachannel v0.24.5 (WebRTC)
+        run: |
+          mkdir -p third_party
+          curl -sL --retry 3 -o /tmp/ldc.tar.gz \
+            https://github.com/paullouisageneau/libdatachannel/archive/refs/tags/v0.24.5.tar.gz
+          tar -xzf /tmp/ldc.tar.gz
+          mv libdatachannel-0.24.5 third_party/libdatachannel
+
       - name: Build libdatachannel (WebRTC)
         run: |
           cmake -S third_party/libdatachannel -B third_party/libdatachannel/build-linux \
