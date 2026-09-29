@@ -127,5 +127,23 @@ void WsClient::onTextMessage(const QString& text) {
     else if (type == QStringLiteral("call_end") || type == QStringLiteral("call_ended")) {
         emit callEnded(o.value(QStringLiteral("from_user_id")).toString());
     }
+    else if (type == QStringLiteral("call_offer")) {
+        // Входящий звонок: сервер прикладывает offer сразу (handleCallOffer
+        // в вебе) — не ждём поллинга get-call-offer.
+        emit callOfferArrived(o.value(QStringLiteral("from_user_id")).toString(),
+                              o.value(QStringLiteral("from_username")).toString(),
+                              o.value(QStringLiteral("avatar_url"))
+                                  .toString(o.value(QStringLiteral("from_avatar_url")).toString()),
+                              o.value(QStringLiteral("call_type")).toString(QStringLiteral("audio")),
+                              o.value(QStringLiteral("offer")).toString());
+    }
+    else if (type == QStringLiteral("call_answered_elsewhere")) {
+        emit callAnsweredElsewhere(o.value(QStringLiteral("peer_id"))
+                                       .toString(o.value(QStringLiteral("from_user_id")).toString()));
+    }
+    else if (type == QStringLiteral("call_missed")) {
+        emit callMissed(o.value(QStringLiteral("peer_id"))
+                            .toString(o.value(QStringLiteral("from_user_id")).toString()));
+    }
     // auth_success / auth_error / прочие типы пока не требуют обработки.
 }

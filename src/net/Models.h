@@ -1,6 +1,7 @@
 #pragma once
 #include <QString>
 #include <QStringList>
+#include <QJsonObject>
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Доменные модели чата — повторяют JSON прод-API
@@ -148,6 +149,10 @@ struct ChatMessage {
     // Reply-превью (если есть)
     QString replyAuthor;
     QString replySnippet;
+
+    // Разметка бота (reply_markup): inline_keyboard / keyboard / web_app-кнопки.
+    // Пустой объект = обычное сообщение без кнопок.
+    QJsonObject replyMarkup;
 
     bool isVoice() const { return messageType == QStringLiteral("voice"); }
 };

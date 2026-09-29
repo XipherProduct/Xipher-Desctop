@@ -40,6 +40,13 @@ signals:
     void callAnswerReceived(const QString& fromUserId, const QString& sdp);
     void callIceReceived(const QString& fromUserId, const QString& candidate);
     void callEnded(const QString& fromUserId);
+    // Push входящего звонка (как notifyIncomingCall в вебе): offer уже в событии.
+    void callOfferArrived(const QString& fromUserId, const QString& fromUsername,
+                          const QString& avatarUrl, const QString& callType,
+                          const QString& offer);
+    // Звонок взяли на другом устройстве / звонок пропущен без ответа.
+    void callAnsweredElsewhere(const QString& peerId);
+    void callMissed(const QString& peerId);
 
 private slots:
     void onConnected();

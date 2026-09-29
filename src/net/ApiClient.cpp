@@ -143,6 +143,16 @@ static Chat parseChat(const QJsonObject& o) {
     return c;
 }
 
+// reply_markup приходит строкой с JSON либо готовым объектом (боты, 1:1 с вебом).
+static QJsonObject parseReplyMarkup(const QJsonValue& v) {
+    if (v.isObject()) return v.toObject();
+    if (v.isString()) {
+        const QJsonDocument doc = QJsonDocument::fromJson(v.toString().toUtf8());
+        if (doc.isObject()) return doc.object();
+    }
+    return {};
+}
+
 static ChatMessage parseMessage(const QJsonObject& o) {
     ChatMessage m;
     m.id          = o.value(QStringLiteral("id")).toString();
@@ -163,6 +173,7 @@ static ChatMessage parseMessage(const QJsonObject& o) {
     const QJsonObject reply = o.value(QStringLiteral("reply")).toObject();
     m.replyAuthor  = reply.value(QStringLiteral("author")).toString();
     m.replySnippet = reply.value(QStringLiteral("snippet")).toString();
+    m.replyMarkup  = parseReplyMarkup(o.value(QStringLiteral("reply_markup")));
     return m;
 }
 
@@ -182,9 +193,11 @@ void ApiClient::getChats() {
     });
 }
 
-void ApiClient::getMessages(const QString& friendId) {
+void ApiClient::getMessages(const QString& friendId, int limit, const QString& beforeId) {
     QJsonObject body{{QStringLiteral("token"), Session::instance().token},
                      {QStringLiteral("friend_id"), friendId}};
+    if (limit > 0)   body.insert(QStringLiteral("limit"), limit);
+    if (!beforeId.isEmpty()) body.insert(QStringLiteral("before_id"), beforeId);
     postJson(QStringLiteral("/api/messages"), body,
              [this, friendId](const QJsonObject& obj, bool ok, const QString& netErr) {
         if (!ok && obj.isEmpty()) { emit chatError(QStringLiteral("messages"), netErr); return; }
@@ -277,6 +290,31 @@ void ApiClient::getUserProfile(const QString& userId) {
     });
 }
 
+// Профиль v2 — тот же эндпоинт, что и js/profile/view.js веба. Один ответ
+// содержит profile + relation + marks + gifts, поэтому клиент не решает сам
+// ни приватность, ни набор доступных действий.
+void ApiClient::profileView(const QString& userId) {
+    const qint64 reqId = ++profileViewReqId_;
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token},
+                     {QStringLiteral("user_id"), userId}};
+    postJson(QStringLiteral("/api/profile/view"), body,
+             [this, reqId](const QJsonObject& obj, bool ok, const QString& netErr) {
+        emit profileViewLoaded(reqId, obj, ok, netErr);
+    });
+}
+
+void ApiClient::mediaCount(const QString& chatId) {
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token},
+                     {QStringLiteral("chat_type"), QStringLiteral("dm")},
+                     {QStringLiteral("chat_id"), chatId}};
+    postJson(QStringLiteral("/api/media/list"), body,
+             [this, chatId](const QJsonObject& obj, bool ok, const QString&) {
+        const int total = (ok && obj.value(QStringLiteral("success")).toBool(false))
+                              ? obj.value(QStringLiteral("total")).toInt(0) : 0;
+        emit mediaCountLoaded(chatId, total);
+    });
+}
+
 // ── Группы и каналы ───────────────────────────────────────────────────────────
 
 namespace {
@@ -296,6 +334,7 @@ QList<ChatMessage> parseGroupChannelMessages(const QJsonObject& obj) {
         m.filePath    = o.value(QStringLiteral("file_path")).toString();
         m.fileName    = o.value(QStringLiteral("file_name")).toString();
         m.fileSize    = static_cast<long long>(o.value(QStringLiteral("file_size")).toDouble(0));
+        m.replyMarkup = parseReplyMarkup(o.value(QStringLiteral("reply_markup")));
         m.sent        = (m.senderId == myId);
         out.append(m);
     }
@@ -403,19 +442,23 @@ void ApiClient::uploadChannelAvatar(const QString& channelId, const QByteArray& 
     });
 }
 
-void ApiClient::getGroupMessages(const QString& groupId) {
+void ApiClient::getGroupMessages(const QString& groupId, int limit, const QString& beforeId) {
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token},
+                     {QStringLiteral("group_id"), groupId}, {QStringLiteral("limit"), limit > 0 ? limit : 100}};
+    if (!beforeId.isEmpty()) body.insert(QStringLiteral("before_id"), beforeId);
     postJson(QStringLiteral("/api/get-group-messages"),
-             {{QStringLiteral("token"), Session::instance().token},
-              {QStringLiteral("group_id"), groupId}, {QStringLiteral("limit"), 100}},
+             body,
              [this, groupId](const QJsonObject& obj, bool, const QString&) {
         emit groupMessagesLoaded(groupId, parseGroupChannelMessages(obj));
     });
 }
 
-void ApiClient::getChannelMessages(const QString& channelId) {
+void ApiClient::getChannelMessages(const QString& channelId, int limit, const QString& beforeId) {
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token},
+                     {QStringLiteral("channel_id"), channelId}, {QStringLiteral("limit"), limit > 0 ? limit : 100}};
+    if (!beforeId.isEmpty()) body.insert(QStringLiteral("before_id"), beforeId);
     postJson(QStringLiteral("/api/get-channel-messages"),
-             {{QStringLiteral("token"), Session::instance().token},
-              {QStringLiteral("channel_id"), channelId}, {QStringLiteral("limit"), 100}},
+             body,
              [this, channelId](const QJsonObject& obj, bool, const QString&) {
         emit channelMessagesLoaded(channelId, parseGroupChannelMessages(obj));
     });
@@ -982,6 +1025,15 @@ void ApiClient::blockUser(const QString& userId) {
     });
 }
 
+// /api/unblock-user — как menu.js «Разблокировать» в вебе.
+void ApiClient::unblockUser(const QString& userId) {
+    postJson(QStringLiteral("/api/unblock-user"),
+             {{QStringLiteral("token"), Session::instance().token}, {QStringLiteral("user_id"), userId}},
+             [this](const QJsonObject& o, bool ok, const QString&) {
+        emit contactActionDone(ok && o.value(QStringLiteral("success")).toBool(false));
+    });
+}
+
 void ApiClient::deleteChat(const QString& chatId) {
     postJson(QStringLiteral("/api/delete-chat"),
              {{QStringLiteral("token"), Session::instance().token},
@@ -1461,8 +1513,7 @@ void ApiClient::rejectFriend(const QString& requestId) {
 
 void ApiClient::searchMessages(const QString& chatId, const QString& context,
                                const QString& query, const QString& type,
-                               int offset, int limit) {
-    // requestId связывает запрос с ответом (новый запрос отменяет морально старый).
+                               int offset, int limit) {    // requestId связывает запрос с ответом (новый запрос отменяет морально старый).
     const QString reqId = QStringLiteral("ss_%1").arg(++searchSeq_);
     QJsonObject body{{QStringLiteral("token"), Session::instance().token},
                      {QStringLiteral("chat_id"), chatId},
@@ -1472,9 +1523,17 @@ void ApiClient::searchMessages(const QString& chatId, const QString& context,
     if (offset > 0) body.insert(QStringLiteral("offset"), QString::number(offset));
     if (limit > 0)  body.insert(QStringLiteral("limit"), QString::number(limit));
     postJson(QStringLiteral("/api/search-messages"), body,
-             [this, reqId](const QJsonObject& obj, bool ok, const QString& netErr) {
+             [this, reqId, chatId](const QJsonObject& obj, bool ok, const QString& netErr) {
         if (!ok && obj.isEmpty()) { emit chatError(QStringLiteral("search"), netErr); return; }
-        emit messagesSearched(reqId, obj.value(QStringLiteral("messages")).toArray());
+        // Помечаем каждое найденное сообщение чатом запроса: в режиме
+        // «Во всех чатах» ответы приходят вперемешку и их надо различать.
+        QJsonArray msgs = obj.value(QStringLiteral("messages")).toArray();
+        for (QJsonValueRef v : msgs) {
+            QJsonObject m = v.toObject();
+            m.insert(QStringLiteral("__chat_id"), chatId);
+            v = m;
+        }
+        emit messagesSearched(reqId, msgs);
     });
 }
 
@@ -1572,5 +1631,55 @@ void ApiClient::premiumRefreshStatus() {
              [this](const QJsonObject& obj, bool ok, const QString&) {
         const AuthResult r = ok ? parseAuth(obj) : AuthResult{};
         emit premiumStatusRefreshed(r.isPremium, r.premiumExpiresAt);
+    });
+}
+
+// ── Боты: callback-кнопки и MiniApp (1:1 с handleKeyboardButtonClick веба) ───
+
+void ApiClient::botCallback(const QString& messageId, const QString& callbackData) {
+    postJson(QStringLiteral("/api/bot-callback-query"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("message_id"), messageId},
+              {QStringLiteral("callback_data"), callbackData},
+              {QStringLiteral("from_user_id"), Session::instance().userId}},
+             [this](const QJsonObject& obj, bool ok, const QString&) {
+        emit botCallbackDone(ok && obj.value(QStringLiteral("success")).toBool(false),
+                             obj.value(QStringLiteral("response")).toObject());
+    });
+}
+
+void ApiClient::botMiniappInit(const QString& botUserId) {
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token}};
+    if (!botUserId.isEmpty()) body.insert(QStringLiteral("bot_user_id"), botUserId);
+    postJson(QStringLiteral("/api/bot-miniapp-init"), body,
+             [this](const QJsonObject& obj, bool ok, const QString&) {
+        emit miniappInitReady(ok && obj.value(QStringLiteral("success")).toBool(false),
+                              obj.value(QStringLiteral("init_data")).toString());
+    });
+}
+
+// ── Подарки (как js/profile/gifts.js веба) ───────────────────────────────────
+
+void ApiClient::giftsCatalog() {
+    postJson(QStringLiteral("/api/gifts/catalog"),
+             {{QStringLiteral("token"), Session::instance().token}},
+             [this](const QJsonObject& obj, bool ok, const QString&) {
+        emit giftsCatalogLoaded(obj.value(QStringLiteral("gifts")).toArray(
+            obj.value(QStringLiteral("catalog")).toArray()));
+    });
+}
+
+void ApiClient::giftSend(const QString& giftId, const QString& toUserId,
+                         const QString& note, bool hideSender) {
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token},
+                     {QStringLiteral("gift_id"), giftId},
+                     {QStringLiteral("to_user_id"), toUserId},
+                     {QStringLiteral("hide_sender"), hideSender}};
+    if (!note.isEmpty()) body.insert(QStringLiteral("message_text"), note.left(200));
+    postJson(QStringLiteral("/api/gifts/send"), body,
+             [this](const QJsonObject& obj, bool ok, const QString&) {
+        const bool s = ok && obj.value(QStringLiteral("success")).toBool(false);
+        emit giftSent(s, s ? QString() : obj.value(QStringLiteral("message")).toString(
+            obj.value(QStringLiteral("error")).toString(QStringLiteral("Не удалось отправить подарок"))));
     });
 }

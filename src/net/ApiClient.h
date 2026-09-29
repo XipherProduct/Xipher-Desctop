@@ -45,7 +45,9 @@ public:
 
     // Чат (токен берётся из Session).
     void getChats();
-    void getMessages(const QString& friendId);
+    // limit>0 — размер страницы; beforeId — догрузка СТАРЫХ сообщений
+    // (сервер: /api/messages?before_id, как пагинация в веб-клиенте).
+    void getMessages(const QString& friendId, int limit = 50, const QString& beforeId = QString());
     void sendMessage(const QString& receiverId, const QString& content, const QString& tempId,
                      int ttlSeconds = 0, const QString& replyTo = QString());
     void deleteMessage(const QString& messageId, ChatKind kind, const QString& peerId);
@@ -107,8 +109,8 @@ public:
     void createGroup(const QString& name, const QString& description);
     void createChannel(const QString& name, const QString& description, const QString& customLink);
     void uploadChannelAvatar(const QString& channelId, const QByteArray& bytes, const QString& fileName);
-    void getGroupMessages(const QString& groupId);
-    void getChannelMessages(const QString& channelId);
+    void getGroupMessages(const QString& groupId, int limit = 100, const QString& beforeId = QString());
+    void getChannelMessages(const QString& channelId, int limit = 100, const QString& beforeId = QString());
     void sendGroupMessage(const QString& groupId, const QString& content, const QString& tempId,
                           const QString& replyTo = QString());
     void sendChannelMessage(const QString& channelId, const QString& content, const QString& tempId,
@@ -150,6 +152,16 @@ public:
     void getChatFolders();
     void setChatFolders(const QList<Folder>& folders);
 
+    // ── Боты (1:1 с вебом) ────────────────────────────────────────────────────
+    // Нажатие inline-кнопки с callback_data: /api/bot-callback-query.
+    void botCallback(const QString& messageId, const QString& callbackData);
+    // Подписанный контекст пользователя для MiniApp: /api/bot-miniapp-init.
+    void botMiniappInit(const QString& botUserId);
+    // Подарки: каталог и отправка (как gifts.js веба).
+    void giftsCatalog();
+    void giftSend(const QString& giftId, const QString& toUserId,
+                  const QString& note, bool hideSender);
+
     // Настройки: профиль, приватность, сеансы, email восстановления.
     void getMyProfile();
     void updateMyProfile(const QString& firstName, const QString& lastName, const QString& bio,
@@ -165,11 +177,19 @@ public:
 
     // Люди и друзья.
     void getUserProfile(const QString& userId);
+    // Профиль v2 — как js/profile/view.js веба: /api/profile/view отдаёт
+    // profile + relation + marks + gifts одним ответом, правила приватности
+    // решает сервер. Ответ помечается id запроса — быстрое переключение
+    // между людьми не должно нарисовать чужой профиль.
+    void profileView(const QString& userId);
+    // Счётчик общих медиа — POST /api/media/list { chat_type:'dm', chat_id }.
+    void mediaCount(const QString& chatId);
     void setContactName(const QString& contactId, const QString& customName);
     void searchUsers(const QString& query);
     void getFriends();
     void removeFriend(const QString& userId);
     void blockUser(const QString& userId);
+    void unblockUser(const QString& userId);
     void deleteChat(const QString& chatId);
     void sendFriendRequest(const QString& username);
     void getFriendRequests();
@@ -178,6 +198,8 @@ public:
 
     QString baseUrl() const { return base_; }
     void setBaseUrl(const QString& url) { base_ = url; }
+    // id последнего отправленного /api/profile/view (для отброса устаревших).
+    qint64 profileViewReply() const { return profileViewReqId_; }
 
 signals:
     void loginFinished(const AuthResult& result);
@@ -202,6 +224,10 @@ signals:
     void contactActionDone(bool ok);
     void chatActionDone(bool ok);
     void profileLoaded(const QJsonObject& profile);
+    // Профиль v2: полный ответ /api/profile/view + id запроса (для отмены
+    // устаревшего) и флаг ошибки сети.
+    void profileViewLoaded(qint64 reqId, const QJsonObject& data, bool ok, const QString& error);
+    void mediaCountLoaded(const QString& chatId, int total);
 
     // Супер-поиск / превью ссылок / сторис.
     void messagesSearched(const QString& requestId, const QJsonArray& messages);
@@ -252,6 +278,12 @@ signals:
     void friendRequestsLoaded(const QList<FriendRequest>& requests);
     void friendActionDone(const QString& requestId, bool accepted, bool ok);
 
+    // Боты и подарки.
+    void botCallbackDone(bool ok, const QJsonObject& response);
+    void miniappInitReady(bool ok, const QString& initData);
+    void giftsCatalogLoaded(const QJsonArray& gifts);
+    void giftSent(bool ok, const QString& message);
+
 public:
     // Доступ к сетевому менеджеру/базе — для загрузки медиа (сторис).
     QNetworkAccessManager* nam() const { return nam_; }
@@ -261,6 +293,8 @@ private:
     void postJson(const QString& path,
                   const QJsonObject& body,
                   std::function<void(const QJsonObject&, bool, const QString&)> callback);
+
+    qint64 profileViewReqId_ = 0;   // монотонный id запроса профиля v2
 
     QHash<QString, QNetworkReply*> fetchReplies_;   // активные загрузки (path → reply)
     QHash<QString, QList<QNetworkReply*>> parallelReplies_;
