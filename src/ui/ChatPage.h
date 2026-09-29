@@ -59,6 +59,7 @@ public:
     void prependOlderMessages();   // догрузка старых при прокрутке к верху (как в ТГ)
     void prependOlderBatch(int floorFrom, int batch);   // порция prepend без якоря
     void continueTail(int targetFrom, quint64 gen);   // достройка хвоста чанками (tdesktop-style)
+    void fetchOlderFromServer();   // серверная пагинация: /api/messages?before_id
     void smoothScrollTo(int target);   // плавная прокрутка (как в Telegram)
     void updateScrollDownButton();
 
@@ -92,7 +93,6 @@ private slots:
     void onChatClicked();
     void onSendClicked();
     void onSearchChanged(const QString& text);
-
     // Голосовые
     void onMicClicked();
     void cancelRecording();
@@ -110,11 +110,13 @@ private slots:
     void sendPhotoBytes(const QByteArray& bytes, const QString& fileName);
     void openChecklistDialog();
     void sendLocation();
-    void toggleSearch();
     void startCall();
     void showChatMenu();
     void openRenameDialog();
     void onFileUploaded(const QString& filePath, const QString& fileName, long long fileSize, const QString& tempId);
+    void onSearchResultPicked(const QString& chatId, const QString& messageId);
+    void onBotCallbackDone(bool ok, const QJsonObject& response);
+    void onMiniappInitReady(bool ok, const QString& initData);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* e) override;
@@ -136,6 +138,7 @@ private:
     void addBubble(const ChatMessage& msg, bool prepend = false, bool animate = true);
     void showMessageMenu(QWidget* bubble, const QPoint& pos);
     void forwardMessage(const QString& text);
+    void saveToSaved(const QString& text);   // «В избранное»: переслать в «Избранные»
     void setReplyTo(const QString& id, const QString& author, const QString& text);
     void clearReplyTo();
     void reloadCurrentMessages();
@@ -144,6 +147,13 @@ private:
     void renderMessages(const QString& filter);   // отрисовать (с фильтром поиска)
     void updateGreeting();   // показать/скрыть пустой-чат приветствие
     void scrollToBottom();
+    void tryJumpToPending();   // прыжок к сообщению из поиска, когда виджет достроен
+    // Боты: inline-кнопки в бабблах, reply-клавиатура над композером, MiniApps.
+    void addInlineKeyboard(QVBoxLayout* bubbleLayout, const ChatMessage& msg);
+    void applyReplyKeyboard(const QJsonObject& markup);
+    void hideBotKeyboard();
+    void openMiniapp(const QString& url, const QString& botId);
+    void openCatalog();   // каталог публичных каналов и групп
     // Локальный зашифрованный кэш истории (ChatCache): мгновенное открытие чата.
     QString cacheKey() const;          // обычный чат — peerId, тема форума — «t:<id>»
     void renderCached();               // показать кэш до ответа сервера
@@ -158,6 +168,9 @@ private:
     void openSuperSearch();                                          // Ctrl+Shift+F
     void jumpToMessage(const QString& messageId);                    // из результатов поиска
     void bumpChat(const QString& peerId, const QString& lastText, const QString& time, bool incrementUnread);
+    // Создаёт ProfilePanel (один экземпляр) и вешает ВСЕ связи, включая
+    // «Избранное»/настройки/канал из профиля — обе точки открытия общие.
+    void ensureProfilePanel();
 
     ApiClient* api_;
     WsClient*  ws_;
@@ -170,9 +183,6 @@ private:
     QStackedWidget* convStack_ = nullptr;   // 0 — пусто, 1 — диалог
     QWidget*     peerHeader_ = nullptr;
     QPushButton* moreBtn_    = nullptr;
-    QWidget*     searchBar_  = nullptr;
-    QLineEdit*   msgSearch_  = nullptr;
-    QLabel*      searchCount_ = nullptr;
     QList<ChatMessage> currentMessages_;   // загруженные сообщения текущего чата
     QLabel*      peerName_   = nullptr;
     QLabel*      peerStatus_ = nullptr;
@@ -192,6 +202,13 @@ private:
     // История грузится (кэш пуст, ответ сервера не пришёл): приветствие
     // «Здесь пока ничего нет» не показываем — иначе оно мелькает.
     bool         loadingChat_ = false;
+    // Серверная пагинация истории (before_id): есть ли ещё старые сообщения
+    // на сервере и идёт ли сейчас их запрос.
+    bool         hasMoreServer_ = true;
+    bool         fetchingOlder_ = false;
+    // Прыжок к сообщению из единого поиска: ждём достройку виджетов.
+    QString      pendingJumpId_;
+    QString      pendingMiniappUrl_;   // MiniApp ждёт initData от сервера
     EmptyChatGreeting* greeting_ = nullptr;
     int          bubbleCount_ = 0;   // сколько сообщений сейчас в переписке
     int          renderedFrom_ = 0;  // индекс первого ОТРИСОВАННОГО сообщения (хвост-рендер)
@@ -200,6 +217,10 @@ private:
     bool         initialRenderPhase_ = false;
     bool         programmaticScroll_ = false;   // служебная прокрутка (не пользователь)
     QStackedWidget* composerStack_ = nullptr;  // 0 — ввод, 1 — запись
+    QWidget*      composerBar_ = nullptr;      // для привязки эмодзи-панели справа
+    QWidget*      botKeyboardBar_ = nullptr;   // reply-клавиатура бота (над вводом)
+    QVBoxLayout*  botKeyboardLayout_ = nullptr;
+    QJsonObject   currentReplyKeyboard_;       // активная reply-клавиатура бота
     ComposerEdit* composer_  = nullptr;
     QPushButton* sendBtn_    = nullptr;
     QPushButton* micBtn_     = nullptr;
@@ -271,7 +292,9 @@ private:
     SuperSearchDialog*   superSearch_ = nullptr;
     LinkPreviewBar*      linkPreview_ = nullptr;
     QList<UserHit> searchHits_;   // глобальный поиск людей в сайдбаре
+    QList<DirectoryItem> directoryHits_;   // глобальный поиск: публичные каналы/группы
     QString     searchQuery_;
+    QString     pendingJoinId_;   // публичный чат, к которому присоединяемся
     QTimer*     searchTimer_ = nullptr;
     QHash<QString, QPointer<QLabel>> pendingImage_;   // путь → QLabel для картинки
     QString     currentPeerId_;

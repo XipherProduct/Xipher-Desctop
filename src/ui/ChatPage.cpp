@@ -38,6 +38,7 @@
 #include <QPropertyAnimation>
 #include <QGraphicsOpacityEffect>
 #include <QPainter>
+#include <QTextCursor>
 #include <QTextDocument>
 #include <QtMath>
 #include <QMenu>
@@ -387,6 +388,28 @@ ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
         searchHits_ = users;
         rebuildChatList();
     });
+    // Глобальный поиск: публичные каналы/группы по запросу (как в вебе —
+    // каталог прямо в результатах поиска сайдбара).
+    connect(api_, &ApiClient::directoryLoaded, this,
+            [this](const QList<DirectoryItem>& items, bool) {
+        if (searchQuery_.isEmpty()) {
+            if (!directoryHits_.isEmpty()) { directoryHits_.clear(); rebuildChatList(); }
+            return;
+        }
+        directoryHits_ = items;
+        rebuildChatList();
+    });
+    // Присоединение к публичному чату (из сайдбара/каталога) → обновить списки.
+    connect(api_, &ApiClient::publicJoined, this, [this](bool ok, const QString& id) {
+        if (!ok || id != pendingJoinId_) return;
+        pendingJoinId_.clear();
+        api_->getChats();
+        api_->getGroups();
+        api_->getChannels();
+    });
+    // Боты: ответ на callback-кнопку и контекст MiniApp.
+    connect(api_, &ApiClient::botCallbackDone, this, &ChatPage::onBotCallbackDone);
+    connect(api_, &ApiClient::miniappInitReady, this, &ChatPage::onMiniappInitReady);
 
     connect(api_, &ApiClient::chatsLoaded,    this, &ChatPage::onChatsLoaded);
     connect(api_, &ApiClient::messagesLoaded,  this, &ChatPage::onMessagesLoaded);
@@ -546,13 +569,21 @@ void ChatPage::buildUi() {
     shl->addWidget(newChatBtn);
 
     auto* searchWrap = new QWidget(sidebar);
-    auto* swl = new QVBoxLayout(searchWrap);
-    // Отступы как .chats-search веба: 0.75rem 1.5rem.
+    auto* swl = new QHBoxLayout(searchWrap);
+    // Отступы как .chats-search веба: 0.75rem 1.5rem. Справа — кнопка «Каталог»
+    // (в вебе каталог открывается кнопкой в поисковой строке чата).
     swl->setContentsMargins(16, 12, 16, 12);
+    swl->setSpacing(8);
     search_ = new QLineEdit(searchWrap);
     search_->setObjectName(QStringLiteral("searchBox"));
     search_->setPlaceholderText(QStringLiteral("Поиск"));
-    swl->addWidget(search_);
+    swl->addWidget(search_, 1);
+    auto* catalogBtn = new QPushButton(QStringLiteral("Каталог"), searchWrap);
+    catalogBtn->setObjectName(QStringLiteral("catalogBtn"));
+    catalogBtn->setCursor(Qt::PointingHandCursor);
+    catalogBtn->setToolTip(QStringLiteral("Каталог публичных каналов и групп"));
+    connect(catalogBtn, &QPushButton::clicked, this, &ChatPage::openCatalog);
+    swl->addWidget(catalogBtn);
 
     // Сторис-бар (как .stories-bar веба): кольца-плитки над списком чатов.
     storiesBar_ = new StoriesBar(sidebar);
@@ -710,7 +741,8 @@ void ChatPage::buildUi() {
     chl->addWidget(callBtn);
     chl->addWidget(moreBtn_);
     connect(superBtn, &QPushButton::clicked, this, &ChatPage::openSuperSearch);
-    connect(searchBtn, &QPushButton::clicked, this, &ChatPage::toggleSearch);
+    // Единый поиск (обычный + супер, в этом чате / во всех чатах) — как в вебе.
+    connect(searchBtn, &QPushButton::clicked, this, &ChatPage::openSuperSearch);
     connect(callBtn, &QPushButton::clicked, this, &ChatPage::startCall);
     connect(moreBtn_, &QPushButton::clicked, this, &ChatPage::showChatMenu);
 
@@ -743,6 +775,12 @@ void ChatPage::buildUi() {
     connect(msgSb, &QAbstractSlider::valueChanged, this, [this, msgSb](int v) {
         if (msgSb->maximum() - v > 24) stickBottom_ = false;   // пользователь ушёл от низа
         else if (!stickBottom_)        stickBottom_ = true;    // вернулся к низу — следим снова
+        // Догрузка старых сообщений при прокрутке к верху (Telegram-style).
+        // Порог 400px: батч строится чуть ЗАРАНЕЕ, чтобы верх не «упирался»
+        // в пустоту (та самая пауза 3–4 секунды перед прогрузкой).
+        // Служебные прокрутки (якорь-компенсация, «к низу») не триггерят —
+        // иначе цепочка prepend'ов утащит всю историю за один скролл.
+        if (!programmaticScroll_ && v < 400) prependOlderMessages();
     });
 
     // Приветствие пустого чата — оверлей поверх области сообщений.
@@ -773,8 +811,18 @@ void ChatPage::buildUi() {
 
     auto* composerBar = new QWidget(conv);
     composerBar->setObjectName(QStringLiteral("composerBar"));
+    composerBar_ = composerBar;   // эмодзи-панель привязывается к его правому краю
     auto* cblOuter = new QVBoxLayout(composerBar);
     cblOuter->setContentsMargins(12, 8, 12, 8);   // как .chat-input-area веба
+
+    // Reply-клавиатура бота (как в Telegram): кнопки над полем ввода.
+    botKeyboardBar_ = new QWidget(composerBar);
+    botKeyboardBar_->setObjectName(QStringLiteral("botKeyboardBar"));
+    botKeyboardLayout_ = new QVBoxLayout(botKeyboardBar_);
+    botKeyboardLayout_->setContentsMargins(0, 0, 0, 8);
+    botKeyboardLayout_->setSpacing(4);
+    botKeyboardBar_->setVisible(false);
+    cblOuter->addWidget(botKeyboardBar_);
 
     // Превью ссылки при вводе URL (как composerLinkPreview в вебе).
     linkPreview_ = new LinkPreviewBar(api_, composerBar);
@@ -881,32 +929,6 @@ void ChatPage::buildUi() {
     composerStack_->setCurrentIndex(0);
 
     cvl->addWidget(convHeader);
-
-    // Строка поиска сообщений (скрыта по умолчанию).
-    searchBar_ = new QWidget(conv);
-    searchBar_->setObjectName(QStringLiteral("searchBar"));
-    auto* sbl = new QHBoxLayout(searchBar_);
-    sbl->setContentsMargins(12, 8, 8, 8);
-    sbl->setSpacing(8);
-    msgSearch_ = new QLineEdit(searchBar_);
-    msgSearch_->setObjectName(QStringLiteral("msgSearch"));
-    msgSearch_->setPlaceholderText(QStringLiteral("Поиск в этом чате…"));
-    searchCount_ = new QLabel(searchBar_);
-    searchCount_->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
-    auto* searchClose = new QPushButton(searchBar_);
-    searchClose->setObjectName(QStringLiteral("hdrBtn"));
-    searchClose->setCursor(Qt::PointingHandCursor);
-    searchClose->setText(QStringLiteral("✕"));
-    searchClose->setStyleSheet(QStringLiteral(
-        "#hdrBtn{color:#ACA6BD;font-size:16px;} #hdrBtn:hover{color:#F3F1F8;}"));
-    sbl->addWidget(msgSearch_, 1);
-    sbl->addWidget(searchCount_);
-    sbl->addWidget(searchClose);
-    searchBar_->hide();
-    cvl->addWidget(searchBar_);
-    connect(msgSearch_, &QLineEdit::textChanged, this,
-            [this](const QString& q) { renderMessages(q.trimmed()); });
-    connect(searchClose, &QPushButton::clicked, this, &ChatPage::toggleSearch);
 
     cvl->addWidget(msgScroll_, 1);
     cvl->addWidget(composerBar);
@@ -1025,20 +1047,53 @@ void ChatPage::load() {
         ws_->start(Session::instance().token);
 }
 
-// ── Супер-поиск (Ctrl+Shift+F, как supersearch.js веба) ──────────────────────
+// ── Единый поиск (Ctrl+Shift+F; слияние «обычного» и супер-поиска) ───────────
 
 void ChatPage::openSuperSearch() {
-    if (currentPeerId_.isEmpty()) return;
     if (!superSearch_) {
         superSearch_ = new SuperSearchDialog(api_, this);
         superSearch_->setGeometry(rect());
         connect(superSearch_, &SuperSearchDialog::resultPicked,
-                this, &ChatPage::jumpToMessage);
+                this, &ChatPage::onSearchResultPicked);
     }
-    // Группа (форум-темы считаем группой) или личка.
+    superSearch_->setChats(chats_);   // для области «Во всех чатах»
+    // Группа (форум-темы считаем группой) или личка; без чата — глобально.
     const QString ctx = (currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel)
         ? QStringLiteral("group") : QStringLiteral("dm");
     superSearch_->openFor(currentTopicId_.isEmpty() ? currentPeerId_ : currentTopicId_, ctx);
+}
+
+void ChatPage::onSearchResultPicked(const QString& chatId, const QString& messageId) {
+    if (chatId.isEmpty()) return;
+    if (chatId == currentPeerId_ && currentTopicId_.isEmpty()) {
+        jumpToMessage(messageId);
+        return;
+    }
+    // Другой чат: открываем, а прыжок выполняем, когда история отрисуется
+    // (pendingJumpId_ доедает tryJumpToPending).
+    const int idx = indexOfChat(chatId);
+    pendingJumpId_ = messageId;
+    if (idx >= 0) {
+        openChat(chats_[idx]);
+    } else {
+        openChatWith(chatId, QString(), QString());
+    }
+}
+
+void ChatPage::tryJumpToPending() {
+    if (pendingJumpId_.isEmpty()) return;
+    const QString target = pendingJumpId_;
+    const auto bubbles = msgContainer_->findChildren<QFrame*>();
+    for (QFrame* b : bubbles)
+        if (b->property("msgId").toString() == target) {
+            pendingJumpId_.clear();
+            jumpToMessage(target);
+            return;
+        }
+    // Виджета ещё нет (сообщение глубже хвоста) — догружаем батч из истории
+    // или ждём серверную пагинацию; continueTail дергает tryJumpToPending.
+    if (renderedFrom_ <= 0 && !hasMoreServer_ && !fetchingOlder_)
+        pendingJumpId_.clear();   // история кончилась, сообщения нет — сдаёмся
 }
 
 void ChatPage::jumpToMessage(const QString& messageId) {
@@ -1533,6 +1588,40 @@ void ChatPage::rebuildChatList() {
             chatList_->setItemWidget(item, row);
         }
     }
+
+    // Глобальный поиск: публичные каналы и группы из каталога (не только свои).
+    if (!filter.isEmpty() && !directoryHits_.isEmpty()) {
+        bool headerAdded = false;
+        for (const DirectoryItem& d : directoryHits_) {
+            if (shownChatIds.contains(d.id)) continue;
+            if (!headerAdded) {
+                auto* h = new QListWidgetItem(chatList_);
+                h->setFlags(Qt::NoItemFlags);
+                h->setSizeHint(QSize(0, 28));
+                auto* hl = new QLabel(QStringLiteral("  Каналы и группы"));
+                hl->setStyleSheet(QStringLiteral("color:#726C82;font-size:11px;font-weight:700;"
+                                                 "text-transform:uppercase;padding:6px 4px;"));
+                chatList_->addItem(h);
+                chatList_->setItemWidget(h, hl);
+                headerAdded = true;
+            }
+            const QString sub = d.isMember
+                ? QStringLiteral("участник · %1").arg(d.membersCount)
+                : QStringLiteral("%1 · %2").arg(
+                    d.type == QStringLiteral("channel") ? QStringLiteral("канал") : QStringLiteral("группа"))
+                  .arg(d.membersCount);
+            auto* row = buildContactRow(d.avatarUrl, d.name, d.name, sub, QString(), 0);
+            auto* item = new QListWidgetItem(chatList_);
+            item->setSizeHint(QSize(0, 72));
+            item->setData(Qt::UserRole, d.id);
+            item->setData(Qt::UserRole + 1, 2);              // элемент каталога
+            item->setData(Qt::UserRole + 2, d.type);         // channel | group
+            item->setData(Qt::UserRole + 3, d.name);
+            item->setData(Qt::UserRole + 4, d.isMember);
+            chatList_->addItem(item);
+            chatList_->setItemWidget(item, row);
+        }
+    }
     chatList_->blockSignals(false);
 }
 
@@ -1540,7 +1629,20 @@ void ChatPage::onChatClicked() {
     auto* item = chatList_->currentItem();
     if (!item) return;
     const QString id = item->data(Qt::UserRole).toString();
-    if (item->data(Qt::UserRole + 1).toBool()) {   // найденный человек → открыть новый чат
+    const QVariant kind = item->data(Qt::UserRole + 1);
+    if (kind.toInt() == 2) {   // публичный канал/группа из каталога
+        const QString type = item->data(Qt::UserRole + 2).toString();
+        const QString name = item->data(Qt::UserRole + 3).toString();
+        if (item->data(Qt::UserRole + 4).toBool()) {
+            const int idx = indexOfChat(id);
+            if (idx >= 0) openChat(chats_[idx]);
+            return;
+        }
+        pendingJoinId_ = id;
+        api_->joinPublic(id, type);   // после publicJoined списки обновятся
+        return;
+    }
+    if (kind.toBool()) {   // найденный человек → открыть новый чат
         openChatWith(id, item->data(Qt::UserRole + 2).toString(),
                      item->data(Qt::UserRole + 3).toString());
         return;
@@ -1583,6 +1685,13 @@ void ChatPage::openChat(const Chat& chat) {
     currentCanManage_ = (chat.role == QStringLiteral("creator") || chat.role == QStringLiteral("owner")
                          || chat.role == QStringLiteral("admin"));
     if (topicBackBtn_) topicBackBtn_->setVisible(false);
+    // Пагинация истории заново: сервер отдаёт хвост (50), остальное —
+    // догрузка при прокрутке к верху.
+    hasMoreServer_ = true;
+    fetchingOlder_ = false;
+    pendingJumpId_.clear();
+    hideBotKeyboard();
+    currentReplyKeyboard_ = QJsonObject();
 
     // Пока нет ни кэша, ни ответа сервера — приветствие не мелькает.
     loadingChat_ = true;
@@ -1591,10 +1700,10 @@ void ChatPage::openChat(const Chat& chat) {
         api_->getGroupTopics(chat.id);
     } else if (chat.kind == ChatKind::Channel) {
         convStack_->setCurrentIndex(1); clearMessages(); renderCached();
-        api_->getChannelMessages(chat.id);
+        api_->getChannelMessages(chat.id, /*limit*/ 50);
     } else {
         convStack_->setCurrentIndex(1); clearMessages(); renderCached();
-        api_->getMessages(chat.id);
+        api_->getMessages(chat.id, /*limit*/ 50);
     }
 
     // Сброс непрочитанных в списке
@@ -1642,6 +1751,9 @@ void ChatPage::updateGreeting() {
     }
 }
 
+// Определён ниже по файлу; нужен раньше (профиль → «Общие медиа»).
+static void showInfoOverlay(QWidget* host, const QString& title, const QString& text);
+
 bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
     if (obj == appMenuScrim_ && e->type() == QEvent::MouseButtonPress) {
         closeAppMenu();
@@ -1688,6 +1800,15 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
                 auto* info = new PeerInfoPanel(api_, currentPeerId_, false, currentPeerName_, av, window());
                 connect(info, &PeerInfoPanel::changed, this, [this]() { api_->getGroups(); });
                 info->showAnimated();
+                return true;
+            }
+            // Клик по имени автора в баббле → профиль 1:1 с вебом.
+            const QVariant prof = w->property("openProfileFor");
+            if (prof.isValid()) {
+                ensureProfilePanel();
+                profilePanel_->setKnownPreview(
+                    w->property("senderName").toString(), QString(), false);
+                profilePanel_->openFor(prof.toString());
                 return true;
             }
         }
@@ -1739,31 +1860,102 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
             info->showAnimated();
             return true;
         }
-        if (!profilePanel_) {
-            profilePanel_ = new ProfilePanel(api_, window());
-            connect(profilePanel_, &ProfilePanel::messageRequested, this,
-                    [this](const QString& uid) {
-                if (uid != currentPeerId_) {
-                    const int idx = indexOfChat(uid);
-                    if (idx >= 0) openChat(chats_[idx]);
-                }
-            });
-        }
+        ensureProfilePanel();
+        // Превью из списка чатов: шапка профиля рисуется мгновенно (view.js).
+        const int pi = indexOfChat(currentPeerId_);
+        if (pi >= 0) profilePanel_->setKnownPreview(
+            chats_[pi].displayName, chats_[pi].avatarUrl, chats_[pi].online);
         profilePanel_->openFor(currentPeerId_);
         return true;
     }
     return QWidget::eventFilter(obj, e);
 }
 
+// Единая точка создания ProfilePanel: связи в одном месте, обе кнопки
+// открытия (шапка диалога, автор поста) получают одинаковый набор.
+void ChatPage::ensureProfilePanel() {
+    if (profilePanel_) return;
+    profilePanel_ = new ProfilePanel(api_, window());
+    // ModalOverlay самоудаляется после закрытия — сбрасываем кэш
+    // (иначе второй клик — краш в удалённом объекте).
+    connect(profilePanel_, &ModalOverlay::closed, this,
+            [this]() { profilePanel_ = nullptr; });
+    connect(profilePanel_, &ProfilePanel::messageRequested, this,
+            [this](const QString& uid) {
+        if (uid != currentPeerId_) {
+            const int idx = indexOfChat(uid);
+            if (idx >= 0) openChat(chats_[idx]);
+        }
+    });
+    connect(profilePanel_, &ProfilePanel::callRequested, this,
+            [this](const QString& uid, const QString& name, const QString& av) {
+        emit callRequested(uid, name, av);
+    });
+    connect(profilePanel_, &ProfilePanel::savedMessagesRequested, this, [this]() {
+        for (const Chat& c : chats_) if (c.isSaved) { openChat(c); return; }
+        openChatWith(Session::instance().userId, QStringLiteral("Избранное"),
+                     Session::instance().username);
+    });
+    connect(profilePanel_, &ProfilePanel::settingsRequested, this,
+            &ChatPage::openSettings);
+    // Канал из профиля: открыт — переключаемся, нет — вступаем (как каталог).
+    connect(profilePanel_, &ProfilePanel::channelOpenRequested, this,
+            [this](const QString& id, const QString& name, const QString&) {
+        const int idx = indexOfChat(id);
+        if (idx >= 0) { openChat(chats_[idx]); return; }
+        pendingJoinId_ = id;
+        api_->joinPublic(id, QStringLiteral("channel"));
+    });
+    connect(profilePanel_, &ProfilePanel::mediaRequested, this,
+            [this](const QString&, int total) {
+        showInfoOverlay(window(), QStringLiteral("Общие медиа"),
+            total > 0 ? QStringLiteral("Общих медиа: %1").arg(total)
+                      : QStringLiteral("Нет общих медиа"));
+    });
+}
+
 void ChatPage::applyMessages(const QList<ChatMessage>& messages, bool updateCache) {
-    // Сервер — источник истины: сортируем, рисуем, обновляем локальный кэш
-    // (при показе из кэша повторно не сохраняем).
     loadingChat_ = false;
-    currentMessages_ = messages;
-    std::sort(currentMessages_.begin(), currentMessages_.end(),
+    // Пустой/запоздалый ответ сервера не должен стирать уже открытый вид:
+    // если ответ на догрузку СТАРЫХ (before_id) — его ведёт onMessagesLoaded,
+    // а пустая «полная» история при живом виде — мусор/гонка, игнорируем.
+    if (messages.isEmpty() && bubbleCount_ > 0 && !fetchingOlder_) return;
+    QList<ChatMessage> sorted = messages;
+    std::sort(sorted.begin(), sorted.end(),
               [](const ChatMessage& a, const ChatMessage& b) { return a.createdAt < b.createdAt; });
-    renderMessages(msgSearch_ && searchBar_->isVisible() ? msgSearch_->text().trimmed() : QString());
+
+    // Пользователь читает историю (ушёл от низа): ПОЛНАЯ перерисовка сорвала бы
+    // позицию просмотра (тот самый «пиздец» при листании, когда приходит новое
+    // сообщение). Подмешиваем только новые сообщения живыми бабблами.
+    if (bubbleCount_ > 0 && !stickBottom_) {
+        bool added = false;
+        for (const ChatMessage& m : sorted) {
+            if (m.id.isEmpty() || shownIds_.contains(m.id)) continue;
+            if (m.content.startsWith(ChecklistProto::kUpdatePrefix)) continue;
+            shownIds_.insert(m.id);
+            currentMessages_.append(m);
+            addBubble(m);
+            added = true;
+        }
+        if (updateCache && added) cacheCurrent();
+        return;
+    }
+
+    currentMessages_ = sorted;
+    renderMessages(QString());
     if (updateCache) cacheCurrent();
+    // Последняя reply-клавиатура бота в истории — активная (как в Telegram).
+    for (int i = currentMessages_.size() - 1; i >= 0; --i) {
+        const QJsonObject mk = currentMessages_[i].replyMarkup;
+        if (!mk.isEmpty() && mk.contains(QStringLiteral("keyboard"))) {
+            applyReplyKeyboard(mk);
+            break;
+        }
+        if (!mk.isEmpty() && mk.contains(QStringLiteral("remove_keyboard"))) {
+            hideBotKeyboard();
+            break;
+        }
+    }
 }
 
 QString ChatPage::cacheKey() const {
@@ -1789,29 +1981,49 @@ void ChatPage::cacheCurrent() {
 void ChatPage::onMessagesLoaded(const QString& friendId, const QList<ChatMessage>& messages) {
     if (friendId != currentPeerId_) return;
     if (!currentTopicId_.isEmpty()) return;   // внутри темы рендерим только её сообщения
+
+    // Ответ на запрос СТАРЫХ сообщений (before_id): приклеиваем сверху,
+    // дедуп по id, затем prepend-батчем достраиваем виджеты.
+    if (fetchingOlder_) {
+        fetchingOlder_ = false;
+        if (messages.size() < 50) hasMoreServer_ = false;
+        QSet<QString> known;
+        for (const ChatMessage& m : currentMessages_) known.insert(m.id);
+        const int firstRendered = renderedFrom_;
+        QList<ChatMessage> older;
+        for (const ChatMessage& m : messages)
+            if (!m.id.isEmpty() && !known.contains(m.id)) older.append(m);
+        if (older.isEmpty()) return;
+        currentMessages_ = older + currentMessages_;
+        std::sort(currentMessages_.begin(), currentMessages_.end(),
+                  [](const ChatMessage& a, const ChatMessage& b) { return a.createdAt < b.createdAt; });
+        renderedFrom_ = firstRendered + older.size();
+        cacheCurrent();
+        prependOlderBatch(0, older.size());
+        tryJumpToPending();
+        return;
+    }
     applyMessages(messages);
 }
 
 void ChatPage::renderMessages(const QString& filter) {
+    Q_UNUSED(filter);   // фильтр в чате ушёл в единый поиск (SuperSearchDialog)
     clearMessages();
-    const QString f = filter.toLower();
-    int matches = 0;
+    stickBottom_ = true;   // перерисовка = заново открываем чат: вид снизу
     QString lastDay;
     // Как в Telegram: в виджетах — только ХВОСТ истории (50 сообщений).
     // Остальное догружается виджетами при прокрутке к верху (prependOlderMessages),
-    // данные при этом и так целиком в currentMessages_.
+    // данные при этом и так целиком в currentMessages_ (либо с сервера — before_id).
     const int total = currentMessages_.size();
-    const int from = f.isEmpty() ? qMax(0, total - 50) : 0;
+    const int from = qMax(0, total - 50);
     // tdesktop-style: СИНХРОННО строим только видимый хвост, остальной хвост —
     // чанками в простое (прерывается при смене чата).
-    const int firstShown = f.isEmpty() ? qMax(from, total - 14) : from;
+    const int firstShown = qMax(from, total - 14);
     renderedFrom_ = firstShown;
     for (int i = 0; i < total; ++i) {
         const ChatMessage& m = currentMessages_[i];
         if (!m.id.isEmpty()) shownIds_.insert(m.id);   // дедуп работаем по всей истории
         if (i < firstShown) continue;
-        if (!f.isEmpty() && !m.content.toLower().contains(f)) continue;
-        ++matches;
         const QString day = m.createdAt.left(10);
         if (!day.isEmpty() && day != lastDay) {
             const QString lbl = dateLabel(m.createdAt);
@@ -1820,22 +2032,20 @@ void ChatPage::renderMessages(const QString& filter) {
         }
         addBubble(m);
     }
-    if (searchCount_)
-        searchCount_->setText(f.isEmpty() ? QString() : QStringLiteral("Найдено: %1").arg(matches));
-    if (f.isEmpty()) {
-        updateGreeting();
-        // Достройка хвоста чанками (tdesktop: ленивое построение за границей экрана).
-        if (renderedFrom_ > from) {
-            const quint64 gen = ++renderGen_;
-            QTimer::singleShot(0, this, [this, gen, from] { continueTail(from, gen); });
-        }
+    updateGreeting();
+    // Достройка хвоста чанками (tdesktop: ленивое построение за границей экрана).
+    if (renderedFrom_ > from) {
+        const quint64 gen = ++renderGen_;
+        QTimer::singleShot(0, this, [this, gen, from] { continueTail(from, gen); });
     }
     scrollToBottom();
+    // Если это был перезапуск после прыжка из поиска — пробуем прыгнуть.
+    tryJumpToPending();
 }
 
 void ChatPage::continueTail(int targetFrom, quint64 gen) {
     if (gen != renderGen_) return;                 // чат сменился — цепочка отменена
-    if (renderedFrom_ <= targetFrom) return;       // хвост достроен
+    if (renderedFrom_ <= targetFrom) { tryJumpToPending(); return; }   // хвост достроен
     prependOlderBatch(targetFrom, 12);
     QTimer::singleShot(0, this, [this, targetFrom, gen] { continueTail(targetFrom, gen); });
 }
@@ -1843,6 +2053,8 @@ void ChatPage::continueTail(int targetFrom, quint64 gen) {
 // Порция prepend'а старых сообщений. Контент растёт СВЕРХУ — без якоря
 // позиция просмотра уезжает вниз ровно на высоту порции (тот самый «съезд»
 // при листании сразу после входа в чат). Якорь: value += прирост высоты.
+// ВАЖНО: прирост меряем ПОСЛЕ синхронного пересчёта геометрии (adjustSize),
+// иначе maximum() ещё старый, grown = 0, и вид дёргается.
 void ChatPage::prependOlderBatch(int floorFrom, int batch) {
     if (renderedFrom_ <= floorFrom) return;
     auto* sb = msgScroll_->verticalScrollBar();
@@ -1867,30 +2079,49 @@ void ChatPage::prependOlderBatch(int floorFrom, int batch) {
     }
     renderedFrom_ = from;
 
+    // Синхронный пересчёт: layout активируется сразу, QScrollArea успевает
+    // обновить диапазон — компенсация точная, без «пиздеца» при листании.
+    msgContainer_->adjustSize();
     const int grown = sb->maximum() - oldMax;
     if (grown > 0) {
         programmaticScroll_ = true;
         sb->setValue(oldVal + grown);
         programmaticScroll_ = false;
     }
+    updateScrollDownButton();
 }
 
 // Догрузка старых сообщений при прокрутке к верху (Telegram-style):
-// добавляем виджеты ПЕРЕД существующими и якорим скролл — вид не дёргается.
+// 1) есть ещё неотрисованные виджеты в currentMessages_ — строим батч;
+// 2) локальные исчерпаны, но на сервере есть история — запрос before_id.
 void ChatPage::prependOlderMessages() {
-    if (loadingOlder_ || renderedFrom_ <= 0) return;
-    loadingOlder_ = true;
-    auto* sb = msgScroll_->verticalScrollBar();
-    const int oldMax = sb->maximum();
-    const int oldVal = sb->value();
+    if (loadingOlder_ || currentPeerId_.isEmpty()) return;
+    if (renderedFrom_ > 0) {
+        loadingOlder_ = true;
+        prependOlderBatch(qMax(0, renderedFrom_ - 50), 50);
+        loadingOlder_ = false;
+        tryJumpToPending();
+        return;
+    }
+    // Локальные данные исчерпаны — тянем старые с сервера (пагинация before_id,
+    // та же, что у веб-клиента). Группы тянутся целиком при открытии — не дёргаем.
+    if (hasMoreServer_ && !fetchingOlder_ && !currentMessages_.isEmpty()
+        && currentKind_ != ChatKind::Group) {
+        QString oldestId;
+        for (const ChatMessage& m : currentMessages_)
+            if (!m.id.isEmpty() && !m.id.startsWith(QStringLiteral("tmp_"))) { oldestId = m.id; break; }
+        if (oldestId.isEmpty()) { hasMoreServer_ = false; return; }
+        fetchingOlder_ = true;
+        if (currentKind_ == ChatKind::Channel)
+            api_->getChannelMessages(currentPeerId_, 50, oldestId);
+        else
+            api_->getMessages(currentPeerId_, 50, oldestId);
+    }
+}
 
-    prependOlderBatch(qMax(0, renderedFrom_ - 50), 50);
-
-    // Якорь: контент вырос сверху — компенсируем, чтобы глаз не дёрнулся.
-    programmaticScroll_ = true;
-    sb->setValue(sb->maximum() - oldMax + oldVal);
-    programmaticScroll_ = false;
-    loadingOlder_ = false;
+void ChatPage::fetchOlderFromServer() {
+    // Оставлено как семантическая точка входа; логика в prependOlderMessages.
+    prependOlderMessages();
 }
 
 void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
@@ -1906,6 +2137,10 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         return;
     }
 
+    // В КАНАЛЕ все посты идут слева (как в Telegram), включая свои: канал —
+    // широковещательная лента, а не диалог. out=false → баббл «входящий».
+    const bool out = msg.sent && currentKind_ != ChatKind::Channel;
+
     auto* row = new QWidget(msgContainer_);
     row->setObjectName(QStringLiteral("msgRow"));
     row->setStyleSheet(QStringLiteral("#msgRow{background:transparent;}"));
@@ -1914,7 +2149,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     rl->setSpacing(0);
 
     auto* bubble = new QFrame(row);
-    bubble->setObjectName(msg.sent ? QStringLiteral("bubbleOut") : QStringLiteral("bubbleIn"));
+    bubble->setObjectName(out ? QStringLiteral("bubbleOut") : QStringLiteral("bubbleIn"));
     // Максимум 480px, но не более 72% ширины области сообщений (узкое окно).
     bubble->setMaximumWidth(qBound(260, msgContainer_->width() * 72 / 100, 480));
     // Чистое медиа без текста — без фона баббла (.is-media-only веба).
@@ -1927,7 +2162,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         bubble->setStyleSheet(QStringLiteral(
             "#bubbleOut,#bubbleIn{background:transparent;border:none;padding:0;}"));
     else
-        bubble->setStyleSheet(msg.sent ? bubbleOutQss() : bubbleInQss());
+        bubble->setStyleSheet(out ? bubbleOutQss() : bubbleInQss());
     auto* bl = new QVBoxLayout(bubble);
     bl->setContentsMargins(14, 8, 14, 6);
     bl->setSpacing(2);
@@ -1944,10 +2179,16 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         showMessageMenu(bubble, bubble->mapToGlobal(p));
     });
 
-    // Имя отправителя в группах (входящие, как в Telegram).
-    if (!msg.sent && currentKind_ == ChatKind::Group && !msg.senderName.isEmpty()) {
+    // Имя отправителя в группах и каналах (входящие, как в Telegram; в личке
+    // имя не выводится). Клик по имени — профиль автора (1:1 с вебом).
+    if (!out && (currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel)
+        && !msg.senderName.isEmpty() && msg.senderId != Session::instance().userId) {
         auto* author = new QLabel(msg.senderName, bubble);
         author->setStyleSheet(QStringLiteral("color:#8B5CF6;font-size:12px;font-weight:700;"));
+        author->setCursor(Qt::PointingHandCursor);
+        author->setProperty("openProfileFor", msg.senderId);
+        author->setProperty("senderName", msg.senderName);   // превью шапки профиля
+        author->installEventFilter(this);
         bl->addWidget(author);
     }
 
@@ -1961,26 +2202,34 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     }
 
     if (msg.content.startsWith(kCallEventPrefix)) {
-        // Лог звонка (как в Telegram): иконка телефона + подпись, клик — перезвонить.
+        // Лог звонка (как в Telegram): иконка телефона + подпись, клик — перезвонить
+        // (buildCallEventElement в вебе делает плашку tappable).
         auto* crow = new QWidget(bubble);
         crow->setStyleSheet(QStringLiteral("background:transparent;"));
+        crow->setCursor(Qt::PointingHandCursor);
+        crow->setToolTip(QStringLiteral("Позвонить"));
         auto* cl = new QHBoxLayout(crow);
         cl->setContentsMargins(0, 2, 0, 2);
         cl->setSpacing(10);
         auto* ic = new QLabel(crow);
         ic->setPixmap(Icons::pixmap(Icons::Phone, 20,
-            msg.sent ? QColor(0xF0, 0xEC, 0xFA) : QColor(0x8B, 0x5C, 0xF6)));
+            out ? QColor(0xF0, 0xEC, 0xFA) : QColor(0x8B, 0x5C, 0xF6)));
         auto* lbl = new QLabel(callEventLabel(msg.content, msg.sent), crow);
         lbl->setStyleSheet(QString("color:%1;font-size:14px;font-weight:600;")
-            .arg(msg.sent ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
+            .arg(out ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
         cl->addWidget(ic);
         cl->addWidget(lbl);
         cl->addStretch();
         bl->addWidget(crow);
+        const QString peer = out ? currentPeerId_ : msg.senderId;
+        const QString nm = out ? currentPeerName_ : msg.senderName;
+        crow->installEventFilter(new SuperSearchClickFilter([this, peer, nm]() {
+            emit callRequested(peer, nm, QString());
+        }, crow));
     } else if (msg.isVoice()) {
         // Голосовое (Telegram-style): ▶/⏸ + waveform + время.
         const QString seed = msg.id.isEmpty() ? msg.filePath : msg.id;
-        auto* voice = new VoiceMessageWidget(seed, msg.sent, bubble);
+        auto* voice = new VoiceMessageWidget(seed, out, bubble);
         voice->setMinimumWidth(240);
         bubble->setMinimumWidth(280);
         const int vsecs = parseVoiceSeconds(msg.content);   // длительность из подписи
@@ -2024,13 +2273,13 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         auto* geo = new QPushButton(bubble);
         geo->setCursor(Qt::PointingHandCursor);
         geo->setIcon(Icons::icon(Icons::Location, 20,
-            msg.sent ? QColor(0xF0,0xEC,0xFA) : QColor(0x8B,0x5C,0xF6)));
+            out ? QColor(0xF0,0xEC,0xFA) : QColor(0x8B,0x5C,0xF6)));
         geo->setIconSize(QSize(20, 20));
         geo->setText(QStringLiteral("  Геопозиция\n  Открыть на карте"));
         geo->setStyleSheet(QString(
             "QPushButton{border:none;background:transparent;text-align:left;font-size:14px;color:%1;}"
             "QPushButton:hover{text-decoration:underline;}")
-            .arg(msg.sent ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
+            .arg(out ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
         bubble->setMinimumWidth(220);
         bl->addWidget(geo);
         const QString url = msg.content;
@@ -2091,7 +2340,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         // Файл как в Telegram: кольцо загрузки вокруг иконки (скачать/отменить/
         // открыть), имя, размер, проценты. Сохраняется в «Загрузки/Xipher Desktop».
         const QString name = msg.fileName.isEmpty() ? QStringLiteral("файл") : msg.fileName;
-        const QColor fclr = msg.sent ? QColor(0xF0, 0xEC, 0xFA) : QColor(0xF3, 0xF1, 0xF8);
+        const QColor fclr = out ? QColor(0xF0, 0xEC, 0xFA) : QColor(0xF3, 0xF1, 0xF8);
 
         auto* rowWrap = new QWidget(bubble);
         auto* wrap = new QHBoxLayout(rowWrap);
@@ -2189,23 +2438,27 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         auto* el = new QHBoxLayout(erow);
         el->setContentsMargins(0, 0, 0, 0);
         el->setSpacing(4);
-        if (msg.sent) el->addStretch();
+        if (out) el->addStretch();
         for (const QString& e : big) {
             auto* a = new AnimatedEmojiLabel(AnimatedEmojiLabel::emojiToCodepoints(e), sz, true, erow);
             el->addWidget(a);
         }
-        if (!msg.sent) el->addStretch();
+        if (!out) el->addStretch();
         bl->addWidget(erow);
     } else {
         auto* text = new MessageTextLabel(formatMessageHtml(msg.content), bubble);
         text->setContextMenuPolicy(Qt::NoContextMenu);   // ПКМ → меню баббла, не дефолтное
         text->setStyleSheet(QString("color:%1;font-size:15px;")
-                                .arg(msg.sent ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
+                                .arg(out ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
         bl->addWidget(text);
     }
 
+    // Inline-кнопки бота (reply_markup.inline_keyboard): callback / url / web_app.
+    if (!msg.replyMarkup.isEmpty())
+        addInlineKeyboard(bl, msg);
+
     QString metaText = msg.time;
-    if (msg.sent) {
+    if (out) {
         const QString tick = (msg.status == QStringLiteral("read"))
             ? QStringLiteral("✓✓") : (msg.status == QStringLiteral("delivered")
             ? QStringLiteral("✓✓") : QStringLiteral("✓"));
@@ -2220,10 +2473,10 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     if (msg.ttlSeconds > 0) {
         auto* flame = new QLabel(bubble);
         flame->setPixmap(Icons::pixmap(Icons::Clock, 12,
-            msg.sent ? QColor(0xF0,0xEC,0xFA) : QColor(0xAC,0xA6,0xBD)));
+            out ? QColor(0xF0,0xEC,0xFA) : QColor(0xAC,0xA6,0xBD)));
         auto* ttlLbl = new QLabel(bubble);
         ttlLbl->setStyleSheet(QString("color:%1;font-size:11px;font-weight:600;")
-            .arg(msg.sent ? QStringLiteral("rgba(240,236,250,0.8)") : QStringLiteral("#ACA6BD")));
+            .arg(out ? QStringLiteral("rgba(240,236,250,0.8)") : QStringLiteral("#ACA6BD")));
 
         const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + qint64(msg.ttlSeconds) * 1000;
         auto fmt = [](qint64 sec) -> QString {
@@ -2252,12 +2505,12 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
 
     auto* meta = new QLabel(metaText, bubble);
     meta->setStyleSheet(QString("color:%1;font-size:11px;")
-        .arg(msg.sent ? QStringLiteral("rgba(240,236,250,0.65)") : QStringLiteral("#726C82")));
+        .arg(out ? QStringLiteral("rgba(240,236,250,0.65)") : QStringLiteral("#726C82")));
     metaRow->addWidget(meta);
     bl->addLayout(metaRow);
 
-    if (msg.sent) { rl->addStretch(); rl->addWidget(bubble); }
-    else          { rl->addWidget(bubble); rl->addStretch(); }
+    if (out) { rl->addStretch(); rl->addWidget(bubble); }
+    else     { rl->addWidget(bubble); rl->addStretch(); }
 
     if (prepend)
         msgLayout_->insertWidget(1, row);   // после stretch, ПЕРЕД существующими
@@ -2301,9 +2554,16 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     const QString author = bubble->property("msgAuthor").toString();
 
     const bool plain = !text.isEmpty() && !text.startsWith(QStringLiteral("[["));
+    const bool isSavedChat = [&]() {
+        const int idx = indexOfChat(currentPeerId_);
+        return idx >= 0 && chats_[idx].isSaved;
+    }();
     QMenu menu(this);
     QAction* reply = menu.addAction(QStringLiteral("Ответить"));
     QAction* forward = plain ? menu.addAction(QStringLiteral("Переслать")) : nullptr;
+    QAction* fav = nullptr;
+    if (plain && !isSavedChat)   // «В избранное» — как пересылка в «Избранные» (1 клик)
+        fav = menu.addAction(QStringLiteral("⭐  В избранное"));
     QAction* copy = plain ? menu.addAction(QStringLiteral("Копировать")) : nullptr;
     QAction* pin = nullptr;
     if ((currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel)
@@ -2320,7 +2580,18 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     else if (ch == copy)     QApplication::clipboard()->setText(text);
     else if (ch == del)      api_->deleteMessage(id, currentKind_, currentPeerId_);
     else if (ch == forward)  forwardMessage(text);
+    else if (fav && ch == fav) saveToSaved(text);
     else if (pin && ch == pin) api_->pinMessage(id, currentKind_, currentPeerId_, true);
+}
+
+// «В избранное» (Saved Messages): копия сообщения в один клик улетает
+// в чат «Избранные» — как пересылка в Telegram, без диалога выбора.
+void ChatPage::saveToSaved(const QString& text) {
+    QString savedId = Session::instance().userId;   // у «Избранных» id = свой
+    for (const Chat& c : chats_)
+        if (c.isSaved) { savedId = c.id; break; }
+    api_->sendMessage(savedId, text, QStringLiteral("fav_%1").arg(++tempCounter_));
+    bumpChat(savedId, text, QTime::currentTime().toString(QStringLiteral("HH:mm")), false);
 }
 
 void ChatPage::forwardMessage(const QString& text) {
@@ -2511,6 +2782,13 @@ void ChatPage::onWsMessage(const QString& peerId, const ChatMessage& msgIn, cons
             currentMessages_.append(msg);
         }
         addBubble(msg);
+        // Бот прислал новую reply-клавиатуру (или убрал) — применяем сразу.
+        if (!msg.replyMarkup.isEmpty()) {
+            if (msg.replyMarkup.contains(QStringLiteral("keyboard")))
+                applyReplyKeyboard(msg.replyMarkup);
+            else if (msg.replyMarkup.contains(QStringLiteral("remove_keyboard")))
+                hideBotKeyboard();
+        }
         // stickBottom_ уже держит низ (якорь на rangeChanged); если пользователь
         // читает историю — не дёргаем. Своё сообщение — всегда к низу.
         if (msg.sent) scrollToBottom();
@@ -2556,9 +2834,14 @@ void ChatPage::onSearchChanged(const QString& text) {
     if (q.length() >= 2) {
         searchQuery_ = q;
         searchTimer_->start();   // дебаунс глобального поиска людей
+        // Глобально: публичные каналы и группы из каталога (не только свои чаты).
+        api_->publicDirectory(QStringLiteral("all"), q, 0);
     } else {
         searchQuery_.clear();
-        if (!searchHits_.isEmpty()) { searchHits_.clear(); rebuildChatList(); }
+        bool dirty = false;
+        if (!searchHits_.isEmpty()) { searchHits_.clear(); dirty = true; }
+        if (!directoryHits_.isEmpty()) { directoryHits_.clear(); dirty = true; }
+        if (dirty) rebuildChatList();
     }
 }
 
@@ -2579,6 +2862,13 @@ static QString chatQSS() {
         "#searchBox { background:%2; border:1px solid rgba(255,255,255,0.10); border-radius:12px;"
         "  min-height:38px; padding:0 14px; color:#F3F1F8; }"
         "#searchBox:focus { border:1px solid %5; }"
+        "#catalogBtn { background:%2; border:1px solid rgba(255,255,255,0.10); border-radius:12px;"
+        "  color:#BBA4FF; font-size:13px; font-weight:600; min-height:38px; padding:0 12px; }"
+        "#catalogBtn:hover { border-color:%5; color:#F3F1F8; }"
+        "#botKeyboardBar { background:transparent; }"
+        "#botKeyboardBtn { background:%2; border:1px solid rgba(255,255,255,0.10); border-radius:12px;"
+        "  min-height:38px; padding:0 14px; color:#BBA4FF; font-size:14px; text-align:center; }"
+        "#botKeyboardBtn:hover { border-color:%5; color:#F3F1F8; background:rgba(%6,%7,%8,0.10); }"
         "#chatList { background:%1; border:none; outline:none; }"
         "#chatList::item { border:none; padding:0; }"
         "#chatList::item:hover { background:%2; border-left:3px solid %5; }"
@@ -2764,11 +3054,7 @@ void ChatPage::buildAppMenu() {
                      Session::instance().username);
     });
     addItem(QStringLiteral("Настройки"), [this]() { openSettings(); });
-    addItem(QStringLiteral("Каталог"), [this]() {
-        auto* d = new CatalogDialog(api_, window());
-        connect(d, &CatalogDialog::joined, this, [this]() { api_->getGroups(); api_->getChannels(); });
-        d->showAnimated();
-    });
+    addItem(QStringLiteral("Каталог"), [this]() { openCatalog(); });
     root->addStretch();
     appMenu_->hide();
 }
@@ -2830,14 +3116,23 @@ void ChatPage::onEmojiClicked() {
         connect(emojiPicker_, &EmojiPicker::emojiPicked, this, [this](const QString& e) {
             composer_->insertPlainText(e);   // вставляем в позицию курсора, пикер не закрываем
         });
+        connect(emojiPicker_, &EmojiPicker::backspacePressed, this, [this]() {
+            QTextCursor c = composer_->textCursor();
+            if (c.hasSelection()) c.removeSelectedText();
+            else c.deletePreviousChar();   // ⌫ в панели, как в Telegram
+            composer_->setTextCursor(c);
+        });
     }
-    // Открываем панель над кнопкой, выравнивая по правому краю (как в Telegram).
-    const QPoint topRight = emojiBtn_->mapToGlobal(QPoint(emojiBtn_->width(), 0));
-    int x = topRight.x() - emojiPicker_->width();
-    int y = topRight.y() - emojiPicker_->height() - 8;
-    if (y < 0) y = emojiBtn_->mapToGlobal(QPoint(0, emojiBtn_->height() + 8)).y();
+    // Панель открывается НАД КОМПОЗЕРОМ, прижатая к его ПРАВОМУ краю
+    // (как .tg-emoji-panel веба: bottom:calc(100%+6px); right:0).
+    const QPoint brGlobal = composerBar_->mapToGlobal(composerBar_->rect().bottomRight());
+    int x = brGlobal.x() - emojiPicker_->width() - 4;
+    int y = brGlobal.y() - emojiPicker_->height() - 10;
+    if (y < window()->mapToGlobal(QPoint(0, 0)).y() + 8)
+        y = window()->mapToGlobal(QPoint(0, 0)).y() + 8;
     emojiPicker_->move(qMax(8, x), y);
     emojiPicker_->show();
+    emojiPicker_->raise();
 }
 
 // ── Вложения (скрепка) ───────────────────────────────────────────────────────
@@ -3083,19 +3378,7 @@ void ChatPage::onFileUploaded(const QString& filePath, const QString& fileName,
 
 // ── Поиск / звонок / меню / переименование ───────────────────────────────────
 
-void ChatPage::toggleSearch() {
-    if (currentPeerId_.isEmpty()) return;
-    const bool show = !searchBar_->isVisible();
-    searchBar_->setVisible(show);
-    if (show) {
-        msgSearch_->clear();
-        msgSearch_->setFocus();
-    } else {
-        msgSearch_->clear();
-        renderMessages(QString());
-    }
-}
-
+// Центрированный инфо-оверлей (нужен методам ботов и звонков ниже).
 static void showInfoOverlay(QWidget* host, const QString& title, const QString& text) {
     auto* ov = new ModalOverlay(host, 360);
     auto* t = new QLabel(title, ov->card());
@@ -3114,6 +3397,129 @@ static void showInfoOverlay(QWidget* host, const QString& title, const QString& 
     ov->cardLayout()->addWidget(ok);
     QObject::connect(ok, &QPushButton::clicked, ov, &ModalOverlay::closeAnimated);
     ov->showAnimated();
+}
+
+// ── Боты: inline-кнопки, reply-клавиатура, MiniApps (1:1 с вебом) ────────────
+
+// inline_keyboard: строки кнопок {text, callback_data | url | web_app{url}}.
+void ChatPage::addInlineKeyboard(QVBoxLayout* bubbleLayout, const ChatMessage& msg) {
+    const QJsonArray rows = msg.replyMarkup.value(QStringLiteral("inline_keyboard")).toArray();
+    if (rows.isEmpty()) return;
+    auto* box = new QWidget(msgContainer_);
+    box->setStyleSheet(QStringLiteral("background:transparent;"));
+    auto* bl2 = new QVBoxLayout(box);
+    bl2->setContentsMargins(0, 6, 0, 2);
+    bl2->setSpacing(4);
+    for (const QJsonValue& r : rows) {
+        const QJsonArray cols = r.toArray();
+        auto* rowW = new QWidget(box);
+        auto* hl = new QHBoxLayout(rowW);
+        hl->setContentsMargins(0, 0, 0, 0);
+        hl->setSpacing(4);
+        for (const QJsonValue& c : cols) {
+            const QJsonObject btn = c.toObject();
+            auto* b = new QPushButton(btn.value(QStringLiteral("text")).toString(), rowW);
+            b->setObjectName(QStringLiteral("botKeyboardBtn"));
+            b->setCursor(Qt::PointingHandCursor);
+            const QString cbData = btn.value(QStringLiteral("callback_data")).toString();
+            const QString url = btn.value(QStringLiteral("url")).toString();
+            const QString webApp = btn.value(QStringLiteral("web_app")).toObject()
+                                       .value(QStringLiteral("url")).toString();
+            const QString mid = msg.id.startsWith(QStringLiteral("tmp_")) ? QString() : msg.id;
+            connect(b, &QPushButton::clicked, this, [this, mid, cbData, url, webApp, msg]() {
+                if (!webApp.isEmpty())                       { openMiniapp(webApp, msg.senderId); return; }
+                if (!url.isEmpty())                          { QDesktopServices::openUrl(QUrl(url)); return; }
+                if (!cbData.isEmpty() && !mid.isEmpty())     api_->botCallback(mid, cbData);
+            });
+            hl->addWidget(b, 1);
+        }
+        bl2->addWidget(rowW);
+    }
+    bubbleLayout->addWidget(box);
+}
+
+// reply-клавиатура бота: кнопки над композером (как в Telegram).
+void ChatPage::applyReplyKeyboard(const QJsonObject& markup) {
+    if (!botKeyboardBar_ || !botKeyboardLayout_) return;
+    currentReplyKeyboard_ = markup;
+    // Очистить старые ряды.
+    QLayoutItem* it;
+    while ((it = botKeyboardLayout_->takeAt(0)) != nullptr) {
+        if (it->widget()) it->widget()->deleteLater();
+        delete it;
+    }
+    const bool oneTime = markup.value(QStringLiteral("one_time_keyboard")).toBool(false);
+    const QJsonArray rows = markup.value(QStringLiteral("keyboard")).toArray();
+    for (const QJsonValue& r : rows) {
+        const QJsonArray cols = r.toArray();
+        auto* rowW = new QWidget(botKeyboardBar_);
+        auto* hl = new QHBoxLayout(rowW);
+        hl->setContentsMargins(0, 0, 0, 0);
+        hl->setSpacing(4);
+        for (const QJsonValue& c : cols) {
+            const QJsonObject btn = c.toObject();
+            const QString text = btn.value(QStringLiteral("text")).toString();
+            auto* b = new QPushButton(text, rowW);
+            b->setObjectName(QStringLiteral("botKeyboardBtn"));
+            b->setCursor(Qt::PointingHandCursor);
+            connect(b, &QPushButton::clicked, this, [this, btn, text, oneTime]() {
+                if (btn.value(QStringLiteral("request_location")).toBool(false)) {
+                    sendLocation();
+                } else if (!text.isEmpty()) {
+                    composer_->setPlainText(text);
+                    onSendClicked();
+                }
+                if (oneTime) hideBotKeyboard();
+            });
+            hl->addWidget(b, 1);
+        }
+        botKeyboardLayout_->addWidget(rowW);
+    }
+    botKeyboardBar_->setVisible(!rows.isEmpty());
+}
+
+void ChatPage::hideBotKeyboard() {
+    if (botKeyboardBar_) botKeyboardBar_->setVisible(false);
+    currentReplyKeyboard_ = QJsonObject();
+}
+
+// MiniApp: подписанный initData от сервера + открытие приложения (как в вебе,
+// только в системном браузере — десктоп без webview по дизайну).
+void ChatPage::openMiniapp(const QString& url, const QString& botId) {
+    if (url.isEmpty()) return;
+    pendingMiniappUrl_ = url;
+    api_->botMiniappInit(botId);
+}
+
+void ChatPage::onMiniappInitReady(bool ok, const QString& initData) {
+    QString url = pendingMiniappUrl_;
+    pendingMiniappUrl_.clear();
+    if (url.isEmpty()) return;
+    if (ok && !initData.isEmpty()) {
+        const QString sep = url.contains(QLatin1Char('?')) ? QStringLiteral("&") : QStringLiteral("?");
+        url += sep + QStringLiteral("init_data=") + QString::fromUtf8(
+            QUrl::toPercentEncoding(initData));
+    }
+    QDesktopServices::openUrl(QUrl(url));
+}
+
+void ChatPage::onBotCallbackDone(bool ok, const QJsonObject& response) {
+    if (!ok) return;
+    // Бот может ответить алертом и/или попросить обновить сообщение.
+    const QString alert = response.value(QStringLiteral("alert")).toString();
+    if (!alert.isEmpty())
+        showInfoOverlay(window(), QStringLiteral("Бот"), alert);
+    if (response.value(QStringLiteral("update_message")).toBool(false))
+        reloadCurrentMessages();
+}
+
+// ── Каталог публичных каналов и групп ────────────────────────────────────────
+void ChatPage::openCatalog() {
+    auto* d = new CatalogDialog(api_, window());
+    connect(d, &CatalogDialog::joined, this, [this]() {
+        api_->getChats(); api_->getGroups(); api_->getChannels();
+    });
+    d->showAnimated();
 }
 
 void ChatPage::startCall() {
