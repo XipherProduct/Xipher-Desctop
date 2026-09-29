@@ -73,3 +73,73 @@ jobs:
         with:
           name: Xipher-windows-signed
           path: signed
+
+  # ── Linux (x86_64): Qt из дистрибутива, WebRTC из third_party ─────────────
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ \
+            qt6-base-dev qt6-multimedia-dev qt6-websockets-dev \
+            libopus-dev libssl-dev zlib1g-dev
+
+      - name: Build libdatachannel (WebRTC)
+        run: |
+          cmake -S third_party/libdatachannel -B third_party/libdatachannel/build-linux \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DNO_WEBSOCKET=ON
+          cmake --build third_party/libdatachannel/build-linux \
+            --target datachannel-static -j"$(nproc)"
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Package
+        run: |
+          strip build/bin/Xipher
+          VER="${GITHUB_REF_NAME#v}"
+          mkdir -p pkg/Xipher-$VER-linux-x86_64
+          cp build/bin/Xipher pkg/Xipher-$VER-linux-x86_64/
+          cat > pkg/Xipher-$VER-linux-x86_64/README.txt <<EOT
+          Xipher Desktop $VER (Linux x86_64)
+
+          Запуск: ./Xipher
+
+          Системные зависимости (есть в актуальных дистрибутивах):
+            Qt 6 (Base, Multimedia, WebSockets), libopus, OpenSSL, zlib.
+
+          WebRTC (libdatachannel) и Opus-кодек уже внутри бинарня;
+          TURN/STUN-конфигурация запрашивается у сервера при звонке.
+          EOT
+          tar -C pkg -czf "Xipher-$VER-linux-x86_64.tar.gz" "Xipher-$VER-linux-x86_64"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Xipher-linux-x86_64
+          path: Xipher-*.tar.gz
+
+  # ── Релиз: тег → GitHub Release с артефактами обеих платформ ─────────────
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
     QApplication::setOrganizationName(QStringLiteral("Xipher"));
     QApplication::setApplicationName(QStringLiteral("Desktop"));
     QApplication::setApplicationDisplayName(QStringLiteral("Xipher"));
-    QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QApplication::setApplicationVersion(QStringLiteral("0.2.0"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/xipher.png")));
 
     // Базовый шрифт. Inter если установлен в системе, иначе Segoe UI.
