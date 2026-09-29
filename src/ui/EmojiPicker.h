@@ -5,11 +5,14 @@
 class QScrollArea;
 class QWidget;
 class QGridLayout;
+class QLineEdit;
+class QPushButton;
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  EmojiPicker — панель эмодзи как в Telegram: вкладки категорий сверху,
-//  большая прокручиваемая сетка эмодзи. Открывается всплывающим окном (Qt::Popup),
-//  клик по эмодзи вставляет его в поле ввода. Окно закрывается по клику вне.
+//  EmojiPicker — панель эмодзи 1:1 с логикой Telegram / tg-emoji-panel веба:
+//  строка поиска, лента категорий (недавние + 8 разделов), большая сетка.
+//  Недавние хранятся локально (Prefs, как localStorage веба, до 32).
+//  Открывается всплывающим окном (Qt::Popup), клик вне — закрывает.
 // ─────────────────────────────────────────────────────────────────────────────
 class EmojiPicker : public QFrame {
     Q_OBJECT
@@ -18,13 +21,21 @@ public:
 
 signals:
     void emojiPicked(const QString& emoji);
+    void backspacePressed();   // кнопка ⌫ в панели (как в Telegram)
 
 private:
+    void buildCategories();
     void showCategory(int index);
+    void showSearchResults(const QString& query);
+    void loadRecents();
+    void addRecent(const QString& emoji);
+    QWidget* makeCell(const QString& emoji, QWidget* parent);
 
     QScrollArea* scroll_ = nullptr;
     QWidget*     grid_    = nullptr;
-    QList<QStringList> categories_;
-    QList<class QPushButton*> tabs_;
+    QLineEdit*   search_  = nullptr;
+    QList<QStringList> categories_;   // 0 — недавние, 1..8 — разделы
+    QList<QPushButton*> catButtons_;
+    QStringList  recents_;
     int current_ = 0;
 };

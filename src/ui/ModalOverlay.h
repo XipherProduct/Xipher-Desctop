@@ -18,6 +18,11 @@ public:
     QWidget*     card() const { return card_; }
     QVBoxLayout* cardLayout() const { return cardLayout_; }
 
+    // Высота по содержимому (fit-content веба, свыше — кламп relayout):
+    // для экранов переменной высоты вроде профиля. Фиксированные диалоги
+    // не вызывают — у них снапшот cardPrefH_ по минимуму карточки.
+    void enableAutoHeight() { autoHeight_ = true; }
+
     void showAnimated();
     void closeAnimated();
 
@@ -37,6 +42,7 @@ private:
     QVBoxLayout* cardLayout_;
     int          cardWidth_;
     int          cardPrefH_ = 0;   // желаемая высота карточки (до клампа)
+    bool         autoHeight_ = false;  // fit-content: минимум задаёт контент
     qreal        dim_ = 0.0;   // прозрачность затемнения 0..1 (анимируется)
     Q_PROPERTY(qreal dim READ dim WRITE setDim)
 public:

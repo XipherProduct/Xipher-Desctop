@@ -19,7 +19,11 @@ namespace Icons {
 enum Kind { Send, Mic, Smile, Paperclip, Clock, Trash, File, Image,
             Search, Pencil, Phone, Location, Checklist, Logout, Plus, More, Lock,
             Menu, Bell, Shield, User, Globe, Star, Device, Gear, Camera,
-            ChevronRight, ArrowLeft, Block };
+            ChevronRight, ArrowLeft, Block, Chat, Gift,
+            // Строки профиля и его действия (SVG из js/profile/view.js веба).
+            Message, Megaphone, Cake, At, Calendar, About,
+            // Звонки (SVG из js/calls.js): трубка вниз — отбой, динамик.
+            Hangup, Speaker };
 
 inline QPixmap pixmap(Kind kind, int size, const QColor& color) {
     const qreal dpr = 2.0;
@@ -162,6 +166,22 @@ inline QPixmap pixmap(Kind kind, int size, const QColor& color) {
         p.drawLine(QLineF(5, 12, 19, 12));
         break;
     }
+    case Chat: {
+        // Бабл сообщения (message-circle веба): контур + хвост.
+        p.drawRoundedRect(QRectF(3.5, 4.5, 17, 11.5), 4.5, 4.5);
+        p.drawPolyline(QPolygonF({QPointF(8.8, 15.6), QPointF(8.8, 20),
+                                  QPointF(13.2, 15.7)}));
+        break;
+    }
+    case Gift: {
+        // Подарок: коробка + крышка + лента + бант (gift веба).
+        p.drawRoundedRect(QRectF(3.8, 10, 16.4, 10.2), 2, 2);
+        p.drawRoundedRect(QRectF(2.8, 6.8, 18.4, 3.5), 1.7, 1.7);
+        p.drawLine(QLineF(12, 6.8, 12, 20.2));
+        p.drawEllipse(QPointF(9.2, 5.1), 2.5, 1.9);
+        p.drawEllipse(QPointF(14.8, 5.1), 2.5, 1.9);
+        break;
+    }
     case More: {
         p.setBrush(color); p.setPen(Qt::NoPen);
         p.drawEllipse(QPointF(12, 5.5), 1.7, 1.7);
@@ -267,6 +287,112 @@ inline QPixmap pixmap(Kind kind, int size, const QColor& color) {
     case Block: {
         p.drawEllipse(QPointF(12, 12), 9, 9);
         p.drawLine(QLineF(5.6, 5.6, 18.4, 18.4));
+        break;
+    }
+    // Кривая стрелка-бабл (ICONS.message из view.js): дуга 8r с разрывом
+    // справа-сверху + короткий хвостик слева-снизу.
+    case Message: {
+        QPainterPath arc;
+        arc.moveTo(20, 12);
+        arc.arcTo(QRectF(4, 4, 16, 16), 0, 308);
+        p.drawPath(arc);
+        p.drawLine(QLineF(4, 20, 5.4, 16.4));
+        break;
+    }
+    // Мегафон персонального канала (ROW_ICONS.megaphone).
+    case Megaphone: {
+        QPainterPath sp;
+        sp.moveTo(3, 10); sp.lineTo(14, 6); sp.lineTo(14, 18); sp.lineTo(3, 14);
+        sp.closeSubpath();
+        p.drawPath(sp);
+        QPainterPath w;
+        w.moveTo(14, 8);
+        w.arcTo(QRectF(10, 8, 8, 8), 270, 180);
+        p.drawPath(w);
+        p.drawLine(QLineF(6, 14, 6, 18));
+        break;
+    }
+    // Торт дня рождения (ROW_ICONS.cake): пламя + торт + волнистый низ.
+    case Cake: {
+        QPainterPath fl;
+        fl.moveTo(12, 6);
+        fl.cubicTo(13.2, 6, 14, 5.1, 14, 4);
+        fl.cubicTo(14, 2.9, 12, 2, 12, 2);
+        fl.cubicTo(12, 2, 10, 2.9, 10, 4);
+        fl.cubicTo(10, 5.1, 10.8, 6, 12, 6);
+        p.setPen(Qt::NoPen); p.setBrush(color); p.drawPath(fl);
+        p.setPen(pen);
+        p.drawRoundedRect(QRectF(5, 8, 14, 6), 3, 3);
+        QPainterPath base;
+        base.moveTo(4, 17);
+        base.cubicTo(5.3, 18.2, 6.7, 18.2, 8, 17);
+        base.cubicTo(9.3, 18.2, 10.7, 18.2, 12, 17);
+        base.cubicTo(13.3, 18.2, 14.7, 18.2, 16, 17);
+        base.cubicTo(17.3, 18.2, 18.7, 18.2, 20, 17);
+        base.lineTo(20, 21); base.lineTo(4, 21); base.closeSubpath();
+        p.drawPath(base);
+        break;
+    }
+    // «Собака» имени пользователя (ROW_ICONS.at).
+    case At: {
+        p.drawEllipse(QPointF(12, 12), 4, 4);
+        QPainterPath big;
+        big.moveTo(21, 12);
+        big.arcTo(QRectF(3, 3, 18, 18), 0, -308);
+        p.drawPath(big);
+        p.drawLine(QLineF(16, 12, 16, 13.5));
+        QPainterPath hook;
+        hook.moveTo(16, 13.5);
+        hook.arcTo(QRectF(16, 11, 5, 5), 180, -180);
+        p.drawPath(hook);
+        break;
+    }
+    // Календарь «В Xipher с» (ROW_ICONS.calendar).
+    case Calendar: {
+        p.drawRoundedRect(QRectF(4, 6, 16, 14), 2, 2);
+        p.drawLine(QLineF(8, 3, 8, 8));
+        p.drawLine(QLineF(16, 3, 16, 8));
+        p.drawLine(QLineF(4, 11, 20, 11));
+        break;
+    }
+    // «i» у био (ROW_ICONS.about).
+    case About: {
+        p.drawEllipse(QPointF(12, 12), 8.5, 8.5);
+        p.drawLine(QLineF(12, 11, 12, 16));
+        p.setPen(Qt::NoPen); p.setBrush(color);
+        p.drawEllipse(QPointF(12, 7.8), 1.1, 1.1);
+        break;
+    }
+    // Трубка «отбой» (hangup из calls.js): телефон, повёрнутый на 135°.
+    case Hangup: {
+        p.translate(12, 12);
+        p.rotate(135);
+        p.translate(-12, -12);
+        QPainterPath ph;
+        ph.moveTo(5, 4); ph.lineTo(9, 4); ph.lineTo(11, 9); ph.lineTo(8.5, 11);
+        ph.arcTo(QRectF(8.5, 11, 9, 9), 90, -90);
+        ph.lineTo(15, 13); ph.lineTo(20, 15); ph.lineTo(20, 19);
+        ph.arcTo(QRectF(4, 4, 16, 16), 0, 0);
+        p.drawPath(ph);
+        break;
+    }
+    // Динамик (speaker из calls.js): рупор + дуги звука.
+    case Speaker: {
+        QPainterPath sp;
+        sp.moveTo(4, 9.5); sp.lineTo(8, 9.5); sp.lineTo(13, 5);
+        sp.lineTo(13, 19); sp.lineTo(8, 14.5); sp.lineTo(4, 14.5);
+        sp.closeSubpath();
+        p.setBrush(color); p.setPen(Qt::NoPen);
+        p.drawPath(sp);
+        p.setPen(pen); p.setBrush(Qt::NoBrush);
+        QPainterPath w1;
+        w1.moveTo(16, 9.5);
+        w1.arcTo(QRectF(15.2, 9.5, 4, 5), -80, 160);
+        p.drawPath(w1);
+        QPainterPath w2;
+        w2.moveTo(18.5, 7);
+        w2.arcTo(QRectF(16.5, 7, 7, 10), -80, 160);
+        p.drawPath(w2);
         break;
     }
     }

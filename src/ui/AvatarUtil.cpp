@@ -17,6 +17,10 @@ QNetworkAccessManager& nam() {
     static QNetworkAccessManager m;
     return m;
 }
+// Ключ «url@size»: список чатов и профиль просят один url в разных size.
+QString cacheKey(const QString& url, int size) {
+    return url + QLatin1Char('@') + QString::number(size);
+}
 QHash<QString, QPixmap>& cache() {
     static QHash<QString, QPixmap> c;
     return c;
@@ -74,8 +78,9 @@ void setRound(QLabel* label, const QString& url, const QString& fallbackText, in
 
     if (url.isEmpty()) return;
 
-    if (cache().contains(url)) {
-        label->setPixmap(cache().value(url));
+    const QString ck = cacheKey(url, size);
+    if (cache().contains(ck)) {
+        label->setPixmap(cache().value(ck));
         return;
     }
 
@@ -86,7 +91,7 @@ void setRound(QLabel* label, const QString& url, const QString& fallbackText, in
         QPixmap src;
         if (src.loadFromData(avBytes)) {
             const QPixmap round = roundFromImage(src, size);
-            cache().insert(url, round);
+            cache().insert(ck, round);
             label->setPixmap(round);
             return;
         }
@@ -107,7 +112,7 @@ void setRound(QLabel* label, const QString& url, const QString& fallbackText, in
         if (!src.loadFromData(data)) return;
         FileCache::instance().store(key, data);   // повторно не качаем
         QPixmap round = roundFromImage(src, size);
-        cache().insert(key, round);
+        cache().insert(cacheKey(key, size), round);
         if (guard) guard->setPixmap(round);
     });
 }

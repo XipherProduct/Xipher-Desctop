@@ -1,6 +1,8 @@
 #include "ui/SuperSearchDialog.h"
 #include "net/ApiClient.h"
+#include "net/Models.h"
 
+#include <QAbstractButton>
 #include <QEvent>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -14,6 +16,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <algorithm>
 
 namespace {
 
@@ -69,24 +72,30 @@ SuperSearchDialog::SuperSearchDialog(ApiClient* api, QWidget* parent)
         "#superSearchOverlay { background:rgba(5,4,8,0.55); }"
         "#ssCard { background:#131218; border:1px solid rgba(255,255,255,0.10);"
         "  border-radius:20px; }"
+        "#ssTitle { font-size:16px; font-weight:700; color:#F3F1F8; }"
         "#ssInput { background:#1A1822; border:1px solid rgba(255,255,255,0.10);"
         "  border-radius:12px; min-height:42px; padding:0 14px; color:#F3F1F8; font-size:15px; }"
         "#ssInput:focus { border:1px solid #8B5CF6; }"
+        "#ssSegBtn { background:transparent; border:none; border-radius:9px;"
+        "  color:#726C82; font-size:13px; font-weight:600; min-height:30px; padding:0 14px; }"
+        "#ssSegBtn:checked { background:#221F2C; color:#F3F1F8; }"
         "#ssChip { background:#1A1822; border:1px solid rgba(255,255,255,0.08);"
         "  border-radius:14px; color:#ACA6BD; font-size:12px; padding:5px 10px; }"
         "#ssChip:hover { background:rgba(139,92,246,0.16); color:#F3F1F8; }"
+        "#ssChip:checked { background:rgba(139,92,246,0.28); color:#F3F1F8;"
+        "  border-color:rgba(139,92,246,0.6); }"
+        "#ssGroup { color:#9B82C9; font-size:11px; font-weight:800; letter-spacing:1px;"
+        "  text-transform:uppercase; padding:10px 2px 2px; }"
         "#ssResult { background:#1A1822; border-radius:12px; }"
         "#ssResult:hover { background:#221F2C; }"
         "#ssHint { color:#726C82; font-size:12px; }"
-        "#ssMark { background:rgba(139,92,246,0.35); color:#F3F1F8; }"
-        "#ssMore { background:transparent; border:1px solid rgba(139,92,246,0.4);"
-        "  border-radius:10px; color:#BBA4FF; min-height:34px; padding:0 18px; }"
-        "#ssMore:hover { background:rgba(139,92,246,0.12); }"));
+        "#ssMeta { color:#726C82; font-size:11px; }"
+        "#ssText { color:#F3F1F8; font-size:13px; }"));
     buildUi();
 
     debounce_ = new QTimer(this);
     debounce_->setSingleShot(true);
-    debounce_->setInterval(400);
+    debounce_->setInterval(350);
     connect(debounce_, &QTimer::timeout, this, &SuperSearchDialog::onDebouncedSearch);
     connect(api_, &ApiClient::messagesSearched, this, &SuperSearchDialog::onResults);
 }
@@ -94,15 +103,30 @@ SuperSearchDialog::SuperSearchDialog(ApiClient* api, QWidget* parent)
 void SuperSearchDialog::buildUi() {
     auto* card = new QWidget(this);
     card->setObjectName(QStringLiteral("ssCard"));
-    card->setFixedWidth(560);
+    card->setFixedWidth(600);
     auto* cl = new QVBoxLayout(card);
     cl->setContentsMargins(18, 14, 18, 14);
     cl->setSpacing(10);
 
-    // Заголовок + закрыть.
+    // Заголовок + сегмент режимов + закрыть (как xpss-header веба).
     auto* head = new QHBoxLayout();
-    auto* title = new QLabel(QStringLiteral("🔍  Супер-поиск"));
-    title->setStyleSheet(QStringLiteral("font-size:16px;font-weight:700;color:#F3F1F8;"));
+    auto* title = new QLabel(QStringLiteral("🔍  Поиск"));
+    title->setObjectName(QStringLiteral("ssTitle"));
+    auto* seg = new QHBoxLayout();
+    seg->setSpacing(2);
+    segNormal_ = new QPushButton(QStringLiteral("Обычный"));
+    segNormal_->setObjectName(QStringLiteral("ssSegBtn"));
+    segNormal_->setCheckable(true);
+    segNormal_->setCursor(Qt::PointingHandCursor);
+    segSuper_ = new QPushButton(QStringLiteral("Супер-поиск"));
+    segSuper_->setObjectName(QStringLiteral("ssSegBtn"));
+    segSuper_->setCheckable(true);
+    segSuper_->setCursor(Qt::PointingHandCursor);
+    segSuper_->setChecked(true);
+    connect(segNormal_, &QAbstractButton::clicked, this, [this]() { setMode(false); });
+    connect(segSuper_,  &QAbstractButton::clicked, this, [this]() { setMode(true); });
+    seg->addWidget(segNormal_);
+    seg->addWidget(segSuper_);
     auto* close = new QPushButton(QStringLiteral("✕"));
     close->setFixedSize(28, 28);
     close->setCursor(Qt::PointingHandCursor);
@@ -111,41 +135,67 @@ void SuperSearchDialog::buildUi() {
     connect(close, &QPushButton::clicked, this, &QWidget::hide);
     head->addWidget(title);
     head->addStretch();
+    head->addLayout(seg);
+    head->addSpacing(8);
     head->addWidget(close);
     cl->addLayout(head);
 
     input_ = new QLineEdit();
-    input_->setPlaceholderText(QStringLiteral("Искать «текст», фото, файлы, ссылки…"));
+    input_->setPlaceholderText(QStringLiteral("Поиск по сообщениям: «фото за неделю», «где обсуждали цену»…"));
     connect(input_, &QLineEdit::textChanged, this,
             [this](const QString& t) { if (t.trimmed().size() >= 2) debounce_->start(); });
     connect(input_, &QLineEdit::returnPressed, this, &SuperSearchDialog::onDebouncedSearch);
     cl->addWidget(input_);
 
-    // Чипы быстрых фильтров (как CHIPS в вебе).
+    // Область: «В этом чате» / «Во всех чатах» (как xpss-miniseg веба).
+    auto* metaRow = new QHBoxLayout();
+    metaRow->setSpacing(6);
+    scopeChatBtn_ = new QPushButton(QStringLiteral("В этом чате"));
+    scopeChatBtn_->setObjectName(QStringLiteral("ssChip"));
+    scopeChatBtn_->setCheckable(true);
+    scopeChatBtn_->setCursor(Qt::PointingHandCursor);
+    scopeAllBtn_ = new QPushButton(QStringLiteral("Во всех чатах"));
+    scopeAllBtn_->setObjectName(QStringLiteral("ssChip"));
+    scopeAllBtn_->setCheckable(true);
+    scopeAllBtn_->setCursor(Qt::PointingHandCursor);
+    connect(scopeChatBtn_, &QAbstractButton::clicked, this, [this]() { setScope(false); });
+    connect(scopeAllBtn_,  &QAbstractButton::clicked, this, [this]() { setScope(true); });
+    metaRow->addWidget(scopeChatBtn_);
+    metaRow->addWidget(scopeAllBtn_);
+    metaRow->addStretch();
+    cl->addLayout(metaRow);
+
+    // Чипы быстрых фильтров: фиксируют тип контента (как CHIPS веба).
     auto* chips = new QHBoxLayout();
     chips->setSpacing(6);
-    const QList<std::pair<QString, QPair<QString, QString>>> chipDefs = {
-        {QStringLiteral("📷 Фото"),     {QStringLiteral(""),  QStringLiteral("image")}},
-        {QStringLiteral("📎 Файлы"),    {QStringLiteral(""),  QStringLiteral("file")}},
-        {QStringLiteral("🎤 Голосовые"),{QStringLiteral(""),  QStringLiteral("voice")}},
-        {QStringLiteral("🔗 Ссылки"),   {QStringLiteral("http"), QStringLiteral("")}},
-        {QStringLiteral("📍 Локации"),  {QStringLiteral(""),  QStringLiteral("location")}},
+    const QList<std::pair<QString, QString>> chipDefs = {
+        {QStringLiteral("📷 Фото"),     QStringLiteral("image")},
+        {QStringLiteral("📎 Файлы"),    QStringLiteral("file")},
+        {QStringLiteral("🎤 Голосовые"),QStringLiteral("voice")},
+        {QStringLiteral("🎬 Видео"),    QStringLiteral("video")},
+        {QStringLiteral("🔗 Ссылки"),   QStringLiteral("_link")},
+        {QStringLiteral("📍 Локации"),  QStringLiteral("location")},
     };
     for (const auto& d : chipDefs) {
         auto* b = new QPushButton(d.first);
         b->setObjectName(QStringLiteral("ssChip"));
+        b->setCheckable(true);
         b->setCursor(Qt::PointingHandCursor);
-        connect(b, &QPushButton::clicked, this, [this, d]() {
-            input_->clear();
-            doSearch(d.second.first, d.second.second);
+        const QString type = d.second;
+        connect(b, &QAbstractButton::clicked, this, [this, b, type]() {
+            pinnedType_ = (pinnedType_ == type) ? QString() : type;
+            for (auto* other : typeChips_) other->setChecked(other == b && !pinnedType_.isEmpty());
+            onDebouncedSearch();
         });
+        typeChips_.append(b);
         chips->addWidget(b);
     }
     chips->addStretch();
     cl->addLayout(chips);
 
     auto* hint = new QLabel(QStringLiteral(
-        "Примеры: «где обсуждали цену?» • «найди фотку паспорта» • «найди где он сказал 'ок'»"));
+        "Супер-режим понимает естественный язык: «найди фотку паспорта», "
+        "«где он сказал 'ок'». Обычный — просто ищет текст."));
     hint->setObjectName(QStringLiteral("ssHint"));
     hint->setWordWrap(true);
     cl->addWidget(hint);
@@ -168,13 +218,6 @@ void SuperSearchDialog::buildUi() {
     sa->setWidget(resultsBox_);
     cl->addWidget(sa);
 
-    moreBtn_ = new QPushButton(QStringLiteral("Загрузить ещё"));
-    moreBtn_->setObjectName(QStringLiteral("ssMore"));
-    moreBtn_->setCursor(Qt::PointingHandCursor);
-    moreBtn_->hide();
-    connect(moreBtn_, &QPushButton::clicked, this, &SuperSearchDialog::loadMore);
-    cl->addWidget(moreBtn_, 0, Qt::AlignHCenter);
-
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->addStretch();
@@ -188,9 +231,28 @@ void SuperSearchDialog::buildUi() {
     hide();
 }
 
+void SuperSearchDialog::setMode(bool superMode) {
+    superMode_ = superMode;
+    segSuper_->setChecked(superMode);
+    segNormal_->setChecked(!superMode);
+    if (!input_->text().trimmed().isEmpty()) onDebouncedSearch();
+}
+
+void SuperSearchDialog::setScope(bool allChats) {
+    scopeAll_ = allChats;
+    scopeAllBtn_->setChecked(allChats);
+    scopeChatBtn_->setChecked(!allChats);
+    if (!input_->text().trimmed().isEmpty()) onDebouncedSearch();
+}
+
 void SuperSearchDialog::openFor(const QString& chatId, const QString& context) {
     chatId_ = chatId;
     context_ = context.isEmpty() ? QStringLiteral("dm") : context;
+    // Без чата (вызов из пустого состояния) — сразу глобальная область.
+    scopeAll_ = chatId_.isEmpty() ? true : scopeAll_;
+    scopeAllBtn_->setChecked(scopeAll_);
+    scopeChatBtn_->setChecked(!scopeAll_);
+    scopeChatBtn_->setEnabled(!chatId_.isEmpty());
     clearResults();
     input_->clear();
     show();
@@ -203,9 +265,11 @@ void SuperSearchDialog::keyPressEvent(QKeyEvent* e) {
     QWidget::keyPressEvent(e);
 }
 
-SuperSearchDialog::Parsed SuperSearchDialog::parseQuery(const QString& raw) const {
+SuperSearchDialog::Parsed SuperSearchDialog::parseQuery(const QString& raw, bool super) const {
     QString q = raw.trimmed();
     Parsed p;
+    if (!super) { p.keywords = q; return p; }   // обычный режим: текст как есть
+
     // 1) Кавычки → точная фраза.
     static const QRegularExpression quoteRe(QStringLiteral("[\"'«]([^\"'»]+)[\"'»]"));
     const auto qm = quoteRe.match(q);
@@ -253,32 +317,54 @@ SuperSearchDialog::Parsed SuperSearchDialog::parseQuery(const QString& raw) cons
 
 void SuperSearchDialog::onDebouncedSearch() {
     const QString val = input_->text().trimmed();
-    if (val.size() < 2) { clearResults(); return; }
-    const Parsed p = parseQuery(val);
+    if (val.size() < 2 && pinnedType_.isEmpty()) { clearResults(); return; }
+    Parsed p = parseQuery(val, superMode_);
+    if (!pinnedType_.isEmpty()) {
+        // Чип-тип главнее парсера; для ссылок ищем подстроку http.
+        p.type = pinnedType_ == QStringLiteral("_link") ? QString() : pinnedType_;
+        if (pinnedType_ == QStringLiteral("_link") && p.keywords.size() < 2)
+            p.keywords = QStringLiteral("http");
+    }
     doSearch(p.keywords, p.type);
 }
 
 void SuperSearchDialog::doSearch(const QString& keywords, const QString& type) {
-    if (chatId_.isEmpty()) return;
     lastKeywords_ = keywords;
     lastType_ = type;
     clearResults();
-    setBusy(true);
-    reqId_ = QStringLiteral("ssd_%1").arg(++seq_);
-    api_->searchMessages(chatId_, context_, keywords, type, 0, 50);
-}
+    if (keywords.size() < 2 && type.isEmpty()) return;
 
-void SuperSearchDialog::loadMore() {
-    if (chatId_.isEmpty()) return;
-    reqId_ = QStringLiteral("ssd_%1").arg(++seq_);
-    api_->searchMessages(chatId_, context_, lastKeywords_, lastType_, offset_, 50);
+    if (!scopeAll_ && !chatId_.isEmpty()) {
+        // Один чат — обычный запрос с пагинацией на сервере (50 на страницу).
+        activeReqIds_.insert(QStringLiteral("ssd_%1").arg(++seq_));
+        ++pending_;
+        api_->searchMessages(chatId_, context_, keywords, type, 0, 50);
+        return;
+    }
+    // Во всех чатах: параллельный обход до 16 чатов по 10 результатов
+    // (1:1 с searchAcross веба: каналы и «Избранное» не ищем).
+    QList<QPair<QString, QString>> targets;   // (id, context)
+    if (!chatId_.isEmpty()) {
+        targets.append({chatId_, context_});
+    }
+    for (const Chat& c : chats_) {
+        if (c.id == chatId_) continue;
+        if (c.kind == ChatKind::Channel || c.isSaved) continue;
+        targets.append({c.id, c.kind == ChatKind::Group
+            ? QStringLiteral("group") : QStringLiteral("dm")});
+        if (targets.size() >= 16) break;
+    }
+    for (const auto& t : targets) {
+        activeReqIds_.insert(QStringLiteral("ssd_%1").arg(++seq_));
+        ++pending_;
+        api_->searchMessages(t.first, t.second, keywords, type, 0, 10);
+    }
 }
-
-void SuperSearchDialog::setBusy(bool busy) { searching_ = busy; }
 
 void SuperSearchDialog::clearResults() {
-    offset_ = 0;
-    moreBtn_->hide();
+    acc_.clear();
+    activeReqIds_.clear();
+    pending_ = 0;
     while (resultsBox_->layout()->count() > 1) {
         QLayoutItem* it = resultsBox_->layout()->takeAt(0);
         if (it->widget()) it->widget()->deleteLater();
@@ -286,70 +372,122 @@ void SuperSearchDialog::clearResults() {
     }
 }
 
-void SuperSearchDialog::onResults(const QString& requestId, const QJsonArray& messages) {
-    if (requestId != reqId_) return;   // устаревший ответ
-    searching_ = false;
+void SuperSearchDialog::addChatGroupHeader(const QString& title) {
+    auto* l = new QLabel(title);
+    l->setObjectName(QStringLiteral("ssGroup"));
     auto* lay = static_cast<QVBoxLayout*>(resultsBox_->layout());
-    int insertAt = lay->count() - 1;   // перед финальным stretch
+    lay->insertWidget(lay->count() - 1, l);
+}
 
-    if (messages.isEmpty() && lay->count() == 1) {
-        auto* empty = new QLabel(QStringLiteral("Ничего не найдено"));
-        empty->setAlignment(Qt::AlignCenter);
-        empty->setStyleSheet(QStringLiteral("color:#726C82;padding:24px;font-size:14px;"));
-        lay->insertWidget(insertAt++, empty);
+void SuperSearchDialog::addResultRow(const QJsonObject& m) {
+    const QString type = m.value(QStringLiteral("message_type")).toString(QStringLiteral("text"));
+    const QString id = m.value(QStringLiteral("id")).toString();
+    const QString chatId = m.value(QStringLiteral("__chat_id")).toString(chatId_);
+    const bool isMedia = type != QStringLiteral("text");
+    const QString kw = lastKeywords_;
+
+    QString preview;
+    if (isMedia)
+        preview = QStringLiteral("%1 %2").arg(typeIcon(type),
+            m.value(QStringLiteral("file_name")).toString(type));
+    else
+        preview = m.value(QStringLiteral("content")).toString();
+
+    auto* row = new QWidget();
+    row->setObjectName(QStringLiteral("ssResult"));
+    auto* hl = new QHBoxLayout(row);
+    hl->setContentsMargins(10, 8, 12, 8);
+    hl->setSpacing(10);
+    auto* ic = new QLabel(typeIcon(type), row);
+    ic->setFixedSize(24, 24);
+    ic->setAlignment(Qt::AlignCenter);
+    ic->setStyleSheet(QStringLiteral("font-size:16px;"));
+    hl->addWidget(ic);
+    auto* body = new QVBoxLayout();
+    body->setSpacing(1);
+    const QString sender = m.value(QStringLiteral("sent")).toBool()
+        ? QStringLiteral("Вы") : m.value(QStringLiteral("sender_username")).toString();
+    const QString when = m.value(QStringLiteral("created_at")).toString().left(10)
+                       + QLatin1Char(' ') + m.value(QStringLiteral("time")).toString();
+    auto* meta = new QLabel(QStringLiteral("%1  •  %2").arg(sender, when), row);
+    meta->setObjectName(QStringLiteral("ssMeta"));
+    body->addWidget(meta);
+    auto* txt = new QLabel(preview, row);
+    txt->setObjectName(QStringLiteral("ssText"));
+    txt->setWordWrap(true);
+    if (!kw.isEmpty() && !isMedia) {
+        // Подсветка совпадения, как ss-mark веба.
+        const int at = txt->text().toLower().indexOf(kw.toLower());
+        if (at >= 0) {
+            const QString esc = txt->text();
+            txt->setText(QStringLiteral("%1<span style=\"background:rgba(139,92,246,0.45);\">%2</span>%3")
+                .arg(esc.left(at).toHtmlEscaped(), esc.mid(at, kw.size()).toHtmlEscaped(),
+                     esc.mid(at + kw.size()).toHtmlEscaped()));
+            txt->setTextFormat(Qt::RichText);
+        }
+    }
+    body->addWidget(txt);
+    hl->addLayout(body, 1);
+
+    row->setCursor(Qt::PointingHandCursor);
+    row->installEventFilter(new SuperSearchClickFilter([this, chatId, id]() {
+        emit resultPicked(chatId, id);
+        hide();
+    }, row));
+
+    auto* lay = static_cast<QVBoxLayout*>(resultsBox_->layout());
+    lay->insertWidget(lay->count() - 1, row);
+}
+
+void SuperSearchDialog::onResults(const QString& requestId, const QJsonArray& messages) {
+    if (!activeReqIds_.contains(requestId)) return;   // устаревший ответ
+    activeReqIds_.remove(requestId);
+    const bool single = !scopeAll_ && !chatId_.isEmpty();
+
+    if (single) {
+        // Одиночный чат: рисуем как есть.
+        auto* lay = static_cast<QVBoxLayout*>(resultsBox_->layout());
+        if (messages.isEmpty()) {
+            auto* empty = new QLabel(QStringLiteral("Ничего не найдено"));
+            empty->setAlignment(Qt::AlignCenter);
+            empty->setStyleSheet(QStringLiteral("color:#726C82;padding:24px;font-size:14px;"));
+            lay->insertWidget(lay->count() - 1, empty);
+            return;
+        }
+        for (const QJsonValue& v : messages) addResultRow(v.toObject());
         return;
     }
 
-    for (const QJsonValue& v : messages) {
-        const QJsonObject m = v.toObject();
-        const QString type = m.value(QStringLiteral("message_type")).toString(QStringLiteral("text"));
-        const bool isMedia = type != QStringLiteral("text");
-        const QString kw = lastKeywords_;
-
-        // Превью: медиа — имя файла; текст — контент с подсветкой.
-        QString preview;
-        if (isMedia)
-            preview = QStringLiteral("%1 %2").arg(typeIcon(type),
-                m.value(QStringLiteral("file_name")).toString(type));
-        else
-            preview = m.value(QStringLiteral("content")).toString();
-
-        auto* row = new QWidget();
-        row->setObjectName(QStringLiteral("ssResult"));
-        auto* hl = new QHBoxLayout(row);
-        hl->setContentsMargins(10, 8, 12, 8);
-        hl->setSpacing(10);
-        auto* ic = new QLabel(typeIcon(type), row);
-        ic->setFixedSize(24, 24);
-        ic->setAlignment(Qt::AlignCenter);
-        ic->setStyleSheet(QStringLiteral("font-size:16px;"));
-        hl->addWidget(ic);
-        auto* body = new QVBoxLayout();
-        body->setSpacing(1);
-        const QString sender = m.value(QStringLiteral("sent")).toBool()
-            ? QStringLiteral("Вы") : m.value(QStringLiteral("sender_username")).toString();
-        const QString when = m.value(QStringLiteral("created_at")).toString().left(10)
-                           + QLatin1Char(' ') + m.value(QStringLiteral("time")).toString();
-        auto* meta = new QLabel(QStringLiteral("%1  •  %2").arg(sender, when), row);
-        meta->setStyleSheet(QStringLiteral("color:#726C82;font-size:11px;"));
-        body->addWidget(meta);
-        auto* txt = new QLabel(preview, row);
-        txt->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:13px;"));
-        txt->setWordWrap(true);
-        body->addWidget(txt);
-        hl->addLayout(body, 1);
-
-        const QString id = m.value(QStringLiteral("id")).toString();
-        row->setCursor(Qt::PointingHandCursor);
-        row->installEventFilter(new SuperSearchClickFilter([this, id]() {
-            emit resultPicked(id);
-            hide();
-        }, row));
-
-        lay->insertWidget(insertAt++, row);
+    // «Во всех чатах»: каждый ответ — один чат; копим группы, рисуем,
+    // когда завершатся все запросы (pending_).
+    if (!messages.isEmpty()) {
+        const QString cid = messages.first().toObject()
+                                .value(QStringLiteral("__chat_id")).toString();
+        QString cname;
+        for (const Chat& c : chats_)
+            if (c.id == cid) { cname = c.displayName; break; }
+        acc_.append({cid, QString(), cname, messages});
     }
-    offset_ += messages.size();
-    moreBtn_->setVisible(messages.size() >= 50);
+    if (--pending_ > 0) return;
+
+    auto* lay = static_cast<QVBoxLayout*>(resultsBox_->layout());
+    if (acc_.isEmpty()) {
+        auto* empty = new QLabel(QStringLiteral("Ничего не найдено"));
+        empty->setAlignment(Qt::AlignCenter);
+        empty->setStyleSheet(QStringLiteral("color:#726C82;padding:24px;font-size:14px;"));
+        lay->insertWidget(lay->count() - 1, empty);
+        return;
+    }
+    std::sort(acc_.begin(), acc_.end(), [](const Acc& a, const Acc& b) {
+        const QString da = a.msgs.first().toObject().value(QStringLiteral("created_at")).toString();
+        const QString db = b.msgs.first().toObject().value(QStringLiteral("created_at")).toString();
+        return da > db;
+    });
+    for (const Acc& g : acc_) {
+        addChatGroupHeader(g.name.isEmpty() ? QStringLiteral("Чат") : g.name);
+        for (const QJsonValue& v : g.msgs) addResultRow(v.toObject());
+    }
+    acc_.clear();
 }
 
 // ── Простой клик-фильтр для строк результата ─────────────────────────────────

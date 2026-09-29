@@ -146,27 +146,39 @@ void StoriesBar::applyData(const QList<StoryUserGroup>& groups) {
 
 QWidget* StoriesBar::makeTile(const StoryUserGroup& g, int index) {
     // Кольцо + аватар + подпись — 1:1 с .story-ring/.story-avatar веба.
+    // Аватар — ОТДЕЛЬНЫЙ лейбл внутри кольца: раньше setRound сжимал сам
+    // лейбл-кольцо до 52px, и рамка 2px срезала картинку сверху/справа.
     auto* col = new QWidget();
     auto* v = new QVBoxLayout(col);
     v->setContentsMargins(0, 0, 0, 0);
     v->setSpacing(4);
 
-    auto* ring = new QLabel(col);
+    auto* ring = new QWidget(col);
     ring->setFixedSize(56, 56);
-    ring->setAlignment(Qt::AlignCenter);
     const QString ringColor = g.stories.isEmpty() ? QStringLiteral("rgba(255,255,255,0.14)")
                             : (g.hasUnread ? QStringLiteral("#8B5CF6")
                                            : QStringLiteral("rgba(255,255,255,0.22)"));
     ring->setStyleSheet(QStringLiteral(
-        "border:2px solid %1;border-radius:30px;background:#1A1822;font-size:20px;"
-        "font-weight:700;color:#F3F1F8;")
+        "border:2px solid %1;border-radius:30px;background:#1A1822;")
         .arg(ringColor));
-    ring->setText(g.stories.isEmpty() ? QStringLiteral("＋")
-                 : (g.avatarUrl.isEmpty()
-                    ? g.username.left(1).toUpper()
-                    : QString()));
+    auto* ringLay = new QVBoxLayout(ring);
+    ringLay->setContentsMargins(0, 0, 0, 0);
+    bool hasAvatar = false;
     if (!g.avatarUrl.isEmpty() && !g.stories.isEmpty()) {
-        Avatar::setRound(ring, g.avatarUrl, g.username.left(1).toUpper(), 52);
+        auto* av = new QLabel(ring);
+        av->setAttribute(Qt::WA_TransparentForMouseEvents);
+        Avatar::setRound(av, g.avatarUrl, g.username.left(1).toUpper(), 46);
+        ringLay->addWidget(av, 0, Qt::AlignCenter);
+        hasAvatar = true;
+    }
+    if (!hasAvatar) {
+        auto* ph = new QLabel(g.stories.isEmpty() ? QStringLiteral("＋")
+                              : g.username.left(1).toUpper(), ring);
+        ph->setAttribute(Qt::WA_TransparentForMouseEvents);
+        ph->setAlignment(Qt::AlignCenter);
+        ph->setStyleSheet(QStringLiteral(
+            "font-size:20px;font-weight:700;color:#F3F1F8;background:transparent;"));
+        ringLay->addWidget(ph);
     }
     v->addWidget(ring, 0, Qt::AlignHCenter);
 

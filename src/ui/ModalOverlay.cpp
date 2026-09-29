@@ -55,14 +55,16 @@ void ModalOverlay::relayout() {
     const int availH = qMax(120, int(height() * 0.94));
     // Предпочтительная высота фиксируется при первом проходе (диалоги задают
     // её через card()->setFixedHeight(...) в конструкторе).
-    if (cardPrefH_ == 0) cardPrefH_ = card_->minimumHeight();
+    if (cardPrefH_ == 0 && !autoHeight_) cardPrefH_ = card_->minimumHeight();
     card_->setFixedWidth(qMin(cardWidth_, availW));
-    const int h = cardPrefH_ > 0 ? qMin(cardPrefH_, availH) : 0;
+    const int h = (cardPrefH_ > 0 && !autoHeight_) ? qMin(cardPrefH_, availH) : 0;
     if (h > 0) {
         card_->setFixedHeight(h);
     } else {
-        card_->setMinimumHeight(0);
-        card_->setMaximumHeight(availH);   // контент задаёт высоту, но не выше
+        // Авто-высота: минимум задаёт КОНТЕНТ (fitHeight у профиля), здесь
+        // только потолок; ручной сброс минимума сжал бы карточку обратно.
+        if (!autoHeight_) card_->setMinimumHeight(0);
+        card_->setMaximumHeight(availH);
     }
 
     // Диалоги перестраиваются под ФИНАЛЬНЫЙ размер карточки: событие ресайза
