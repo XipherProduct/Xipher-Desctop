@@ -55,7 +55,11 @@ jobs:
       #   4) project-slug / signing-policy-slug / artifact-configuration-slug —
       #      из настроек проекта SignPath.
       - name: Sign with SignPath
+        id: signpath
         if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        # Подпись — необязательный шаг: неподписанный артефакт уже загружен,
+        # и истёкший токен SignPath не должен ронять выпуск релиза.
+        continue-on-error: true
         uses: signpath/github-action-submit-signing-request@v1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -68,7 +72,7 @@ jobs:
           output-artifact-directory: 'signed'
 
       - name: Upload signed artifact
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && steps.signpath.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: Xipher-windows-signed
