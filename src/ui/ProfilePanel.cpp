@@ -666,6 +666,24 @@ ProfilePanel::ProfilePanel(ApiClient* api, QWidget* parent)
     });
     connect(api_, &ApiClient::mediaCountLoaded, this,
             [this](const QString& chatId, int total) { applyMediaCount(chatId, total); });
+    // Коллекция подарков: для инлайн-фолбэка (ничего не закреплено) и для
+    // экрана «Показать все подарки» (как openCollection веба).
+    connect(api_, &ApiClient::userGiftsLoaded, this,
+            [this](const QString& userId, const QJsonArray& gifts, bool ok, bool hidden) {
+        Q_UNUSED(userId);
+        if (userId != userId_) return;
+        allGifts_ = gifts;
+        allGiftsHidden_ = hidden || !ok;
+        if (giftsInlinePending_) {
+            giftsInlinePending_ = false;
+            if (!allGiftsHidden_ && !allGifts_.isEmpty()) fillGiftsRow(allGifts_);
+        }
+        // Экран «Показать все подарки» уже открыт и ждал данных.
+        if (collectionScreen_) {
+            buildCollectionScreen(collectionScreen_);
+            collectionScreen_ = nullptr;
+        }
+    });
 }
 
 bool ProfilePanel::eventFilter(QObject* obj, QEvent* e) {
@@ -1145,6 +1163,139 @@ QWidget* ProfilePanel::makeMarks(const QJsonArray& marks) {
     return wrap;
 }
 
+
+// Ряд карточек подарков (закреплённые, а если их нет — недавние): до трёх,
+// как LIMIT 3 в /api/profile/view.
+void ProfilePanel::fillGiftsRow(const QJsonArray& list) {
+    if (!giftsRow_) return;
+    if (giftsRow_->layout()) {
+        QLayoutItem* it;
+        while ((it = giftsRow_->layout()->takeAt(0)) != nullptr) {
+            if (it->widget()) it->widget()->deleteLater();
+            delete it;
+        }
+        delete giftsRow_->layout();
+    }
+    auto* grid = new QGridLayout(giftsRow_);
+    grid->setContentsMargins(8, 8, 8, 8);
+    grid->setSpacing(8);
+    int i = 0;
+    for (const QJsonValue& gv : list) {
+        if (i >= 3) break;
+        const QJsonObject g = gv.toObject();
+        auto* card = new QWidget(giftsRow_);
+        card->setObjectName(QStringLiteral("profGift"));
+        card->setAttribute(Qt::WA_StyledBackground, true);
+        card->setStyleSheet(QStringLiteral(
+            "QWidget#profGift{background:#221F2C;border-radius:14px;}"));
+        card->setMinimumHeight(120);
+        auto* cl = new QVBoxLayout(card);
+        cl->setContentsMargins(8, 12, 8, 12);
+        cl->setSpacing(6);
+        auto* art = new QLabel(g.value(QStringLiteral("icon")).toString(
+            g.value(QStringLiteral("art")).toString(QString::fromUtf8("\U0001F381"))), card);
+        art->setAlignment(Qt::AlignCenter);
+        art->setStyleSheet(QStringLiteral("font-size:32px;"));
+        auto* nm = new QLabel(g.value(QStringLiteral("name")).toString(
+            g.value(QStringLiteral("title")).toString()), card);
+        nm->setObjectName(QStringLiteral("profGiftName"));
+        nm->setAlignment(Qt::AlignHCenter);
+        nm->setWordWrap(true);
+        cl->addWidget(art, 1);
+        cl->addWidget(nm);
+        const QString msg = g.value(QStringLiteral("message")).toString();
+        if (!msg.isEmpty()) card->setToolTip(msg);
+        grid->addWidget(card, 0, i);
+        ++i;
+    }
+    fitHeight();
+}
+
+// Экран всей коллекции — как openCollection веба: карточки с «от кого ·
+// когда», подписью и отметкой закрепления.
+void ProfilePanel::buildCollectionScreen(QWidget* host) {
+    if (!host) return;
+    if (host->layout()) {
+        QLayoutItem* it;
+        while ((it = host->layout()->takeAt(0)) != nullptr) {
+            if (it->widget()) it->widget()->deleteLater();
+            delete it;
+        }
+        delete host->layout();
+    }
+    auto* hv = new QVBoxLayout(host);
+    hv->setContentsMargins(16, 12, 16, 16);
+    hv->setSpacing(8);
+    if (allGiftsHidden_) {
+        auto* note = new QLabel(QStringLiteral("Этот человек скрыл свои подарки"), host);
+        note->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+        hv->addWidget(note);
+        return;
+    }
+    if (allGifts_.isEmpty()) {
+        auto* note = new QLabel(isSelf_ ? QStringLiteral("Вам пока не дарили подарков")
+                                        : QStringLiteral("Подарков пока нет"), host);
+        note->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+        hv->addWidget(note);
+        return;
+    }
+    for (const QJsonValue& gv : allGifts_) {
+        const QJsonObject g = gv.toObject();
+        const bool pinned = g.value(QStringLiteral("pinned")).toBool(false);
+        auto* card = new QWidget(host);
+        card->setAttribute(Qt::WA_StyledBackground, true);
+        card->setStyleSheet(QStringLiteral(
+            "QWidget{background:#1A1822;border-radius:20px;%1}")
+            .arg(pinned ? QStringLiteral("border:1px solid rgba(139,92,246,0.34);")
+                        : QString()));
+        auto* hl = new QHBoxLayout(card);
+        hl->setContentsMargins(12, 12, 12, 12);
+        hl->setSpacing(12);
+        auto* art = new QLabel(g.value(QStringLiteral("icon")).toString(
+            g.value(QStringLiteral("art")).toString(QString::fromUtf8("\U0001F381"))), card);
+        art->setStyleSheet(QStringLiteral("font-size:34px;background:transparent;"));
+        auto* col2 = new QVBoxLayout();
+        col2->setSpacing(2);
+        auto* nm = new QLabel(g.value(QStringLiteral("name")).toString(
+            g.value(QStringLiteral("title")).toString()), card);
+        nm->setStyleSheet(QStringLiteral(
+            "color:#F3F1F8;font-size:14px;font-weight:600;background:transparent;"));
+        col2->addWidget(nm);
+        if (pinned) {
+            auto* pin = new QLabel(QStringLiteral("Закреплён"), card);
+            pin->setStyleSheet(QStringLiteral(
+                "color:#BBA4FF;font-size:11px;background:transparent;"));
+            col2->addWidget(pin);
+        }
+        // «от @user · 22 сентября» — как xp-gc__meta.
+        QStringList meta;
+        const QString from = g.value(QStringLiteral("from")).toString();
+        if (!from.isEmpty()) meta << QStringLiteral("от @") + from;
+        const QDateTime dt = parseServerTime(g.value(QStringLiteral("created_at")).toString());
+        if (dt.isValid())
+            meta << QStringLiteral("%1 %2").arg(dt.date().day())
+                    .arg(QString::fromUtf8(kMonths[dt.date().month()]));
+        if (!meta.isEmpty()) {
+            auto* m = new QLabel(meta.join(QStringLiteral(" · ")), card);
+            m->setStyleSheet(QStringLiteral(
+                "color:#726C82;font-size:12px;background:transparent;"));
+            col2->addWidget(m);
+        }
+        const QString msg = g.value(QStringLiteral("message")).toString();
+        if (!msg.isEmpty()) {
+            auto* m2 = new QLabel(msg, card);
+            m2->setWordWrap(true);
+            m2->setStyleSheet(QStringLiteral(
+                "color:#ACA6BD;font-size:12px;font-style:italic;background:transparent;"));
+            col2->addWidget(m2);
+        }
+        hl->addWidget(art);
+        hl->addLayout(col2, 1);
+        hv->addWidget(card);
+    }
+    hv->addStretch(1);
+}
+
 QWidget* ProfilePanel::makeGifts(const QJsonObject& gifts) {
     auto* sec = new QFrame();
     sec->setObjectName(QStringLiteral("profSec"));
@@ -1165,81 +1316,41 @@ QWidget* ProfilePanel::makeGifts(const QJsonObject& gifts) {
     v->addLayout(head);
 
     const QJsonArray pinned = gifts.value(QStringLiteral("pinned")).toArray();
+    giftsRow_ = new QWidget(sec);
+    giftsRow_->setStyleSheet(QStringLiteral("background:transparent;"));
+    v->addWidget(giftsRow_);
     if (!pinned.isEmpty()) {
-        auto* grid = new QGridLayout();
-        grid->setContentsMargins(8, 8, 8, 8);
-        grid->setSpacing(8);
-        int i = 0;
-        for (const QJsonValue& gv : pinned) {
-            const QJsonObject g = gv.toObject();
-            auto* card = new QWidget(sec);
-            card->setObjectName(QStringLiteral("profGift"));
-            card->setAttribute(Qt::WA_StyledBackground, true);
-            card->setStyleSheet(QStringLiteral(
-                "QWidget#profGift{background:#221F2C;border-radius:14px;}"));
-            card->setMinimumHeight(120);
-            auto* cl = new QVBoxLayout(card);
-            cl->setContentsMargins(8, 12, 8, 12);
-            cl->setSpacing(6);
-            auto* art = new QLabel(g.value(QStringLiteral("icon")).toString(
-                QStringLiteral("🎁")), card);
-            art->setAlignment(Qt::AlignCenter);
-            art->setStyleSheet(QStringLiteral("font-size:32px;"));
-            auto* nm = new QLabel(g.value(QStringLiteral("name")).toString(), card);
-            nm->setObjectName(QStringLiteral("profGiftName"));
-            nm->setAlignment(Qt::AlignHCenter);
-            nm->setWordWrap(true);
-            cl->addWidget(art, 1);
-            cl->addWidget(nm);
-            const QString msg = g.value(QStringLiteral("message")).toString();
-            if (!msg.isEmpty()) card->setToolTip(msg);
-            grid->addWidget(card, i / 5, i % 5);
-            ++i;
-        }
-        v->addLayout(grid);
+        fillGiftsRow(pinned);
+    } else if (!allGifts_.isEmpty()) {
+        fillGiftsRow(allGifts_);   // уже загружены (повторное открытие)
+    } else {
+        // Ничего не закреплено, но подарки есть: показываем последние,
+        // пока едет /api/gifts/of-user (в вебе закреплённые — выбор владельца;
+        // пустой ряд читался бы как «подарков нет»).
+        giftsInlinePending_ = true;
+        api_->giftsOfUser(userId_);
     }
 
     auto* all = new QPushButton(QStringLiteral("Показать все подарки"), sec);
     all->setObjectName(QStringLiteral("profMoreBtn"));
     all->setCursor(Qt::PointingHandCursor);
-    const QJsonArray pinnedCopy = pinned;
-    connect(all, &QPushButton::clicked, this, [this, pinnedCopy]() {
-        // Вся коллекция — вложенным экраном с шапкой «назад».
+    connect(all, &QPushButton::clicked, this, [this]() {
+        // Вся коллекция — вложенным экраном с шапкой «назад» (openCollection).
         auto* host = new QWidget();
         host->setStyleSheet(QStringLiteral("background:transparent;"));
         auto* hv = new QVBoxLayout(host);
         hv->setContentsMargins(16, 12, 16, 16);
         hv->setSpacing(8);
-        for (const QJsonValue& gv : pinnedCopy) {
-            const QJsonObject g = gv.toObject();
-            auto* card = new QWidget(host);
-            card->setStyleSheet(QStringLiteral(
-                "QWidget{background:#221F2C;border-radius:14px;}"));
-            card->setAttribute(Qt::WA_StyledBackground, true);
-            auto* hl = new QHBoxLayout(card);
-            hl->setContentsMargins(12, 12, 12, 12);
-            hl->setSpacing(12);
-            auto* art = new QLabel(g.value(QStringLiteral("icon")).toString(
-                QStringLiteral("🎁")), card);
-            art->setStyleSheet(QStringLiteral("font-size:28px;background:transparent;"));
-            auto* col2 = new QVBoxLayout();
-            auto* nm = new QLabel(g.value(QStringLiteral("name")).toString(), card);
-            nm->setStyleSheet(QStringLiteral(
-                "color:#F3F1F8;font-size:14px;background:transparent;"));
-            col2->addWidget(nm);
-            const QString msg = g.value(QStringLiteral("message")).toString();
-            if (!msg.isEmpty()) {
-                auto* m = new QLabel(msg, card);
-                m->setStyleSheet(QStringLiteral(
-                    "color:#ACA6BD;font-size:12px;font-style:italic;background:transparent;"));
-                m->setWordWrap(true);
-                col2->addWidget(m);
-            }
-            hl->addWidget(art);
-            hl->addLayout(col2, 1);
-            hv->addWidget(card);
+        if (allGifts_.isEmpty() && !allGiftsHidden_) {
+            auto* loading = new QLabel(QStringLiteral("Загрузка…"), host);
+            loading->setStyleSheet(QStringLiteral(
+                "color:#726C82;font-size:13px;padding:16px;background:transparent;"));
+            hv->addWidget(loading);
+            collectionScreen_ = host;
+            if (!allGiftsRequested_) { allGiftsRequested_ = true; api_->giftsOfUser(userId_); }
+        } else {
+            buildCollectionScreen(host);
         }
-        hv->addStretch(1);
         pushScreen(QStringLiteral("Подарки"), host);
     });
     v->addWidget(all);

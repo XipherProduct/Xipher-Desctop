@@ -1660,6 +1660,21 @@ void ApiClient::botMiniappInit(const QString& botUserId) {
 
 // ── Подарки (как js/profile/gifts.js веба) ───────────────────────────────────
 
+// Коллекция подарков человека — как openCollection в profile/gifts.js веба.
+void ApiClient::giftsOfUser(const QString& userId) {
+    postJson(QStringLiteral("/api/gifts/of-user"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("user_id"), userId}},
+             [this, userId](const QJsonObject& o, bool ok, const QString&) {
+        const bool success = ok && o.value(QStringLiteral("success")).toBool(false);
+        const bool hidden = success && o.value(QStringLiteral("hidden")).toBool(false);
+        emit userGiftsLoaded(userId,
+                             success ? o.value(QStringLiteral("gifts")).toArray()
+                                     : QJsonArray(),
+                             success, hidden);
+    });
+}
+
 void ApiClient::giftsCatalog() {
     postJson(QStringLiteral("/api/gifts/catalog"),
              {{QStringLiteral("token"), Session::instance().token}},

@@ -157,8 +157,9 @@ public:
     void botCallback(const QString& messageId, const QString& callbackData);
     // Подписанный контекст пользователя для MiniApp: /api/bot-miniapp-init.
     void botMiniappInit(const QString& botUserId);
-    // Подарки: каталог и отправка (как gifts.js веба).
+    // Подарки: каталог, отправка и коллекция пользователя (profile/gifts.js).
     void giftsCatalog();
+    void giftsOfUser(const QString& userId);
     void giftSend(const QString& giftId, const QString& toUserId,
                   const QString& note, bool hideSender);
 
@@ -282,6 +283,9 @@ signals:
     void botCallbackDone(bool ok, const QJsonObject& response);
     void miniappInitReady(bool ok, const QString& initData);
     void giftsCatalogLoaded(const QJsonArray& gifts);
+    // Коллекция человека: /api/gifts/of-user. hidden=true — человек скрыл.
+    void userGiftsLoaded(const QString& userId, const QJsonArray& gifts,
+                         bool ok, bool hidden);
     void giftSent(bool ok, const QString& message);
 
 public:

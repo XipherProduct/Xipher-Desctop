@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QWidget>
 #include <QJsonDocument>
+#include <QLabel>
 #include <cstdio>
 
 #include "net/ApiClient.h"
@@ -52,6 +53,9 @@ int main(int argc, char** argv) {
         fprintf(stderr, "relation=%s\n",
                 QJsonDocument(data.value(QStringLiteral("relation")).toObject())
                     .toJson(QJsonDocument::Compact).constData());
+        fprintf(stderr, "gifts=%s\n",
+                QJsonDocument(data.value(QStringLiteral("gifts")).toObject())
+                    .toJson(QJsonDocument::Compact).constData());
     });
     QObject::connect(&api, &ApiClient::mediaCountLoaded, &app,
                      [](const QString& id, int total) {
@@ -61,6 +65,17 @@ int main(int argc, char** argv) {
     // Себя открываем: у пользователя именно свой профиль под рукой.
     prof.openFor(Session::instance().userId);
 
+    // Есть ли секция «Подарки» в отрисованном профиле.
+    QTimer::singleShot(3000, &app, [&]() {
+        int giftLabels = 0;
+        for (QLabel* l : prof.findChildren<QLabel*>())
+            if (l->text() == QStringLiteral("Подарки")) ++giftLabels;
+        fprintf(stderr, "[widgets] меток «Подарки»: %d\n", giftLabels);
+        int giftCards = 0;
+        for (QWidget* w : prof.findChildren<QWidget*>())
+            if (w->objectName() == QStringLiteral("profGift")) ++giftCards;
+        fprintf(stderr, "[widgets] карточек подарков: %d\n", giftCards);
+    });
     int shots = 0;
     QTimer t;
     QObject::connect(&t, &QTimer::timeout, &app, [&]() {

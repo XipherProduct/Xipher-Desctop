@@ -1,6 +1,7 @@
 #pragma once
 #include <QLabel>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QVariantAnimation>
 #include "ui/Icons.h"
 #include "ui/ModalOverlay.h"
@@ -85,6 +86,8 @@ private:
     QWidget* makeInfo(const QJsonObject& p);
     QWidget* makeMarks(const QJsonArray& marks);
     QWidget* makeGifts(const QJsonObject& gifts);
+    void fillGiftsRow(const QJsonArray& list);          // закреплённые/недавние
+    void buildCollectionScreen(QWidget* host);          // вся коллекция (of-user)
     QWidget* makeMediaEntry(const QJsonObject& p);
     QWidget* makeBottom(const QJsonObject& p, const QJsonObject& rel);
     void moreMenu(const QPoint& globalPos);
@@ -102,6 +105,12 @@ private:
     QVBoxLayout*    col_    = nullptr;     // колонка контента профиля
     QPushButton*    closeBtn_ = nullptr;   // крестик поверх баннера
     QWidget*        mediaRow_ = nullptr;   // строка «Общие медиа» (для счётчика)
+    QWidget*        giftsRow_ = nullptr;   // ряд карточек подарков (для до-заполнения)
+    QJsonArray      allGifts_;             // /api/gifts/of-user (вся коллекция)
+    bool            allGiftsHidden_ = false;
+    bool            allGiftsRequested_ = false;
+    bool            giftsInlinePending_ = false;
+    QWidget*        collectionScreen_ = nullptr;
     QString         userId_;
     QString         knownName_, knownAvatar_;
     bool            knownOnline_ = false;
