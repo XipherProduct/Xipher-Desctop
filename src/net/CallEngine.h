@@ -12,6 +12,7 @@
 
 namespace rtc { class PeerConnection; class Track; class RtpPacketizationConfig; }
 class QAudioSource;
+class QTimer;
 class QAudioSink;
 class QIODevice;
 struct OpusEncoder;
@@ -34,6 +35,9 @@ public:
     void addRemoteCandidate(const QString& cand, const QString& mid);
     void hangup();
     void setMuted(bool muted);
+    // Демо-режим: вместо микрофона в эфир идёт синтезированная мелодия
+    // (C5-E5-G5 арпеджио) — контролируемый звук без акустической петли.
+    void setTestTone(bool on);
     void setDeaf(bool deaf);   // не слышать собеседника (динамик в 0)
 
     // Статистика RTP: сколько кадров улетело/прилетело (20 мс Opus каждый).
@@ -81,4 +85,12 @@ private:
     OpusDecoder*  dec_ = nullptr;
     std::atomic<int> rtpSent_{0};
     std::atomic<int> rtpReceived_{0};
+
+    // Тест-тон (демо): таймер 20 мс гонит кадры мелодии вместо микрофона.
+    bool     testTone_ = false;
+    QTimer*  toneTimer_ = nullptr;
+    double   tonePhase_ = 0.0;
+    quint64  toneFrames_ = 0;
+    void sendToneFrame();
+    void encodeAndSend(const void* pcm16);
 };

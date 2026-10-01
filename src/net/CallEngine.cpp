@@ -10,6 +10,8 @@
 #endif
 
 #include <QAudioSource>
+#include <QTimer>
+#include <cmath>
 #include <QAudioSink>
 #include <QAudioFormat>
 #include <QMediaDevices>
@@ -265,6 +267,44 @@ void CallEngine::flushCandidates() {
 
 void CallEngine::setMuted(bool muted) { muted_ = muted; }
 
+// Демо-тон: арпеджио C5-E5-G5, нота 0.5 c, амплитудная огибающая без щелчков.
+void CallEngine::setTestTone(bool on) {
+    testTone_ = on;
+    if (!on) {
+        if (toneTimer_) toneTimer_->stop();
+        return;
+    }
+    if (!toneTimer_) {
+        toneTimer_ = new QTimer(this);
+        toneTimer_->setInterval(20);
+        connect(toneTimer_, &QTimer::timeout, this, &CallEngine::sendToneFrame);
+    }
+    if (audioStarted_) toneTimer_->start();
+}
+
+void CallEngine::sendToneFrame() {
+    if (!enc_ || !track_) return;
+    static const double kNotes[] = {523.25, 659.25, 783.99, 659.25};   // C5 E5 G5 E5
+    const double freq = kNotes[(toneFrames_ / 25) % 4];                // нота = 25 кадров
+    const quint64 inNote = toneFrames_ % 25;
+    // Плавные 5 мс на краях ноты — иначе щелчки на стыках.
+    double env = 1.0;
+    if (inNote < 12) env = double(inNote) / 12.0;
+    else if (inNote > 12 && inNote < 25 - 12) env = 1.0;
+    else if (inNote >= 25 - 12) env = double(25 - inNote) / 12.0;
+    env *= 0.16;   // негромко
+
+    opus_int16 pcm[kFrame];
+    for (int i = 0; i < kFrame; ++i) {
+        tonePhase_ += 2.0 * M_PI * freq / 48000.0;
+        if (tonePhase_ > 2.0 * M_PI) tonePhase_ -= 2.0 * M_PI;
+        pcm[i] = opus_int16(32767.0 * env * std::sin(tonePhase_));
+    }
+    ++toneFrames_;
+    if (muted_) return;   // мьют глушит и демо-тон
+    encodeAndSend(pcm);
+}
+
 void CallEngine::setDeaf(bool deaf) {
     deaf_ = deaf;
     if (spk_) spk_->setVolume(deaf ? 0.0f : 1.0f);
@@ -277,7 +317,11 @@ void CallEngine::startAudioIo() {
     audioStarted_ = true;
 
     const QAudioFormat fmt = pcmFormat();
-    if (!QMediaDevices::defaultAudioInput().isNull()) {
+    if (testTone_) {
+        // Микрофон не нужен вовсе: кадры генерирует таймер (нет акустической
+        // петли микрофон→динамики даже при открытых колонках).
+        if (toneTimer_ && !toneTimer_->isActive()) toneTimer_->start();
+    } else if (!QMediaDevices::defaultAudioInput().isNull()) {
         mic_ = new QAudioSource(QMediaDevices::defaultAudioInput(), fmt, this);
         micIo_ = mic_->start();
         if (micIo_) connect(micIo_, &QIODevice::readyRead, this, &CallEngine::onEncodedFrameReady);
@@ -295,6 +339,20 @@ void CallEngine::stopAudioIo() {
     capBuf_.clear();
 }
 
+// Общий отправщик: PCM-кадр → Opus → RTP.
+void CallEngine::encodeAndSend(const void* pcm16) {
+    if (!enc_ || !track_) return;
+    unsigned char out[4000];
+    const int n = opus_encode(enc_, reinterpret_cast<const opus_int16*>(pcm16),
+                              kFrame, out, sizeof(out));
+    if (n <= 0) return;
+    rtpConfig_->timestamp += kFrame;
+    try {
+        track_->send(reinterpret_cast<const std::byte*>(out), size_t(n));
+        ++rtpSent_;
+    } catch (...) {}
+}
+
 void CallEngine::onEncodedFrameReady() {
     if (!micIo_ || !enc_ || !track_) return;
     capBuf_.append(micIo_->readAll());
@@ -302,16 +360,7 @@ void CallEngine::onEncodedFrameReady() {
         QByteArray frame = capBuf_.left(kFrameBytes);
         capBuf_.remove(0, kFrameBytes);
         if (muted_) continue;   // тишину не шлём
-
-        unsigned char out[4000];
-        const int n = opus_encode(enc_, reinterpret_cast<const opus_int16*>(frame.constData()),
-                                  kFrame, out, sizeof(out));
-        if (n <= 0) continue;
-        rtpConfig_->timestamp += kFrame;
-        try {
-            track_->send(reinterpret_cast<const std::byte*>(out), size_t(n));
-            ++rtpSent_;
-        } catch (...) {}
+        encodeAndSend(frame.constData());
     }
 }
 
@@ -369,5 +418,8 @@ void CallEngine::addRemoteCandidate(const QString&, const QString&) {}
 void CallEngine::hangup() {}
 void CallEngine::setMuted(bool) {}
 void CallEngine::setDeaf(bool) {}
+void CallEngine::setTestTone(bool) {}
+void CallEngine::sendToneFrame() {}
+void CallEngine::encodeAndSend(const void*) {}
 
 #endif

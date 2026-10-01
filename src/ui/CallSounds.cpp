@@ -107,16 +107,28 @@ void CallSounds::playPcm(const QByteArray& pcm) {
         io_->write(pcm);
         return;
     }
-    // Устройство захотело другой формат — простая передискретизация.
-    const double rate = double(f.sampleRate()) / kSampleRate;
+    // Устройство захотело другой формат — передискретизация с ЛИНЕЙНОЙ
+    // интерполяцией: ближайший сосед давал ступеньки-алиасинг, звук был
+    // «резким» (важно для рингтона на 44.1 кГц-устройствах).
+    const double step = double(kSampleRate) / f.sampleRate();   // in-шагов на out-сэмпл
     const int channels = f.channelCount();
     if (f.sampleFormat() == QAudioFormat::Int16) {
-        QByteArray out;
-        out.reserve(int(pcm.size() * rate) * channels);
         const int samples = pcm.size() / 2;
-        for (int i = 0; i < int(samples / rate); ++i) {
-            const qint16 s = qint16(quint8(pcm[int(i / rate) * 2])
-                                    | (quint8(pcm[int(i / rate) * 2 + 1]) << 8));
+        const auto srcAt = [&](double pos) -> double {
+            const int i0 = int(pos);
+            const double frac = pos - i0;
+            const auto raw = [&](int i) {
+                return i < samples
+                    ? double(qint16(quint8(pcm[i * 2]) | (quint8(pcm[i * 2 + 1]) << 8)))
+                    : 0.0;
+            };
+            return raw(i0) * (1.0 - frac) + raw(i0 + 1) * frac;
+        };
+        QByteArray out;
+        const int outSamples = int(double(samples) / step);
+        out.reserve(outSamples * channels * 2);
+        for (int i = 0; i < outSamples; ++i) {
+            const qint16 s = qint16(qBound(-32768.0, srcAt(i * step), 32767.0));
             for (int c = 0; c < channels; ++c) {
                 out.append(char(quint16(s) & 0xFF));
                 out.append(char((quint16(s) >> 8) & 0xFF));

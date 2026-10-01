@@ -3,13 +3,16 @@
 // (offer/answer/ICE прокидываются напрямую сигналами), реальный RTP-эфир
 // libdatachannel, Opus 20 мс.
 //
-// Что слышно из колонок: рингтон (двухнотный chime) → «динь» соединения →
-// ваш собственный голос с микрофона (эхо через весь стек:
-// микрофон → Opus → RTP/SRTP → декодер → динамик). На 5-й секунде микрофон
-// мьютится на 3 секунды — голос пропадает и возвращается.
+// Режим по умолчанию (мелодия): через весь конвейер в колонки идёт чистое
+// арпеджио C5-E5-G5 (синтез на стороне «звонящего», кодек, RTP, декодер,
+// динамик «принимающего»). Микрофон не трогаем вовсе — самовозбуждение
+// (микрофон→колонки→микрофон = резкий вой) невозможно в принципе.
 //
-// PASS-критерий: оба движка connected + до эфира дошло ≥70% отправленных
-// кадров + мьют действительно гасит исходящий поток.
+// Режим --echo: вместо мелодии — ваш голос (микрофон → динамик). Первые 3 c
+// слышимое эхо, затем динамики глушатся: без AEC и наушников петля завывает.
+//
+// PASS-критерий: оба движка connected + до эфира дошло ≥70% кадров + мьют
+// действительно гасит исходящий поток.
 #include <QApplication>
 #include <QTimer>
 #include <QDeadlineTimer>
@@ -30,7 +33,11 @@ int main(int argc, char** argv) {
     app.setApplicationName(QStringLiteral("Desktop"));
     app.setOrganizationName(QStringLiteral("Xipher"));
 
-    printf("Демо-звонок с звуком (loopback, два пира в одном процессе)\n\n");
+    const bool echoMode = argc > 1 && QByteArray(argv[1]) == "--echo";
+
+    printf("Демо-звонок с звуком (loopback, два пира в одном процессе)\n");
+    printf("Режим: %s\n\n", echoMode ? "эхо голоса (лучше в наушниках)"
+                                     : "мелодия через весь конвейер");
 
     CallEngine a;   // звонящий
     CallEngine b;   // принимающий
@@ -64,6 +71,7 @@ int main(int argc, char** argv) {
 
     // Соединение: host-кандидатов достаточно, ICE-серверы не нужны.
     // Порядок как в CallController: сначала конфигурация, потом старт.
+    if (!echoMode) a.setTestTone(true);   // мелодия вместо микрофона
     a.setIceServers({});
     b.setIceServers({});
     a.startAsCaller();
@@ -84,19 +92,35 @@ int main(int argc, char** argv) {
     }
 
     CallSounds::instance().playConnectChime();
-    printf("♪ «Дин» соединения. Эфир 12 c: говорите в микрофон — услышите себя.\n");
-    printf("   на 5-й секунде микрофон мьют на 3 c (голос должен пропасть).\n\n");
+    if (echoMode) {
+        printf("♪ «Дин» соединения. ПЕРВЫЕ 3 c скажите что-нибудь — услышите себя.\n");
+        printf("   Потом динамики глушатся: без наушников петля завывает.\n\n");
+        QDeadlineTimer echo(3000);
+        while (!echo.hasExpired()) {
+            QCoreApplication::processEvents();
+            QThread::msleep(15);
+        }
+        b.setDeaf(true);   // глушим ВОСПРОИЗВЕДЕНИЕ; декодер и счётчик живут
+        printf("   динамики выключены, эфир продолжается\n\n");
+    } else {
+        printf("♪ «Дин» соединения. Сейчас из колонок — арпеджио C5-E5-G5,\n");
+        printf("   прошедшее весь конвейер: синтез → Opus → RTP → декодер → динамик.\n");
+        printf("   На 4-й секунде мьют на 3 c — музыка замрёт и продолжится.\n\n");
+    }
 
     // Эфир: секундная статистика + мьют-окно.
     int sentBeforeMute = 0, sentDuringMute = 0;
     int mutedAtSec = -1;
-    for (int sec = 1; sec <= 12; ++sec) {
+    const int total = echoMode ? 9 : 12;
+    for (int sec = 1; sec <= total; ++sec) {
         QDeadlineTimer slice(1000);
         while (!slice.hasExpired()) {
             QCoreApplication::processEvents();
             QThread::msleep(15);
         }
-        if (sec == 5) {
+        const int muteAt = echoMode ? 3 : 4;
+        const int unmuteAt = echoMode ? 6 : 7;
+        if (sec == muteAt) {
             sentBeforeMute = a.rtpSent();
             a.setMuted(true);
             mutedAtSec = sec;
@@ -104,7 +128,7 @@ int main(int argc, char** argv) {
                    sec, a.rtpSent(), b.rtpReceived());
             continue;
         }
-        if (sec == 8) {
+        if (sec == unmuteAt) {
             sentDuringMute = a.rtpSent() - sentBeforeMute;
             a.setMuted(false);
         }
@@ -112,17 +136,16 @@ int main(int argc, char** argv) {
     }
     const int totalSent = a.rtpSent();
     const int totalRecv = b.rtpReceived();
-    const bool micPresent = totalSent > 0;
-    if (micPresent) {
+    const bool streamPresent = totalSent > 0;
+    if (streamPresent) {
         check(totalRecv * 100 >= totalSent * 70,
               "звук доехал: ≥70% кадров (получено/отправлено)");
     } else {
-        printf("  [ ! ] микрофон не дал кадров (нет устройства/занят) — "
-               "тракт проверен соединением и рингтоном\n");
+        printf("  [ ! ] поток не дал кадров — тракт проверен соединением и рингтоном\n");
     }
-    if (mutedAtSec > 0 && micPresent) {
-        // За 3 c мьюта в эфире должно уйти заметно меньше кадров, чем за
-        // сопоставимое время до него (тишину движок не кодирует).
+    if (mutedAtSec > 0 && streamPresent) {
+        // За 3 c мьюта в эфир должно уйти заметно меньше кадров (тон/тишину
+        // движок не кодирует).
         check(sentDuringMute <= 10,
               "мьют глушит исходящий поток");
     }
