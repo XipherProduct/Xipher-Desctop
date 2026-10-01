@@ -12,6 +12,8 @@
 #include "ui/ChatPage.h"
 #include "ui/ProfilePanel.h"
 #include "ui/CallOverlay.h"
+#include "ui/EmojiPicker.h"
+#include "ui/AnimatedEmojiLabel.h"
 #include "ui/CallSounds.h"
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
@@ -641,6 +643,42 @@ int main(int argc, char** argv) {
         check(channel, QStringLiteral("карточка персонального канала"));
         prof.closeAnimated();
         for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+    }
+
+    // ── Панель эмодзи/подарков: привязана к композеру справа, табы, поиск.
+    {
+        printf("\nЭмодзи-панель (tg-emoji-panel)\n");
+        EmojiPicker pick(&page);
+        pick.setFixedSize(420, 400);
+        pick.openAbove(&page);   // якорь — страница: проверяем клампы позиции
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        check(pick.isVisible(), QStringLiteral("панель показывается у композера"));
+        // Панель прижата к правому краю и не вылезает за страницу.
+        check(pick.x() + pick.width() <= page.width() + 8,
+              QStringLiteral("не выходит за правый край"));
+        check(pick.y() >= 0 && pick.y() + pick.height() <= page.height(),
+              QStringLiteral("не выходит за высоту страницы"));
+        bool tabE = false, tabG = false;
+        for (QPushButton* b : pick.findChildren<QPushButton*>()) {
+            if (b->text() == QStringLiteral("😀 Эмодзи")) tabE = true;
+            if (b->text() == QStringLiteral("Подарки")) tabG = true;
+        }
+        check(tabE && tabG, QStringLiteral("табы «Эмодзи» и «Подарки»"));
+        // Ячейки — QLabel с коротким эмодзи-текстом (AnimatedEmojiLabel без
+        // Q_OBJECT, findChildren по типу не берётся).
+        int cells = 0;
+        for (QLabel* l : pick.findChildren<QLabel*>())
+            if (!l->text().isEmpty() && l->text().size() <= 4) ++cells;
+        check(cells > 30, QStringLiteral("сетка эмодзи наполнена: %1").arg(cells));
+        // Подарки без каталога показывают честную заглушку.
+        pick.setGiftsAvailable(false);
+        for (QPushButton* b : pick.findChildren<QPushButton*>())
+            if (b->text() == QStringLiteral("Подарки")) { b->click(); break; }
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        bool note = false;
+        for (QLabel* l : pick.findChildren<QLabel*>())
+            if (l->text().contains(QStringLiteral("личных чатах"))) note = true;
+        check(note, QStringLiteral("в не-ЛС таб подарков объясняет ограничение"));
     }
 
     // ── Звонок 1:1 с вебом: состояния экрана, кнопки, свёрнутый бар, рингтон.

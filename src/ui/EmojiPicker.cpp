@@ -1,19 +1,23 @@
 #include "ui/EmojiPicker.h"
 #include "ui/AnimatedEmojiLabel.h"
 #include "ui/EmojiNames.h"
+#include "ui/Icons.h"
+#include "net/ApiClient.h"
 #include "net/Prefs.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QScrollArea>
+#include <QStackedLayout>
 #include <QPushButton>
 #include <QLineEdit>
+#include <QLabel>
 #include <QScrollBar>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
-#include <QTimer>
 
 namespace {
 
@@ -83,55 +87,82 @@ const CatDef kCategories[] = {
 } // namespace
 
 EmojiPicker::EmojiPicker(QWidget* parent) : QFrame(parent) {
-    setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
+    // Не Qt::Popup: панель — часть страницы у композера (как .tg-emoji-panel
+    // веба), остаётся открытой при вводе текста и не крадёт фокус.
     setObjectName(QStringLiteral("emojiPicker"));
-    setFixedSize(420, 400);
     setStyleSheet(QStringLiteral(R"QSS(
-#emojiPicker { background:#1A1822; border:1px solid rgba(255,255,255,0.12); border-radius:14px; }
-QLineEdit { background:#131218; border:1px solid rgba(255,255,255,0.10); border-radius:10px;
-  min-height:30px; padding:0 10px; color:#F3F1F8; font-size:13px; }
-QLineEdit:focus { border:1px solid #8B5CF6; }
-QPushButton.tab, QPushButton.cat {
+#emojiPicker { background:#1A1822; border:1px solid rgba(255,255,255,0.10); border-radius:12px; }
+QLineEdit { background:#131218; border:1px solid rgba(255,255,255,0.10); border-radius:14px;
+  min-height:28px; max-width:150px; padding:0 10px; color:#F3F1F8; font-size:12px; }
+QLineEdit:focus { border:1px solid #8B5CF6; max-width:180px; }
+QPushButton.tab { border:none; background:transparent; color:#ACA6BD; font-size:12px;
+  font-weight:600; padding:0 12px; border-radius:6px; }
+QPushButton.tab:hover { color:#F3F1F8; }
+QPushButton.tab:checked { color:#8B5CF6; }
+QPushButton.cat {
     border:none; background:transparent; font-size:17px; padding:4px; border-radius:8px;
     font-family:"Segoe UI Emoji","Noto Color Emoji",sans-serif;
 }
-QPushButton.tab:hover, QPushButton.cat:hover { background:rgba(255,255,255,0.08); }
+QPushButton.cat:hover { background:rgba(255,255,255,0.08); }
 QPushButton.cat:checked { background:rgba(139,92,246,0.22); }
-QPushButton.del { border:none; background:transparent; color:#ACA6BD; font-size:15px;
-  border-radius:8px; min-width:32px; min-height:32px; }
+QPushButton.del { border:none; background:transparent; color:#726C82; font-size:14px;
+  border-radius:8px; min-width:30px; min-height:30px; }
 QPushButton.del:hover { background:rgba(255,255,255,0.08); color:#F3F1F8; }
 QScrollArea { background:transparent; border:none; }
 QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
 QScrollBar::handle:vertical { background:rgba(255,255,255,0.14); border-radius:4px; min-height:30px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+QLabel { background:transparent; }
 )QSS"));
 
     buildCategories();
     loadRecents();
 
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(8, 8, 8, 8);
-    root->setSpacing(6);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
 
-    // ── Строка заголовка: поиск + ⌫ (как tg-emoji-tabs веба) ─────────────────
-    auto* head = new QHBoxLayout();
-    head->setSpacing(4);
-    search_ = new QLineEdit(this);
+    // ── Табы (42px, как .tg-emoji-tabs): [Эмодзи][Подарки] поиск ⌫ ──────────
+    auto* tabs = new QWidget(this);
+    tabs->setFixedHeight(42);
+    tabs->setStyleSheet(QStringLiteral(
+        "background:#16161E; border-bottom:1px solid rgba(255,255,255,0.06);"
+        "border-top-left-radius:12px; border-top-right-radius:12px;"));
+    tabs->setAttribute(Qt::WA_StyledBackground, true);
+    auto* tl = new QHBoxLayout(tabs);
+    tl->setContentsMargins(6, 0, 6, 0);
+    tl->setSpacing(2);
+    tabEmoji_ = new QPushButton(QStringLiteral("😀 Эмодзи"), tabs);
+    tabGifts_ = new QPushButton(QStringLiteral("Подарки"), tabs);
+    for (auto* t : {tabEmoji_, tabGifts_}) {
+        t->setProperty("class", "tab");
+        t->setCheckable(true);
+        t->setCursor(Qt::PointingHandCursor);
+        tl->addWidget(t);
+    }
+    tabEmoji_->setChecked(true);
+    connect(tabEmoji_, &QPushButton::clicked, this, [this]() { setTab(0); });
+    connect(tabGifts_, &QPushButton::clicked, this, [this]() { setTab(1); });
+    tl->addStretch(1);
+    search_ = new QLineEdit(tabs);
     search_->setPlaceholderText(QStringLiteral("Поиск…"));
     search_->setClearButtonEnabled(true);
-    head->addWidget(search_, 1);
-    auto* del = new QPushButton(QStringLiteral("⌫"), this);
+    tl->addWidget(search_);
+    auto* del = new QPushButton(QStringLiteral("⌫"), tabs);
     del->setProperty("class", "del");
     del->setCursor(Qt::PointingHandCursor);
     del->setToolTip(QStringLiteral("Удалить символ"));
-    head->addWidget(del);
-    root->addLayout(head);
+    tl->addWidget(del);
+    root->addWidget(tabs);
 
     // ── Лента категорий ───────────────────────────────────────────────────────
-    auto* catRow = new QHBoxLayout();
+    catBar_ = new QWidget(this);
+    catBar_->setFixedHeight(40);
+    auto* catRow = new QHBoxLayout(catBar_);
+    catRow->setContentsMargins(8, 2, 8, 2);
     catRow->setSpacing(2);
-    for (int i = 0; i < categories_.size(); ++i) {
-        auto* t = new QPushButton(QString::fromUtf8(kCategories[i].icon), this);
+    for (int i = 0; i < 9; ++i) {
+        auto* t = new QPushButton(QString::fromUtf8(kCategories[i].icon), catBar_);
         t->setProperty("class", "cat");
         t->setCheckable(true);
         t->setToolTip(QString::fromUtf8(kCategories[i].title));
@@ -144,24 +175,101 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
         catRow->addWidget(t);
     }
     catRow->addStretch();
-    root->addLayout(catRow);
+    root->addWidget(catBar_);
 
-    // ── Сетка ─────────────────────────────────────────────────────────────────
-    scroll_ = new QScrollArea(this);
+    // ── Контент: эмодзи-сетка / подарки ───────────────────────────────────────
+    stack_ = new QStackedLayout();
+    root->addLayout(stack_, 1);
+
+    scroll_ = new QScrollArea();
     scroll_->setWidgetResizable(true);
     scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     grid_ = new QWidget();
     grid_->setStyleSheet(QStringLiteral("background:transparent;"));
     scroll_->setWidget(grid_);
-    root->addWidget(scroll_, 1);
+    stack_->addWidget(scroll_);
+
+    giftsPage_ = new QWidget();
+    auto* gl = new QVBoxLayout(giftsPage_);
+    gl->setContentsMargins(0, 0, 0, 0);
+    giftsScroll_ = new QScrollArea();
+    giftsScroll_->setWidgetResizable(true);
+    giftsScroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    giftsGrid_ = new QWidget();
+    giftsGrid_->setStyleSheet(QStringLiteral("background:transparent;"));
+    giftsScroll_->setWidget(giftsGrid_);
+    gl->addWidget(giftsScroll_, 1);
+    stack_->addWidget(giftsPage_);
+    stack_->setCurrentIndex(0);
 
     connect(search_, &QLineEdit::textChanged, this, [this](const QString& t) {
+        if (currentTab_ != 0) setTab(0);
         if (t.trimmed().isEmpty()) { showCategory(current_ <= 0 ? 1 : current_); return; }
         showSearchResults(t.trimmed());
     });
     connect(del, &QPushButton::clicked, this, &EmojiPicker::backspacePressed);
 
     showCategory(1);
+}
+
+void EmojiPicker::setGiftApi(ApiClient* api) {
+    giftApi_ = api;
+    if (!giftApi_) return;
+    connect(giftApi_, &ApiClient::giftsCatalogLoaded, this,
+            [this](const QJsonArray& gifts) {
+        giftsCatalog_ = gifts;
+        giftsLoaded_ = true;
+        if (currentTab_ == 1) buildGiftsGrid();
+    });
+}
+
+void EmojiPicker::setGiftsAvailable(bool available) {
+    giftsAvailable_ = available;
+    if (currentTab_ == 1) buildGiftsGrid();
+}
+
+void EmojiPicker::setTab(int tab) {
+    currentTab_ = tab;
+    tabEmoji_->setChecked(tab == 0);
+    tabGifts_->setChecked(tab == 1);
+    catBar_->setVisible(tab == 0);
+    stack_->setCurrentIndex(tab);
+    if (tab == 1) {
+        if (!giftsLoaded_ && giftApi_) {
+            auto* loading = new QLabel(QStringLiteral("Загрузка каталога…"), giftsGrid_);
+            loading->setStyleSheet(QStringLiteral(
+                "color:#726C82;font-size:13px;padding:16px;"));
+            buildGiftsGrid();
+            giftApi_->giftsCatalog();
+        } else {
+            buildGiftsGrid();
+        }
+    }
+}
+
+// ── Позиционирование: над anchor, прижата к его правому краю (веб:
+// bottom:calc(100%+6px); right:0), в пределах родителя. ─────────────────────
+void EmojiPicker::openAbove(QWidget* anchor) {
+    if (!anchor || !parentWidget()) { show(); raise(); return; }
+    const int maxW = qMax(200, parentWidget()->width() - 16);
+    const int maxH = qMax(220, parentWidget()->height() - 140);
+    const int w = qMin(420, maxW);
+    const int h = qMin(400, maxH);
+    setFixedSize(w, h);
+    const QPoint topRight = anchor->mapTo(parentWidget(), QPoint(anchor->width(), 0));
+    int x = topRight.x() - w - 4;
+    int y = topRight.y() - h - 6;
+    x = qBound(8, x, qMax(8, parentWidget()->width() - w - 8));
+    y = qBound(8, y, qMax(8, parentWidget()->height() - h - 8));
+    move(x, y);
+    show();
+    raise();
+    if (currentTab_ == 0) showCategory(current_ <= 0 ? 1 : current_);
+}
+
+void EmojiPicker::toggleAbove(QWidget* anchor) {
+    if (isVisible()) hide();
+    else openAbove(anchor);
 }
 
 void EmojiPicker::buildCategories() {
@@ -202,19 +310,23 @@ QWidget* EmojiPicker::makeCell(const QString& emoji, QWidget* parent) {
     return cell;
 }
 
+void EmojiPicker::clearGrid(QWidget* host) {
+    if (host->layout()) {
+        QLayoutItem* it;
+        while ((it = host->layout()->takeAt(0)) != nullptr) {
+            if (it->widget()) it->widget()->deleteLater();
+            delete it;
+        }
+        delete host->layout();
+    }
+}
+
 void EmojiPicker::showCategory(int index) {
     current_ = index;
     for (int i = 0; i < catButtons_.size(); ++i)
         catButtons_[i]->setChecked(i == index);
 
-    if (grid_->layout()) {
-        QLayoutItem* it;
-        while ((it = grid_->layout()->takeAt(0)) != nullptr) {
-            if (it->widget()) it->widget()->deleteLater();
-            delete it;
-        }
-        delete grid_->layout();
-    }
+    clearGrid(grid_);
     auto* g = new QGridLayout(grid_);
     g->setContentsMargins(2, 2, 2, 2);
     g->setSpacing(2);
@@ -223,6 +335,11 @@ void EmojiPicker::showCategory(int index) {
     const int cols = 9;
     for (int i = 0; i < list.size(); ++i)
         g->addWidget(makeCell(list[i], grid_), i / cols, i % cols);
+    if (list.isEmpty()) {
+        auto* empty = new QLabel(QStringLiteral("Здесь появятся часто используемые"), grid_);
+        empty->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;padding:12px;"));
+        g->addWidget(empty, 0, 0, 1, cols);
+    }
     scroll_->verticalScrollBar()->setValue(0);
 }
 
@@ -230,14 +347,7 @@ void EmojiPicker::showSearchResults(const QString& query) {
     current_ = -1;
     for (auto* b : catButtons_) b->setChecked(false);
 
-    if (grid_->layout()) {
-        QLayoutItem* it;
-        while ((it = grid_->layout()->takeAt(0)) != nullptr) {
-            if (it->widget()) it->widget()->deleteLater();
-            delete it;
-        }
-        delete grid_->layout();
-    }
+    clearGrid(grid_);
     auto* g = new QGridLayout(grid_);
     g->setContentsMargins(2, 2, 2, 2);
     g->setSpacing(2);
@@ -254,5 +364,92 @@ void EmojiPicker::showSearchResults(const QString& query) {
     const int cols = 9;
     for (int i = 0; i < hits.size(); ++i)
         g->addWidget(makeCell(hits[i], grid_), i / cols, i % cols);
+    if (hits.isEmpty()) {
+        auto* empty = new QLabel(QStringLiteral("Ничего не найдено"), grid_);
+        empty->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;padding:12px;"));
+        g->addWidget(empty, 0, 0, 1, cols);
+    }
     scroll_->verticalScrollBar()->setValue(0);
 }
+
+// Лёгкий клик-фильтр для карточек подарков (QLabel'ы внутри пропускают мышь).
+class EmojiGiftClickFilter : public QObject {
+public:
+    EmojiGiftClickFilter(EmojiPicker* picker, QString id, QString name, QObject* parent)
+        : QObject(parent), picker_(picker), id_(std::move(id)), name_(std::move(name)) {}
+    bool eventFilter(QObject* obj, QEvent* e) override {
+        if (e->type() == QEvent::MouseButtonRelease) {
+            emit picker_->giftSendRequested(id_, name_);
+            return true;
+        }
+        return QObject::eventFilter(obj, e);
+    }
+private:
+    EmojiPicker* picker_;
+    QString id_, name_;
+};
+
+void EmojiPicker::buildGiftsGrid() {
+    clearGrid(giftsGrid_);
+    auto* g = new QGridLayout(giftsGrid_);
+    g->setContentsMargins(8, 8, 8, 8);
+    g->setSpacing(8);
+
+    if (!giftsAvailable_) {
+        auto* note = new QLabel(
+            QStringLiteral("Подарки можно отправлять только в личных чатах"), giftsGrid_);
+        note->setWordWrap(true);
+        note->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+        g->addWidget(note, 0, 0, 1, 3);
+        return;
+    }
+    if (giftsCatalog_.isEmpty()) {
+        auto* note = new QLabel(QStringLiteral("Загрузка каталога…"), giftsGrid_);
+        note->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+        g->addWidget(note, 0, 0, 1, 3);
+        return;
+    }
+    const int cols = 4;
+    for (int i = 0; i < giftsCatalog_.size(); ++i) {
+        const QJsonObject gif = giftsCatalog_[i].toObject();
+        const QString id = gif.value(QStringLiteral("id")).toString();
+        const QString name = gif.value(QStringLiteral("name")).toString(
+            gif.value(QStringLiteral("title")).toString(id));
+        const QString icon = gif.value(QStringLiteral("icon")).toString(
+            QStringLiteral("🎁"));
+        const qint64 price = gif.value(QStringLiteral("price")).toInteger(0);
+
+        auto* card = new QWidget(giftsGrid_);
+        card->setStyleSheet(QStringLiteral(
+            "QWidget { background:#221F2C; border-radius:14px; }"
+            "QWidget:hover { background:#2B2737; }"));
+        card->setAttribute(Qt::WA_StyledBackground, true);
+        card->setCursor(Qt::PointingHandCursor);
+        auto* cl = new QVBoxLayout(card);
+        cl->setContentsMargins(8, 10, 8, 8);
+        cl->setSpacing(4);
+        auto* art = new QLabel(icon, card);
+        art->setAlignment(Qt::AlignCenter);
+        art->setAttribute(Qt::WA_TransparentForMouseEvents);
+        art->setStyleSheet(QStringLiteral(
+            "font-size:30px;background:transparent;"));
+        auto* nm = new QLabel(name, card);
+        nm->setAlignment(Qt::AlignHCenter);
+        nm->setWordWrap(true);
+        nm->setAttribute(Qt::WA_TransparentForMouseEvents);
+        nm->setStyleSheet(QStringLiteral(
+            "color:#F3F1F8;font-size:11px;background:transparent;"));
+        auto* pr = new QLabel(QStringLiteral("⭐ %1").arg(price), card);
+        pr->setAlignment(Qt::AlignHCenter);
+        pr->setStyleSheet(QStringLiteral(
+            "color:#F5C451;font-size:11px;background:transparent;"));
+        cl->addWidget(art);
+        cl->addWidget(nm);
+        cl->addWidget(pr);
+        // Клик ловит вся карточка; содержимое прозрачно для мыши.
+        card->installEventFilter(new class EmojiGiftClickFilter(this, id, name, card));
+        g->addWidget(card, i / cols, i % cols);
+    }
+    giftsScroll_->verticalScrollBar()->setValue(0);
+}
+

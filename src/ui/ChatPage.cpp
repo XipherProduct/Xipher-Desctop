@@ -1,4 +1,5 @@
 #include "ui/ChatPage.h"
+#include <QMessageBox>
 #include "ui/NewChatDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/GroupChannelDialogs.h"
@@ -876,6 +877,7 @@ void ChatPage::buildUi() {
     attachBtn_->setIconSize(QSize(20, 20));
 
     composer_ = new ComposerEdit(normal);
+    composer_->installEventFilter(this);   // Esc → закрыть панель эмодзи
     composer_->setObjectName(QStringLiteral("composer"));
     composer_->setPlaceholderText(QStringLiteral("Сообщение…"));
     connect(composer_, &ComposerEdit::sendRequested, this, &ChatPage::onSendClicked);
@@ -1755,6 +1757,13 @@ void ChatPage::updateGreeting() {
 static void showInfoOverlay(QWidget* host, const QString& title, const QString& text);
 
 bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
+    // Esc в поле ввода закрывает панель эмодзи (не очищает черновик).
+    if (obj == composer_ && e->type() == QEvent::KeyPress
+        && static_cast<QKeyEvent*>(e)->key() == Qt::Key_Escape && emojiPicker_
+        && emojiPicker_->isVisible()) {
+        emojiPicker_->hide();
+        return true;
+    }
     if (obj == appMenuScrim_ && e->type() == QEvent::MouseButtonPress) {
         closeAppMenu();
         return true;
@@ -3122,17 +3131,38 @@ void ChatPage::onEmojiClicked() {
             else c.deletePreviousChar();   // ⌫ в панели, как в Telegram
             composer_->setTextCursor(c);
         });
+        // Подарок из панели: только ЛС (не «Избранное», не группы/каналы/боты).
+        emojiPicker_->setGiftApi(api_);
+        connect(emojiPicker_, &EmojiPicker::giftSendRequested, this,
+                [this](const QString& giftId, const QString& name) {
+            const bool dm = currentKind_ == ChatKind::User && !currentPeerId_.isEmpty()
+                            && currentPeerId_ != Session::instance().userId;
+            if (!dm) {
+                showInfoOverlay(window(), QStringLiteral("Подарки"),
+                                QStringLiteral("Подарки можно отправлять только в личных чатах"));
+                return;
+            }
+            if (QMessageBox::question(this, QStringLiteral("Подарок"),
+                    QStringLiteral("Отправить «%1»?").arg(name)) != QMessageBox::Yes) return;
+            emojiPicker_->hide();
+            api_->giftSend(giftId, currentPeerId_, QString(), false);
+            showInfoOverlay(window(), QStringLiteral("Подарок"),
+                            QStringLiteral("Отправляем…"));
+        });
+        connect(api_, &ApiClient::giftSent, this, [this](bool ok, const QString& msg) {
+            if (!emojiPicker_) return;
+            showInfoOverlay(window(), QStringLiteral("Подарок"),
+                ok ? QStringLiteral("Подарок отправлен")
+                   : (msg.isEmpty() ? QStringLiteral("Не удалось отправить подарок") : msg));
+        });
     }
-    // Панель открывается НАД КОМПОЗЕРОМ, прижатая к его ПРАВОМУ краю
-    // (как .tg-emoji-panel веба: bottom:calc(100%+6px); right:0).
-    const QPoint brGlobal = composerBar_->mapToGlobal(composerBar_->rect().bottomRight());
-    int x = brGlobal.x() - emojiPicker_->width() - 4;
-    int y = brGlobal.y() - emojiPicker_->height() - 10;
-    if (y < window()->mapToGlobal(QPoint(0, 0)).y() + 8)
-        y = window()->mapToGlobal(QPoint(0, 0)).y() + 8;
-    emojiPicker_->move(qMax(8, x), y);
-    emojiPicker_->show();
-    emojiPicker_->raise();
+    // Панель — как .tg-emoji-panel веба: над композером, прижата к правому
+    // краю, НЕ попап — остаётся открытой при вводе. Размер клампится под окно.
+    const bool dm = currentKind_ == ChatKind::User
+                    && currentPeerId_ != Session::instance().userId;
+    emojiPicker_->setGiftsAvailable(dm);
+    emojiPicker_->toggleAbove(composerBar_);
+    if (emojiPicker_->isVisible()) composer_->setFocus();
 }
 
 // ── Вложения (скрепка) ───────────────────────────────────────────────────────
