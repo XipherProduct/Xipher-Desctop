@@ -310,6 +310,7 @@ void CallEngine::onEncodedFrameReady() {
         rtpConfig_->timestamp += kFrame;
         try {
             track_->send(reinterpret_cast<const std::byte*>(out), size_t(n));
+            ++rtpSent_;
         } catch (...) {}
     }
 }
@@ -330,8 +331,10 @@ void CallEngine::onIncomingRtp(const QByteArray& rtp) {
     const int samples = opus_decode(dec_,
         reinterpret_cast<const unsigned char*>(d + offset), rtp.size() - offset,
         pcm, kFrame * 2, 0);
-    if (samples > 0)
+    if (samples > 0) {
         spkIo_->write(reinterpret_cast<const char*>(pcm), samples * 2);
+        ++rtpReceived_;
+    }
 }
 
 void CallEngine::hangup() {

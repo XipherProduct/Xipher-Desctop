@@ -6,6 +6,7 @@
 #include <QList>
 #include <QPair>
 #include <memory>
+#include <atomic>
 
 #include "net/Models.h"
 
@@ -34,6 +35,11 @@ public:
     void hangup();
     void setMuted(bool muted);
     void setDeaf(bool deaf);   // не слышать собеседника (динамик в 0)
+
+    // Статистика RTP: сколько кадров улетело/прилетело (20 мс Opus каждый).
+    // Нужно демо-звонку и диагностике «есть ли звук вообще».
+    int rtpSent() const { return rtpSent_; }
+    int rtpReceived() const { return rtpReceived_; }
 
 signals:
     void localOffer(const QString& sdp);
@@ -73,4 +79,6 @@ private:
     QByteArray    capBuf_;
     OpusEncoder*  enc_ = nullptr;
     OpusDecoder*  dec_ = nullptr;
+    std::atomic<int> rtpSent_{0};
+    std::atomic<int> rtpReceived_{0};
 };

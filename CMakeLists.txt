@@ -194,6 +194,16 @@ if(NOT WIN32)
         OUTPUT_NAME "design-verify"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+    # Демо-звонок с звуком: два пира в одном процессе, loopback-сигналинг,
+    # реальный RTP-эфир (микрофон → динамик), статистика кадров и мьют.
+    qt_add_executable(call-demo ${SOURCES} ${HEADERS} tests/call-demo.cpp)
+    target_include_directories(call-demo PRIVATE src)
+    target_link_libraries(call-demo PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+    set_target_properties(call-demo PROPERTIES
+        OUTPUT_NAME "call-demo"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
     # Живая проверка звонковой цепочки: TURN → SDP offer → WS → рингтон.
     qt_add_executable(call-live ${SOURCES} ${HEADERS} tests/call-live.cpp)
     target_include_directories(call-live PRIVATE src)
@@ -214,7 +224,7 @@ if(NOT WIN32)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
     # Звонковая сборка у инструментов та же, что у приложения.
-    foreach(t design-verify profile-live call-live)
+    foreach(t design-verify profile-live call-live call-demo)
         target_include_directories(${t} PRIVATE ${CALL_INCLUDES})
         target_link_libraries(${t} PRIVATE ${CALL_LIBS})
         target_compile_definitions(${t} PRIVATE ${CALL_DEFS})
