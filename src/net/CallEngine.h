@@ -89,6 +89,7 @@ private:
     // Тест-тон (демо): таймер 20 мс гонит кадры мелодии вместо микрофона.
     bool     testTone_ = false;
     QTimer*  toneTimer_ = nullptr;
+    QTimer*  disconnectGrace_ = nullptr;   // Disconnected → 8 c на восстановление
     double   tonePhase_ = 0.0;
     quint64  toneFrames_ = 0;
     void sendToneFrame();

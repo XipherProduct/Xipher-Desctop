@@ -4,6 +4,7 @@
 #include <QStringList>
 #include <QSet>
 #include <QList>
+#include <QHash>
 #include <functional>
 
 #include "net/Models.h"
@@ -38,6 +39,7 @@ private:
     void acceptIncoming();
     void finish(const QString& logStatus);   // end + лог + очистка
     void cleanup();
+    void closeWithStatus(const QString& text);   // показать причину и закрыть
     void sendCallEvent(const QString& status);
 
     ApiClient*   api_;
@@ -56,6 +58,8 @@ private:
     QSet<QString> addedCandidates_;
     std::function<void(const QList<IceServerCfg>&)> onIce_;
 
+    void suppressPeer(const QString& peerId);
+    QHash<QString, qint64> suppressed_;   // peer → время подавления повторного звона
     void applyAnswer(const QString& calleeId, const QString& sdp);
     void applyOffer(const QString& callerId, const QString& sdp);
     void addCandidates(const QString& otherId, const QStringList& cands);

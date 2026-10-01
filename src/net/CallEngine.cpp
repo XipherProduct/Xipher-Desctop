@@ -174,9 +174,26 @@ void CallEngine::createPeerConnection() {
     pc_->onStateChange([this](rtc::PeerConnection::State state) {
         qInfo() << "[call] pc state" << int(state);
         if (state == rtc::PeerConnection::State::Connected) {
-            QMetaObject::invokeMethod(this, [this]() { startAudioIo(); emit connected(); });
-        } else if (state == rtc::PeerConnection::State::Disconnected ||
-                   state == rtc::PeerConnection::State::Closed) {
+            QMetaObject::invokeMethod(this, [this]() {
+                if (disconnectGrace_) disconnectGrace_->stop();
+                startAudioIo();
+                emit connected();
+            });
+        } else if (state == rtc::PeerConnection::State::Disconnected) {
+            // Кратковременный сбой — не повод рвать разговор (веб держит
+            // recovery-grace 180 c): даём ICE 8 c на восстановление.
+            QMetaObject::invokeMethod(this, [this]() {
+                if (!disconnectGrace_) {
+                    disconnectGrace_ = new QTimer(this);
+                    disconnectGrace_->setSingleShot(true);
+                    connect(disconnectGrace_, &QTimer::timeout, this, [this]() {
+                        if (pc_ && pc_->state() == rtc::PeerConnection::State::Disconnected)
+                            emit ended();
+                    });
+                }
+                disconnectGrace_->start(8000);
+            });
+        } else if (state == rtc::PeerConnection::State::Closed) {
             QMetaObject::invokeMethod(this, [this]() { emit ended(); });
         } else if (state == rtc::PeerConnection::State::Failed) {
             QMetaObject::invokeMethod(this, [this]() { emit failed(QStringLiteral("ICE failed")); });

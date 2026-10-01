@@ -116,19 +116,26 @@ CallController::CallController(ApiClient* api, WsClient* ws, QWidget* window, QO
     // WS (real-time, дублирует поллинг — дедуп ниже).
     connect(ws_, &WsClient::callAnswerReceived, this, [this](const QString& from, const QString& sdp) { applyAnswer(from, sdp); });
     connect(ws_, &WsClient::callIceReceived, this, [this](const QString& from, const QString& cand) { addCandidates(from, {cand}); });
-    connect(ws_, &WsClient::callEnded, this, [this](const QString& from) { if (from == peerId_) cleanup(); });
+    connect(ws_, &WsClient::callEnded, this, [this](const QString& from) {
+        if (from != peerId_) return;
+        qWarning() << "[call] call_end от собеседника";
+        if (connected_) closeWithStatus(QStringLiteral("Звонок завершён"));
+        else cleanup();   // не дозвонились — мгновенно, как в вебе
+    });
     // Push входящего звонка: offer уже здесь — поллинг не нужен.
     connect(ws_, &WsClient::callOfferArrived, this,
             [this](const QString& from, const QString& fromName, const QString& avatar,
                    const QString& callType, const QString& offer) {
         onIncoming(from, fromName, callType, offer, avatar);
     });
-    // Трубку взяли в другом клиенте (веб/Android) — убираем экран без лога.
+    // Трубку взяли в другом клиенте (веб/Android): показываем пояснение,
+    // иначе экран «молча исчезал» и выглядело как падение.
     connect(ws_, &WsClient::callAnsweredElsewhere, this, [this](const QString& peer) {
         if (peer == peerId_ || peer.isEmpty()) {
             qInfo() << "[call] answered elsewhere";
+            suppressPeer(peerId_);   // поллинг ещё принесёт этот звонок
             CallSounds::instance().stopRingtone();
-            cleanup();
+            closeWithStatus(QStringLiteral("Трубку взяли на другом устройстве"));
         }
     });
     connect(ws_, &WsClient::callMissed, this, [this](const QString& peer) {
@@ -154,19 +161,24 @@ CallEngine* CallController::createEngine() {
         connected_ = true;
         ringTimeout_->stop();
         CallSounds::instance().stopRingtone();
-        CallSounds::instance().playConnectChime();
         if (overlay_) {
             overlay_->setState(CallOverlay::State::Active);
             overlay_->startCallTimer();
         }
     });
-    connect(e, &CallEngine::ended, this, [this]() { qInfo() << "[call] engine ended"; cleanup(); });
+    connect(e, &CallEngine::ended, this, [this]() {
+        qWarning() << "[call] engine ended (state Disconnected/Closed)";
+        // Резкое исчезновение экрана без объяснения читается как краш:
+        // показываем причину полторы секунды.
+        if (connected_) closeWithStatus(QStringLiteral("Соединение потеряно"));
+        else closeWithStatus(QStringLiteral("Звонок завершён"));
+    });
     connect(e, &CallEngine::failed, this, [this](const QString& r) {
         qWarning() << "[call] engine FAILED:" << r;
         // Соединение не сложилось: вызывающий пишет «без ответа» (как в вебе),
-        // принимающему достаточно тихо убрать экран.
+        // принимающему показываем причину — экран не исчезает молча.
         if (caller_ && !connected_) finish(QStringLiteral("missed"));
-        else cleanup();
+        else closeWithStatus(QStringLiteral("Не удалось соединиться: ") + r);
     });
     return e;
 }
@@ -218,10 +230,24 @@ void CallController::startOutgoing(const QString& peerId, const QString& peerNam
     ringTimeout_->start();
 }
 
+// Недавно завершённый звонок поллинг приносит снова (сервер держит его
+// «ringing» до ответа любой из сторон) — подавляем на минуту.
+void CallController::suppressPeer(const QString& peerId) {
+    if (peerId.isEmpty()) return;
+    suppressed_[peerId] = QDateTime::currentMSecsSinceEpoch();
+}
+
 void CallController::onIncoming(const QString& callerId, const QString& callerName,
                                 const QString& /*callType*/, const QString& offerSdp,
                                 const QString& avatarUrl) {
     if (callerId.isEmpty() || peerId_ == callerId) return;
+    // Свежезавершённый/отвеченный в другом месте — повторный звонок того же
+    // человека в течение минуты не дёргает экран.
+    const qint64 sup = suppressed_.value(callerId, 0);
+    if (sup > 0 && QDateTime::currentMSecsSinceEpoch() - sup < 60'000) {
+        qInfo() << "[call] suppressed re-ring from" << callerId;
+        return;
+    }
     if (busy()) {
         // Уже в звонке — сразу отбой (как «Already in call, rejecting» в вебе).
         ws_->sendCallEnd(callerId);
@@ -314,6 +340,17 @@ void CallController::finish(const QString& logStatus) {
     cleanup();
 }
 
+// Закрытие с последней подписью: человек видит, ЧТО произошло, а не
+// «экран мигнул и пропал».
+void CallController::closeWithStatus(const QString& text) {
+    if (!overlay_) { cleanup(); return; }
+    overlay_->setStatusHint(text);
+    overlay_->setState(CallOverlay::State::Active);
+    overlay_->minimizedBar()->hide();
+    if (overlay_->isVisible()) overlay_->raise();
+    QTimer::singleShot(1500, this, [this]() { cleanup(); });
+}
+
 void CallController::cleanup() {
     static bool inCleanup = false;
     if (inCleanup) return;
@@ -333,6 +370,7 @@ void CallController::cleanup() {
         o->hide();
         o->deleteLater();
     }
+    if (!peerId_.isEmpty()) suppressPeer(peerId_);
     peerId_.clear(); peerName_.clear(); avatarUrl_.clear();
     inCleanup = false;
 }

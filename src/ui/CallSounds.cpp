@@ -79,6 +79,9 @@ void CallSounds::startRingtone() {
 void CallSounds::stopRingtone() {
     loop_.stop();
     playing_ = false;
+    // Глушим и воспроизведение: иначе хвост чаяма доигрывал ПОСЛЕ принятия
+    // звонка и накладывался на голос/перебивался щелчком.
+    if (sink_ && sink_->state() != QAudio::StoppedState) sink_->stop();
 }
 
 void CallSounds::playConnectChime() {
@@ -98,7 +101,9 @@ void CallSounds::playPcm(const QByteArray& pcm) {
         if (f.sampleRate() <= 0 || f.channelCount() <= 0) return;
     }
     if (!sink_) sink_ = new QAudioSink(dev, f, this);
-    if (sink_->state() == QAudio::ActiveState) sink_->stop();   // перебиваем
+    // Стоп ОБЯЗАТЕЛЕН и при Idle: start() поверх запущенного sink'а (Qt
+    // молча перезапускает его) обрезал звук щелчком на каждом цикле рингтона.
+    if (sink_->state() != QAudio::StoppedState) sink_->stop();
     io_ = sink_->start();   // push-режим
     if (!io_) return;
     playing_ = true;
