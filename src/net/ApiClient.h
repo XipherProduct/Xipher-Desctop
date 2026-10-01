@@ -88,8 +88,7 @@ public:
     void storyView(const QString& storyId);
     void storyDelete(const QString& storyId);
     void storyCreate(const QString& mediaUrl, const QString& mediaType,
-                     const QString& caption, const QString& privacy,
-                     const QString& keyB64, const QString& ivB64);
+                     const QString& caption, const QString& privacy);
 
     // Звонки (сигналинг)
     void getTurnConfig();

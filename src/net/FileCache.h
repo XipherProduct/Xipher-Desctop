@@ -1,5 +1,5 @@
 #pragma once
-#include "net/SecretStore.h"
+#include "net/DiskStore.h"
 #include <QByteArray>
 #include <QString>
 
@@ -9,7 +9,7 @@
 //  файл качается только при первом обращении. После выхода из аккаунта кэш
 //  очищается (как и кэш историй).
 //
-//  Хранение — SecretStore («mediacache»): шифрование + права 0700/0600.
+//  Хранение — DiskStore («mediacache»), без шифрования; права 0700/0600.
 //  Лимит объёма с LRU-вытеснением: при переполнении удаляются давно не
 //  использовавшиеся файлы (mtime обновляется при каждом чтении).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -33,6 +33,6 @@ private:
     FileCache() = default;
     void evictIfNeeded();
 
-    SecretStore store_{QStringLiteral("mediacache")};
+    DiskStore store_{QStringLiteral("mediacache")};   // без шифрования
     qint64 maxBytes_ = 256 * 1024 * 1024;   // 256 МБ на медиа-кэш
 };

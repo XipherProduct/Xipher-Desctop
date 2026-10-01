@@ -1571,16 +1571,13 @@ void ApiClient::storyDelete(const QString& storyId) {
 }
 
 void ApiClient::storyCreate(const QString& mediaUrl, const QString& mediaType,
-                            const QString& caption, const QString& privacy,
-                            const QString& keyB64, const QString& ivB64) {
+                            const QString& caption, const QString& privacy) {
     postJson(QStringLiteral("/api/stories/create"),
              {{QStringLiteral("token"), Session::instance().token},
               {QStringLiteral("media_url"), mediaUrl},
               {QStringLiteral("media_type"), mediaType},
               {QStringLiteral("caption"), caption},
-              {QStringLiteral("privacy"), privacy},
-              {QStringLiteral("encryption_key"), keyB64},
-              {QStringLiteral("encryption_iv"), ivB64}},
+              {QStringLiteral("privacy"), privacy}},
              [this](const QJsonObject& obj, bool, const QString& netErr) {
         const bool ok = obj.value(QStringLiteral("success")).toBool(false);
         emit storyCreated(ok, ok ? QString() : (netErr.isEmpty()

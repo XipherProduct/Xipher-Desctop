@@ -1,6 +1,6 @@
 #pragma once
 #include "net/Models.h"
-#include "net/SecretStore.h"
+#include "net/DiskStore.h"
 #include <QList>
 #include <QString>
 
@@ -10,10 +10,7 @@
 //  ответом сервера. Без кэша у пустого на момент загрузки чата не мелькает
 //  приветствие «Здесь пока ничего нет».
 //
-//  Шифрование и хранение — SecretStore («chatcache»): ключи HKDF от сессионного
-//  токена (на диске ключа нет), PRF-CTR + encrypt-then-MAC, каталог 0700/файлы
-//  0600, атомарная запись. Хранится хвост истории (максимум 500 сообщений).
-// ─────────────────────────────────────────────────────────────────────────────
+//  Хранение — DiskStore («chatcache»), без шифрования; права 0700/0600.
 class ChatCache {
 public:
     static ChatCache& instance();
@@ -26,5 +23,5 @@ public:
 private:
     ChatCache() = default;
 
-    SecretStore store_{QStringLiteral("chatcache")};
+    DiskStore store_{QStringLiteral("chatcache")};   // без шифрования
 };

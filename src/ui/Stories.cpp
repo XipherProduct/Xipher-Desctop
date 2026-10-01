@@ -1,7 +1,6 @@
 #include "ui/Stories.h"
 #include "ui/AvatarUtil.h"
 #include "ui/SuperSearchDialog.h"
-#include "net/AesGcm.h"
 #include "net/ApiClient.h"
 #include "net/Session.h"
 
@@ -90,16 +89,11 @@ QList<StoryUserGroup> groupStoriesPayload(const QJsonObject& data, const QString
     return groups;
 }
 
-// ── Расшифровка медиа сторис (AES-256-GCM, ключ/IV из payload) ───────────────
+// Шифрование историй удалено: медиа приходит открытым текстом. Старые
+// записи с ключами показываем заглушкой (расшифровать их больше нечем).
 static QByteArray decryptStoryMedia(const StoryItem& s, const QByteArray& bytes) {
-    if (s.keyB64.isEmpty() && s.ivB64.isEmpty()) return bytes;   // не зашифровано
-    QByteArray key = QByteArray::fromBase64(s.keyB64.toLatin1());
-    QByteArray iv  = QByteArray::fromBase64(s.ivB64.toLatin1());
-    if (key.size() != 32 || iv.size() != 12) return {};
-    QByteArray out;
-    if (!AesGcm::decrypt(key, iv, bytes, QByteArray(), s.id.toUtf8().left(0), &out))
-        return {};
-    return out;
+    if (s.keyB64.isEmpty() && s.ivB64.isEmpty()) return bytes;   // обычная история
+    return {};   // старая зашифрованная — не показываем битую картинку
 }
 
 // Загрузка медиа по media_url (с токеном), затем расшифровка.
@@ -498,23 +492,12 @@ void StoryCreatorDialog::publish() {
     postBtn_->setEnabled(false);
     postBtn_->setText(QStringLiteral("Публикация…"));
 
-    // 1) AES-256-GCM ключ + IV (как generateKey в вебе).
-    unsigned char kb[32], ivb[12];
-    QRandomGenerator::system()->generate(kb, kb + 32);
-    QRandomGenerator::system()->generate(ivb, ivb + 12);
-    const QByteArray key(reinterpret_cast<char*>(kb), 32);
-    const QByteArray iv(reinterpret_cast<char*>(ivb), 12);
-    QByteArray cipher, tag;
-    AesGcm::encrypt(key, iv, mediaBytes_, QByteArray(), &cipher, &tag);
-
-    // 2) Upload зашифрованного файла.
-    const QByteArray keyB64 = key.toBase64(), ivB64 = iv.toBase64();
+    // Шифрование удалено: файл публикуется как есть, без ключей.
     connect(api_, &ApiClient::fileUploaded, this,
-            [this, keyB64, ivB64](const QString& filePath, const QString&, long long, const QString&) {
+            [this](const QString& filePath, const QString&, long long, const QString&) {
         if (!isVisible()) return;
-        // 3) create с ключом/IV (base64) — сервер сохранит метаданные.
         api_->storyCreate(filePath, mediaType_, captionEdit_->text().trimmed(),
-                          privacy_->currentData().toString(), keyB64, ivB64);
+                          privacy_->currentData().toString());
     }, static_cast<Qt::ConnectionType>(Qt::UniqueConnection));
     connect(api_, &ApiClient::storyCreated, this, [this](bool ok, const QString& msg) {
         postBtn_->setEnabled(true);
@@ -522,5 +505,5 @@ void StoryCreatorDialog::publish() {
         if (ok) { hide(); mediaBytes_.clear(); preview_->setText(QStringLiteral("Выберите фото…")); }
         else preview_->setText(msg);
     }, static_cast<Qt::ConnectionType>(Qt::UniqueConnection));
-    api_->uploadFile(cipher, mediaName_ + QStringLiteral(".enc"), QString());
+    api_->uploadFile(mediaBytes_, mediaName_, QString());
 }

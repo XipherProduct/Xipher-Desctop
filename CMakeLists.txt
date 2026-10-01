@@ -20,12 +20,11 @@ set(SOURCES
     src/main.cpp
     src/app/MainWindow.cpp
     src/net/ApiClient.cpp
-    src/net/AesGcm.cpp
     src/net/ChatCache.cpp
     src/net/DownloadCenter.cpp
     src/net/FileCache.cpp
     src/net/MediaServer.cpp
-    src/net/SecretStore.cpp
+    src/net/DiskStore.cpp
     src/net/Session.cpp
     src/net/WsClient.cpp
     src/net/VoiceRecorder.cpp
@@ -69,12 +68,11 @@ set(SOURCES
 set(HEADERS
     src/app/MainWindow.h
     src/net/ApiClient.h
-    src/net/AesGcm.h
     src/net/ChatCache.h
     src/net/DownloadCenter.h
     src/net/FileCache.h
     src/net/MediaServer.h
-    src/net/SecretStore.h
+    src/net/DiskStore.h
     src/net/Session.h
     src/net/Models.h
     src/net/WsClient.h
