@@ -6,6 +6,7 @@
 #include <QTextStream>
 #include <QDir>
 #include <QDateTime>
+#include <QSysInfo>
 #include <QMutex>
 
 #include "app/MainWindow.h"
@@ -29,9 +30,24 @@ static void logToFile(QtMsgType type, const QMessageLogContext&, const QString& 
     }
 }
 
+// Ротация: лог пишется всегда и растёт неограниченно; при старте жирный
+// файл уезжает в .1 (хранится одно поколение), текущий начинается заново.
+static void rotateLog() {
+    const QString path = QCoreApplication::applicationDirPath() + QStringLiteral("/xipher.log");
+    QFileInfo fi(path);
+    if (!fi.exists() || fi.size() < 2 * 1024 * 1024) return;
+    const QString prev = path + QStringLiteral(".1");
+    if (QFile::exists(prev)) QFile::remove(prev);
+    QFile::rename(path, prev);
+}
+
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     qInstallMessageHandler(logToFile);
+    rotateLog();
+    qInfo().noquote() << "старт:" << QCoreApplication::applicationVersion()
+                      << QSysInfo::productVersion() << "qt" << QT_VERSION_STR
+                      << QCoreApplication::applicationDirPath();
 
     // Имена для QSettings (HKCU\Software\Xipher\Desktop).
     QApplication::setOrganizationName(QStringLiteral("Xipher"));

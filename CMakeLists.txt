@@ -221,6 +221,17 @@ if(NOT WIN32)
         OUTPUT_NAME "profile-live"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+    # ASAN-сборка верификатора: гонять в цикле при подозрении на утечки/краши.
+    qt_add_executable(dv-asan ${SOURCES} ${HEADERS} tests/design-verify.cpp)
+    target_include_directories(dv-asan PRIVATE src)
+    target_link_libraries(dv-asan PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+    target_compile_options(dv-asan PRIVATE -fsanitize=address -fno-omit-frame-pointer -g)
+    target_link_options(dv-asan PRIVATE -fsanitize=address)
+    set_target_properties(dv-asan PROPERTIES
+        OUTPUT_NAME "dv-asan"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
     # Звонковая сборка у инструментов та же, что у приложения.
     foreach(t design-verify profile-live call-live call-demo)
         target_include_directories(${t} PRIVATE ${CALL_INCLUDES})
