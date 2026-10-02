@@ -75,6 +75,11 @@ public:
     void debugAction(const QString& name, int arg = 0);
     QString debugCurrentChatId() const { return currentPeerId_; }
     int debugChatIndex(const QString& id) const { return indexOfChat(id); }
+    // Прыжок из поиска с подсветкой (SRC-04; публично для design-verify).
+    void onSearchResultPickedForTest(const QString& chatId, const QString& messageId,
+                                     const QString& keywords) {
+        onSearchResultPicked(chatId, messageId, keywords);
+    }
 
     // Третья колонка (WIN-01/02): инфо о чате справа. 0/360/фулл, анимация
     // 200мс; при узком окне (<1000px) — оверлей поверх чата со скримом.
@@ -166,7 +171,8 @@ private slots:
     void showChatMenu();
     void openRenameDialog();
     void onFileUploaded(const QString& filePath, const QString& fileName, long long fileSize, const QString& tempId);
-    void onSearchResultPicked(const QString& chatId, const QString& messageId);
+    void onSearchResultPicked(const QString& chatId, const QString& messageId,
+                              const QString& keywords);
     void onBotCallbackDone(bool ok, const QJsonObject& response);
     void onMiniappInitReady(bool ok, const QString& initData);
 
@@ -425,6 +431,9 @@ private:
     QString     currentPeerName_;
     QSet<QString> shownIds_;   // дедуп сообщений в открытом чате
     int tempCounter_ = 0;
+    // Подсветка поискового запроса в бабблах (SRC-04): живёт с последнего
+    // прыжка из поиска до смены чата.
+    QString highlightQuery_;
 
     // Клавиатурная навигация (KEY-02/03): порядок видимого списка чатов
     // (обновляется в rebuildChatList) и стеки истории переходов.

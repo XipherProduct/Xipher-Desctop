@@ -64,6 +64,92 @@ QString typeIcon(const QString& type) {
 
 } // namespace
 
+// ── DSL Discord-стиля (SRC-01) ───────────────────────────────────────────────
+
+// Даты в локали: 01.09, 01.09.2026, 2026-09-01. Двузначный год — 20xx.
+static QDateTime parseDslDate(const QString& v) {
+    const QString s = v.trimmed();
+    QDate d;
+    const auto parts = s.split(QLatin1Char('.'));
+    if (parts.size() == 3)
+        d = QDate(parts[2].toInt() < 100 ? parts[2].toInt() + 2000 : parts[2].toInt(),
+                  parts[1].toInt(), parts[0].toInt());
+    else if (parts.size() == 2)
+        d = QDate(QDate::currentDate().year(), parts[1].toInt(), parts[0].toInt());
+    else
+        d = QDate::fromString(s, Qt::ISODate);
+    if (!d.isValid() || d.year() < 2000) return QDateTime();
+    return d.startOfDay(Qt::LocalTime);
+}
+
+SuperSearchDialog::Dsl SuperSearchDialog::parseDsl(const QString& raw) {
+    Dsl d;
+    QString rest = raw.trimmed();
+    static const QRegularExpression filterRe(
+        QStringLiteral("(from|has|before|after|до|после):([^\\s]+)"),
+        QRegularExpression::CaseInsensitiveOption);
+    auto it = filterRe.globalMatch(rest);
+    QStringList consumed;
+    while (it.hasNext()) {
+        const auto m = it.next();
+        const QString key = m.captured(1).toLower();
+        const QString val = m.captured(2);
+        if (key == QLatin1String("from")) {
+            d.fromUser = val;
+            d.fromUser.remove(QLatin1Char('@'));
+            consumed << m.captured(0);
+        } else if (key == QLatin1String("has")) {
+            const QString v = val.toLower();
+            if (v == QLatin1String("photo") || v == QLatin1String("image") || v == QLatin1String("фото"))
+                d.type = QStringLiteral("image");
+            else if (v == QLatin1String("file") || v == QLatin1String("файл"))
+                d.type = QStringLiteral("file");
+            else if (v == QLatin1String("voice") || v == QLatin1String("аудио"))
+                d.type = QStringLiteral("voice");
+            else if (v == QLatin1String("video") || v == QLatin1String("видео"))
+                d.type = QStringLiteral("video");
+            else if (v == QLatin1String("link") || v == QLatin1String("url")
+                     || v == QLatin1String("ссылк"))
+                d.type = QStringLiteral("_link");
+            else if (v == QLatin1String("geo") || v == QLatin1String("location")
+                     || v == QLatin1String("гео"))
+                d.type = QStringLiteral("location");
+            consumed << m.captured(0);
+        } else if (key == QLatin1String("before") || key == QLatin1String("до")) {
+            const QDateTime dt = parseDslDate(val);
+            if (dt.isValid()) { d.before = dt; consumed << m.captured(0); }
+        } else if (key == QLatin1String("after") || key == QLatin1String("после")) {
+            const QDateTime dt = parseDslDate(val);
+            if (dt.isValid()) { d.after = dt; consumed << m.captured(0); }
+        }
+    }
+    for (const QString& c : consumed) rest.remove(c, Qt::CaseInsensitive);
+    d.keywords = rest.simplified();
+    return d;
+}
+
+bool SuperSearchDialog::matchesDsl(const QJsonObject& msg, const Dsl& dsl) {
+    if (!dsl.fromUser.isEmpty()) {
+        const QString sender = msg.value(QStringLiteral("sender_username")).toString()
+                             + QLatin1Char('/') + msg.value(QStringLiteral("sender_id")).toString();
+        if (!sender.contains(dsl.fromUser, Qt::CaseInsensitive)) return false;
+    }
+    if (!dsl.type.isEmpty()) {
+        const QString t = msg.value(QStringLiteral("message_type")).toString(QStringLiteral("text"));
+        if (dsl.type == QLatin1String("_link")) {
+            if (!msg.value(QStringLiteral("content")).toString().contains(
+                    QStringLiteral("http"))) return false;
+        } else if (t != dsl.type) return false;
+    }
+    const QDateTime created = QDateTime::fromString(
+        msg.value(QStringLiteral("created_at")).toString(), Qt::ISODate);
+    if (created.isValid()) {
+        if (dsl.before.isValid() && created >= dsl.before.addDays(1)) return false;
+        if (dsl.after.isValid() && created < dsl.after) return false;
+    }
+    return true;
+}
+
 SuperSearchDialog::SuperSearchDialog(ApiClient* api, QWidget* parent)
     : QWidget(parent), api_(api) {
     setObjectName(QStringLiteral("superSearchOverlay"));
@@ -141,11 +227,19 @@ void SuperSearchDialog::buildUi() {
     cl->addLayout(head);
 
     input_ = new QLineEdit();
-    input_->setPlaceholderText(QStringLiteral("Поиск по сообщениям: «фото за неделю», «где обсуждали цену»…"));
+    input_->setPlaceholderText(QStringLiteral(
+        "Поиск: «кот», from:@bob, has:photo, before:01.09, after:15.08…"));
     connect(input_, &QLineEdit::textChanged, this,
             [this](const QString& t) { if (t.trimmed().size() >= 2) debounce_->start(); });
     connect(input_, &QLineEdit::returnPressed, this, &SuperSearchDialog::onDebouncedSearch);
     cl->addWidget(input_);
+
+    // Активные DSL-фильтры (SRC-01): чипы под полем, видны что применится.
+    filterBar_ = new QLabel();
+    filterBar_->setObjectName(QStringLiteral("ssChip"));
+    filterBar_->setWordWrap(true);
+    filterBar_->hide();
+    cl->addWidget(filterBar_);
 
     // Область: «В этом чате» / «Во всех чатах» (как xpss-miniseg веба).
     auto* metaRow = new QHBoxLayout();
@@ -194,8 +288,9 @@ void SuperSearchDialog::buildUi() {
     cl->addLayout(chips);
 
     auto* hint = new QLabel(QStringLiteral(
-        "Супер-режим понимает естественный язык: «найди фотку паспорта», "
-        "«где он сказал 'ок'». Обычный — просто ищет текст."));
+        "Супер-режим понимает естественный язык: «найди фотку паспорта». "
+        "Фильтры: from:@имя, has:photo|file|link|voice|video|geo, "
+        "before:/after:дата (01.09 или 2026-09-01)."));
     hint->setObjectName(QStringLiteral("ssHint"));
     hint->setWordWrap(true);
     cl->addWidget(hint);
@@ -315,14 +410,35 @@ SuperSearchDialog::Parsed SuperSearchDialog::parseQuery(const QString& raw, bool
     return p;
 }
 
+void SuperSearchDialog::renderFilterBar() {
+    if (!filterBar_) return;
+    QStringList chips;
+    if (!dsl_.fromUser.isEmpty())
+        chips << QStringLiteral("from: @%1").arg(dsl_.fromUser);
+    if (!dsl_.type.isEmpty())
+        chips << QStringLiteral("has: %1").arg(dsl_.type == QLatin1String("_link")
+            ? QStringLiteral("link") : dsl_.type);
+    if (dsl_.before.isValid())
+        chips << QStringLiteral("до %1").arg(dsl_.before.date().toString(QStringLiteral("dd.MM.yyyy")));
+    if (dsl_.after.isValid())
+        chips << QStringLiteral("после %1").arg(dsl_.after.date().toString(QStringLiteral("dd.MM.yyyy")));
+    if (chips.isEmpty()) { filterBar_->hide(); return; }
+    filterBar_->setText(QStringLiteral("Фильтры: ") + chips.join(QStringLiteral("  ·  ")));
+    filterBar_->show();
+}
+
 void SuperSearchDialog::onDebouncedSearch() {
     const QString val = input_->text().trimmed();
     if (val.size() < 2 && pinnedType_.isEmpty()) { clearResults(); return; }
-    Parsed p = parseQuery(val, superMode_);
+    // DSL-фильтры (SRC-01) вынимаются первыми и применяются к результатам.
+    dsl_ = parseDsl(val);
+    renderFilterBar();
+    Parsed p = parseQuery(dsl_.keywords, superMode_);
+    if (!dsl_.type.isEmpty()) p.type = dsl_.type;   // has: сильнее естественного парсера
     if (!pinnedType_.isEmpty()) {
         // Чип-тип главнее парсера; для ссылок ищем подстроку http.
         p.type = pinnedType_ == QStringLiteral("_link") ? QString() : pinnedType_;
-        if (pinnedType_ == QStringLiteral("_link") && p.keywords.size() < 2)
+        if (pinnedType_ == QLatin1String("_link") && p.keywords.size() < 2)
             p.keywords = QStringLiteral("http");
     }
     doSearch(p.keywords, p.type);
@@ -430,8 +546,9 @@ void SuperSearchDialog::addResultRow(const QJsonObject& m) {
     hl->addLayout(body, 1);
 
     row->setCursor(Qt::PointingHandCursor);
-    row->installEventFilter(new SuperSearchClickFilter([this, chatId, id]() {
-        emit resultPicked(chatId, id);
+    const QString kwForJump = dsl_.keywords.isEmpty() ? lastKeywords_ : dsl_.keywords;
+    row->installEventFilter(new SuperSearchClickFilter([this, chatId, id, kwForJump]() {
+        emit resultPicked(chatId, id, kwForJump);
         hide();
     }, row));
 
@@ -444,29 +561,35 @@ void SuperSearchDialog::onResults(const QString& requestId, const QJsonArray& me
     activeReqIds_.remove(requestId);
     const bool single = !scopeAll_ && !chatId_.isEmpty();
 
+    // DSL-фильтры from:/before:/after: применяем к ответу сервера (SRC-01):
+    // сервер про них не знает — «только фото от bob до сентября» решает клиент.
+    QJsonArray filtered;
+    for (const QJsonValue& v : messages)
+        if (matchesDsl(v.toObject(), dsl_)) filtered.append(v);
+
     if (single) {
         // Одиночный чат: рисуем как есть.
         auto* lay = static_cast<QVBoxLayout*>(resultsBox_->layout());
-        if (messages.isEmpty()) {
+        if (filtered.isEmpty()) {
             auto* empty = new QLabel(QStringLiteral("Ничего не найдено"));
             empty->setAlignment(Qt::AlignCenter);
             empty->setStyleSheet(QStringLiteral("color:#726C82;padding:24px;font-size:14px;"));
             lay->insertWidget(lay->count() - 1, empty);
             return;
         }
-        for (const QJsonValue& v : messages) addResultRow(v.toObject());
+        for (const QJsonValue& v : filtered) addResultRow(v.toObject());
         return;
     }
 
     // «Во всех чатах»: каждый ответ — один чат; копим группы, рисуем,
     // когда завершатся все запросы (pending_).
-    if (!messages.isEmpty()) {
-        const QString cid = messages.first().toObject()
+    if (!filtered.isEmpty()) {
+        const QString cid = filtered.first().toObject()
                                 .value(QStringLiteral("__chat_id")).toString();
         QString cname;
         for (const Chat& c : chats_)
             if (c.id == cid) { cname = c.displayName; break; }
-        acc_.append({cid, QString(), cname, messages});
+        acc_.append({cid, QString(), cname, filtered});
     }
     if (--pending_ > 0) return;
 

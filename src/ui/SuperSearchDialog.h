@@ -4,6 +4,7 @@
 #include <QList>
 #include <QJsonArray>
 #include <QSet>
+#include <QDateTime>
 #include <functional>
 
 class QVBoxLayout;
@@ -49,9 +50,29 @@ public:
     // Список чатов для области «Во всех чатах» (ChatPage отдаёт объединённый).
     void setChats(const QList<Chat>& chats) { chats_ = chats; }
 
+    // DSL-фильтры Discord-стиля (SRC-01): from:@bob has:photo before:01.09
+    // after:15.08 — распознаются в любом режиме, применяются к результатам
+    // клиента; остальное уходит на сервер ключевыми словами.
+    struct Dsl {
+        QString fromUser;      // from:@bob / from:bob / from:<uuid>
+        QString type;          // has:photo|file|link|voice|video|geo
+        QDateTime before;      // до даты (включительно — строго раньше след. дня)
+        QDateTime after;       // после даты
+        QString keywords;      // текст без фильтров
+        bool isEmpty() const {
+            return fromUser.isEmpty() && type.isEmpty()
+                   && !before.isValid() && !after.isValid();
+        }
+    };
+    static Dsl parseDsl(const QString& raw);
+    // Сообщение проходит клиентские фильтры (from/даты)? (для design-verify)
+    static bool matchesDsl(const QJsonObject& msg, const Dsl& dsl);
+
 signals:
-    // Клик по результату → открыть чат (chatId) и прыгнуть к сообщению.
-    void resultPicked(const QString& chatId, const QString& messageId);
+    // Клик по результату → открыть чат (chatId) и прыгнуть к сообщению;
+    // keywords — последний запрос (для подсветки в бабблах, SRC-04).
+    void resultPicked(const QString& chatId, const QString& messageId,
+                      const QString& keywords);
 
 protected:
     void keyPressEvent(QKeyEvent* e) override;
@@ -87,6 +108,9 @@ private:
     bool    scopeAll_ = false;
     QSet<QString> activeReqIds_;    // живые запросы (scope=all шлёт пачку)
     QString pinnedType_;            // тип, выбранный чипом
+    Dsl     dsl_;                   // активные DSL-фильтры (SRC-01)
+    QLabel* filterBar_ = nullptr;   // строка активных фильтров под полем
+    void renderFilterBar();         // чипы «from:@bob · has:photo · …»
     int     seq_ = 0;
     int     pending_ = 0;           // незавершённые запросы (scope=all)
     struct Acc { QString chatId, ctx, name; QJsonArray msgs; };

@@ -238,7 +238,7 @@ private:
     int lastW_ = -1;
 };
 
-static QString formatMessageHtml(const QString& raw);
+static QString formatMessageHtml(const QString& raw, const QString& highlight = QString());
 
 static QString escapeHtmlMin_(const QString& s) {
     QString r = s;
@@ -290,8 +290,17 @@ static QString highlightCode(QString code) {
     return code;
 }
 
-QString formatMessageHtml(const QString& raw) {
+QString formatMessageHtml(const QString& raw, const QString& highlight) {
     QString s = escapeHtmlMin_(raw);
+
+    // Подсветка активного поискового запроса (SRC-04, как <mark>/ss-mark веба):
+    // на экранированном тексте ДО markdown-разметки — теги разметки не задеваются.
+    if (highlight.size() >= 2) {
+        const QRegularExpression re(QRegularExpression::escape(highlight),
+                                    QRegularExpression::CaseInsensitiveOption);
+        s.replace(re, QStringLiteral(
+            "<span style=\"background:rgba(139,92,246,0.45);border-radius:3px;\">\\0</span>"));
+    }
 
     // Многострочные код-блоки ```…``` — раньше остальных форматов:
     // содержимое вынимается в токены и возвращается стилизованным <pre>.
@@ -1676,9 +1685,13 @@ void ChatPage::openSuperSearch() {
     superSearch_->openFor(currentTopicId_.isEmpty() ? currentPeerId_ : currentTopicId_, ctx);
 }
 
-void ChatPage::onSearchResultPicked(const QString& chatId, const QString& messageId) {
+void ChatPage::onSearchResultPicked(const QString& chatId, const QString& messageId,
+                                    const QString& keywords) {
     if (chatId.isEmpty()) return;
+    // Подсветка запроса в бабблах (SRC-04): перерисовка + прыжок.
+    highlightQuery_ = keywords.trimmed();
     if (chatId == currentPeerId_ && currentTopicId_.isEmpty()) {
+        if (!highlightQuery_.isEmpty()) rerenderPreservingScroll();
         jumpToMessage(messageId);
         return;
     }
@@ -2463,6 +2476,7 @@ void ChatPage::openChat(const Chat& chat) {
     clearReplyTo();
     cancelEditing();
     clearStagedFiles();   // вложения принадлежат чату, куда их бросили (MLT-06)
+    highlightQuery_.clear();   // подсветка поиска не переезжает в чужой чат (SRC-04)
     if (emojiPicker_) emojiPicker_->hide();   // панель не висит над чужим чатом
     // История переходов (KEY-03): обычный переход пишет предыдущий чат в стек,
     // Alt+←/→ ходит по нему и не пишет (это делает сама navigateChatHistory).
@@ -3283,7 +3297,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         if (!out) el->addStretch();
         bl->addWidget(erow);
     } else {
-        auto* text = new MessageTextLabel(formatMessageHtml(msg.content), bubble);
+        auto* text = new MessageTextLabel(formatMessageHtml(msg.content, highlightQuery_), bubble);
         text->setContextMenuPolicy(Qt::NoContextMenu);   // ПКМ → меню баббла, не дефолтное
         text->setStyleSheet(QString("color:%1;font-size:15px;")
                                 .arg(out ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));

@@ -18,6 +18,7 @@
 #include "ui/ImageViewer.h"
 #include "ui/QuickSwitcher.h"
 #include "ui/ChatPickerDialog.h"
+#include "ui/SuperSearchDialog.h"
 #include <QCheckBox>
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
@@ -1191,6 +1192,63 @@ int main(int argc, char** argv) {
             }
             check(fwdGuard.isNull(), QStringLiteral("Esc закрывает диалог пересылки"));
         }
+    }
+
+    // ── Поиск: DSL-фильтры и подсветка (SRC-01, SRC-04).
+    {
+        printf("\nПоиск DSL + подсветка (SRC-01/SRC-04)\n");
+        using Dsl = SuperSearchDialog::Dsl;
+        const Dsl d = SuperSearchDialog::parseDsl(
+            QStringLiteral("from:@bob has:photo before:01.09 привет кот"));
+        check(d.fromUser == QStringLiteral("bob"), QStringLiteral("DSL: from:@bob распознан"));
+        check(d.type == QStringLiteral("image"), QStringLiteral("DSL: has:photo → image"));
+        check(d.before.date().month() == 9 && d.before.date().day() == 1,
+              QStringLiteral("DSL: before:01.09 → 1 сентября"));
+        check(d.keywords.contains(QStringLiteral("привет"))
+              && d.keywords.contains(QStringLiteral("кот"))
+              && !d.keywords.contains(QStringLiteral("from")),
+              QStringLiteral("DSL: ключевые слова очищены от фильтров"));
+
+        // Сценарий ТЗ: «только фото от bob» — фильтрация сообщений.
+        QJsonObject fromBob, fromAlice, bobText, bobOldPhoto;
+        fromBob.insert(QStringLiteral("sender_username"), QStringLiteral("bob"));
+        fromBob.insert(QStringLiteral("message_type"), QStringLiteral("image"));
+        fromBob.insert(QStringLiteral("created_at"), QStringLiteral("2026-09-14T10:00:00"));
+        fromAlice = fromBob;
+        fromAlice[QStringLiteral("sender_username")] = QStringLiteral("alice");
+        bobText = fromBob;
+        bobText[QStringLiteral("message_type")] = QStringLiteral("text");
+        bobOldPhoto = fromBob;
+        bobOldPhoto[QStringLiteral("created_at")] = QStringLiteral("2026-08-20T10:00:00");
+        check(!SuperSearchDialog::matchesDsl(fromBob, d),
+              QStringLiteral("фото от bob от 14.09 — отсечено before:01.09"));
+        check(!SuperSearchDialog::matchesDsl(fromAlice, d),
+              QStringLiteral("фото от alice — отсечён from:"));
+        check(!SuperSearchDialog::matchesDsl(bobText, d),
+              QStringLiteral("текст от bob — отсечён has:photo"));
+        check(SuperSearchDialog::matchesDsl(bobOldPhoto, d),
+              QStringLiteral("фото от bob от 20.08 — проходит до before:01.09"));
+
+        // Пустой DSL ничего не режет.
+        const Dsl empty = SuperSearchDialog::parseDsl(QStringLiteral("просто текст"));
+        check(empty.isEmpty() && SuperSearchDialog::matchesDsl(fromBob, empty),
+              QStringLiteral("без фильтров всё проходит"));
+
+        // SRC-04: подсветка запроса в баббле после прыжка из поиска.
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        page.onSearchResultPickedForTest(QStringLiteral("u_alice"),
+                                         QStringLiteral("m5"),
+                                         QStringLiteral("номер"));
+        for (int i = 0; i < 8; ++i) QCoreApplication::processEvents();
+        bool marked = false;
+        for (auto* l : page.findChildren<QLabel*>()) {
+            if (l->textFormat() == Qt::RichText
+                && l->text().contains(QStringLiteral("background:rgba(139,92,246")))
+                marked = true;
+        }
+        check(marked, QStringLiteral("вхождения запроса подсвечены в бабблах (SRC-04)"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).
