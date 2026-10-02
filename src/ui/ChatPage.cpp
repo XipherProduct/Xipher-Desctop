@@ -52,6 +52,7 @@
 #include <QContextMenuEvent>
 #include <QMouseEvent>
 #include <QShortcut>
+#include <QSplitter>
 #include <QMimeData>
 #include <QDragEnterEvent>
 #include <QDragLeaveEvent>
@@ -1157,8 +1158,147 @@ void ChatPage::buildUi() {
     convStack_->addWidget(topicsPage);  // 2
     convStack_->setCurrentIndex(0);
 
-    root->addWidget(sidebar);
-    root->addWidget(convStack_, 1);
+    // ── Третья колонка (WIN-01): контейнер инфо о чате справа ─────────────────
+    // В сплиттере: [сайдбар 380 | чат | инфо 0/360/фулл]; в узком окне (<1000px)
+    // уходит в оверлей поверх чата со скримом (WIN-02: анимация 200мс).
+    thirdCol_ = new QFrame();
+    thirdCol_->setObjectName(QStringLiteral("thirdCol"));
+    thirdCol_->setMinimumWidth(0);
+    thirdCol_->setMaximumWidth(0);   // исходно закрыта
+    {
+        auto* tv = new QVBoxLayout(thirdCol_);
+        tv->setContentsMargins(0, 0, 0, 0);
+        tv->setSpacing(0);
+        auto* tcHead = new QWidget(thirdCol_);
+        tcHead->setObjectName(QStringLiteral("thirdColHeader"));
+        tcHead->setAttribute(Qt::WA_StyledBackground, true);
+        tcHead->setFixedHeight(60);
+        auto* thl = new QHBoxLayout(tcHead);
+        thl->setContentsMargins(16, 0, 8, 0);
+        thl->setSpacing(4);
+        auto* tcTitle = new QLabel(QStringLiteral("Информация"), tcHead);
+        tcTitle->setObjectName(QStringLiteral("tcTitle"));
+        thl->addWidget(tcTitle);
+        thl->addStretch();
+        tcExpandBtn_ = new QPushButton(QStringLiteral("⤢"), tcHead);
+        tcExpandBtn_->setObjectName(QStringLiteral("tcBtn"));
+        tcExpandBtn_->setCursor(Qt::PointingHandCursor);
+        tcExpandBtn_->setToolTip(QStringLiteral("Развернуть/свернуть"));
+        tcExpandBtn_->setFixedSize(36, 36);
+        connect(tcExpandBtn_, &QPushButton::clicked, this, [this]() {
+            // 360 ↔ фулл (45% окна); Esc/✕ закрывает совсем.
+            setThirdColumnOpen(true, !thirdColFull_);
+        });
+        thl->addWidget(tcExpandBtn_);
+        auto* tcClose = new QPushButton(QStringLiteral("✕"), tcHead);
+        tcClose->setObjectName(QStringLiteral("tcBtn"));
+        tcClose->setCursor(Qt::PointingHandCursor);
+        tcClose->setFixedSize(36, 36);
+        connect(tcClose, &QPushButton::clicked, this, [this]() { closeThirdColumn(); });
+        thl->addWidget(tcClose);
+        tv->addWidget(tcHead);
+
+        auto* tcScroll = new QScrollArea(thirdCol_);
+        tcScroll->setObjectName(QStringLiteral("tcScroll"));
+        tcScroll->setWidgetResizable(true);
+        tcScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        tcScroll->setFrameShape(QFrame::NoFrame);
+        auto* tcBody = new QWidget();
+        auto* bv = new QVBoxLayout(tcBody);
+        bv->setContentsMargins(20, 20, 20, 20);
+        bv->setSpacing(8);
+        tcAvatar_ = new QLabel(tcBody);
+        tcAvatar_->setAlignment(Qt::AlignHCenter);
+        bv->addWidget(tcAvatar_, 0, Qt::AlignHCenter);
+        tcName_ = new QLabel(tcBody);
+        tcName_->setObjectName(QStringLiteral("tcName"));
+        tcName_->setAlignment(Qt::AlignHCenter);
+        tcName_->setWordWrap(true);
+        bv->addWidget(tcName_);
+        tcSub_ = new QLabel(tcBody);
+        tcSub_->setObjectName(QStringLiteral("tcSub"));
+        tcSub_->setAlignment(Qt::AlignHCenter);
+        tcSub_->setWordWrap(true);
+        bv->addWidget(tcSub_);
+        bv->addSpacing(8);
+        auto* tcProfile = new QPushButton(QStringLiteral("Полный профиль"), tcBody);
+        tcProfile->setObjectName(QStringLiteral("tcAction"));
+        connect(tcProfile, &QPushButton::clicked, this, [this]() {
+            // Полная карточка — прежняя модалка профиля (клик по шапке веба).
+            if (currentPeerId_.isEmpty()) return;
+            ensureProfilePanel();
+            const int pi = indexOfChat(currentPeerId_);
+            if (pi >= 0) profilePanel_->setKnownPreview(
+                chats_[pi].displayName, chats_[pi].avatarUrl, chats_[pi].online);
+            profilePanel_->openFor(currentPeerId_);
+        });
+        bv->addWidget(tcProfile);
+        auto* tcCall = new QPushButton(QStringLiteral("Позвонить"), tcBody);
+        tcCall->setObjectName(QStringLiteral("tcActionGhost"));
+        connect(tcCall, &QPushButton::clicked, this, [this]() {
+            if (currentPeerId_.isEmpty()) return;
+            emit callRequested(currentPeerId_, currentPeerName_, QString());
+        });
+        bv->addWidget(tcCall);
+        // Управление группой/каналом — прежняя панель PeerInfoPanel (модалкой).
+        auto* tcManage = new QPushButton(QStringLiteral("Управление"), tcBody);
+        tcManage->setObjectName(QStringLiteral("tcActionGhost"));
+        tcManage->setVisible(false);
+        connect(tcManage, &QPushButton::clicked, this, [this]() {
+            if (currentPeerId_.isEmpty()
+                || (currentKind_ != ChatKind::Group && currentKind_ != ChatKind::Channel))
+                return;
+            const int idx = indexOfChat(currentPeerId_);
+            const QString av = idx >= 0 ? chats_[idx].avatarUrl : QString();
+            auto* info = new PeerInfoPanel(api_, currentPeerId_,
+                                           currentKind_ == ChatKind::Channel,
+                                           currentPeerName_, av, window());
+            connect(info, &PeerInfoPanel::changed, this,
+                    [this]() { api_->getGroups(); api_->getChannels(); });
+            connect(info, &PeerInfoPanel::leftPeer, this, [this](const QString&) {
+                api_->getGroups(); api_->getChannels();
+                convStack_->setCurrentIndex(0);
+                currentPeerId_.clear();
+            });
+            info->showAnimated();
+        });
+        bv->addWidget(tcManage);
+        tcManageBtn_ = tcManage;
+        bv->addSpacing(4);
+        tcMeta_ = new QWidget(tcBody);
+        auto* mv = new QVBoxLayout(tcMeta_);
+        mv->setContentsMargins(0, 8, 0, 0);
+        mv->setSpacing(8);
+        bv->addWidget(tcMeta_);
+        bv->addStretch();
+        tcScroll->setWidget(tcBody);
+        tv->addWidget(tcScroll, 1);
+    }
+
+    // Скрим оверлея: затемнение ЧАТА (не сайдбара) в узком режиме; клик — закрыть.
+    overlayScrim_ = new QWidget(this);
+    overlayScrim_->setObjectName(QStringLiteral("overlayScrim"));
+    overlayScrim_->hide();
+    scrimFx_ = new QGraphicsOpacityEffect(overlayScrim_);
+    scrimFx_->setOpacity(0.0);
+    overlayScrim_->setGraphicsEffect(scrimFx_);
+    overlayScrim_->installEventFilter(this);
+
+    // Три колонки (WIN-01): сайдбар | чат | инфо, перетаскиваемая граница
+    // между чатом и инфо (ручка сплиттера), сайдбар фиксирован как в вебе.
+    splitter_ = new QSplitter(Qt::Horizontal, this);
+    splitter_->setObjectName(QStringLiteral("mainSplitter"));
+    splitter_->setChildrenCollapsible(false);
+    splitter_->setHandleWidth(4);
+    splitter_->addWidget(sidebar);
+    splitter_->addWidget(convStack_);
+    splitter_->addWidget(thirdCol_);
+    splitter_->setStretchFactor(0, 0);
+    splitter_->setStretchFactor(1, 1);
+    splitter_->setStretchFactor(2, 0);
+    splitter_->setSizes({380, width() - 380, 0});
+
+    root->addWidget(splitter_);
 
     connect(newChatBtn, &QPushButton::clicked, this, &ChatPage::openNewChatDialog);
     connect(menuBtn_, &QPushButton::clicked, this, &ChatPage::toggleAppMenu);
@@ -1295,6 +1435,203 @@ void ChatPage::openQuickSwitcher() {
     quickSwitcher_->showAnimated();
 }
 
+// ── Третья колонка (WIN-01/WIN-02) ───────────────────────────────────────────
+
+void ChatPage::setThirdColumnInfo() {
+    if (!thirdCol_) return;
+    if (currentPeerId_.isEmpty()) {
+        tcName_->setText(QStringLiteral("Чат не выбран"));
+        tcSub_->clear();
+        Avatar::setRound(tcAvatar_, QString(), QStringLiteral("?"), 96);
+        return;
+    }
+    const int pi = indexOfChat(currentPeerId_);
+    const QString av = pi >= 0 ? chats_[pi].avatarUrl : QString();
+    Avatar::setRound(tcAvatar_, currentKind_ == ChatKind::User ? av : QString(),
+                     currentPeerName_.mid(0, 1), 96);
+    tcName_->setText(currentPeerName_);
+    tcSub_->setText(peerStatus_->text());
+    if (tcManageBtn_)
+        tcManageBtn_->setVisible(currentKind_ == ChatKind::Group
+                                 || currentKind_ == ChatKind::Channel);
+
+    // Мета-строки: тип, участники/подписчики, @ссылка — по данным чата.
+    if (QLayout* ml = tcMeta_->layout()) {
+        while (ml->count() > 0) {
+            QLayoutItem* it = ml->takeAt(0);
+            if (it->widget()) it->widget()->deleteLater();
+            delete it;
+        }
+        auto addRow = [this, ml](const QString& k, const QString& v) {
+            if (v.isEmpty()) return;
+            auto* row = new QWidget(tcMeta_);
+            auto* rl = new QHBoxLayout(row);
+            rl->setContentsMargins(0, 0, 0, 0);
+            rl->setSpacing(8);
+            auto* kk = new QLabel(k, row);
+            kk->setObjectName(QStringLiteral("tcMetaKey"));
+            auto* vv = new QLabel(v, row);
+            vv->setObjectName(QStringLiteral("tcMetaVal"));
+            vv->setWordWrap(true);
+            rl->addWidget(kk);
+            rl->addStretch();
+            rl->addWidget(vv, 1);
+            ml->addWidget(row);
+        };
+        const Chat c = pi >= 0 ? chats_[pi] : Chat();
+        addRow(QStringLiteral("Тип"),
+               currentKind_ == ChatKind::Group ? QStringLiteral("Группа")
+               : currentKind_ == ChatKind::Channel ? QStringLiteral("Канал")
+               : QString());
+        if (c.membersCount > 0)
+            addRow(currentKind_ == ChatKind::Channel ? QStringLiteral("Подписчики")
+                                                     : QStringLiteral("Участники"),
+                   QString::number(c.membersCount));
+        if (!c.customLink.isEmpty())
+            addRow(QStringLiteral("Ссылка"), QStringLiteral("@") + c.customLink);
+        if (!c.name.isEmpty())
+            addRow(QStringLiteral("Имя пользователя"), QStringLiteral("@") + c.name);
+    }
+}
+
+void ChatPage::animateThirdColumnTo(int targetW) {
+    const int from = thirdCol_->width();
+    if (!thirdColAnim_) {
+        thirdColAnim_ = new QVariantAnimation(this);
+        thirdColAnim_->setDuration(200);   // WIN-02: 200мс, без миганий
+        thirdColAnim_->setEasingCurve(QEasingCurve::OutCubic);
+        connect(thirdColAnim_, &QVariantAnimation::valueChanged, this,
+                [this](const QVariant& v) {
+            const int w = v.toInt();
+            if (thirdColOverlayMode_) {
+                thirdCol_->setMaximumWidth(QWIDGETSIZE_MAX);
+                thirdCol_->setGeometry(width() - w, 0, w, height());
+                thirdCol_->raise();
+            } else {
+                thirdCol_->setMinimumWidth(w);
+                thirdCol_->setMaximumWidth(w);
+            }
+        });
+        connect(thirdColAnim_, &QVariantAnimation::finished, this, [this]() {
+            if (thirdColTarget_ == 0) {
+                // Закрыто: панель возвращается в сплиттер нулевой ширины
+                // (из оверлей-режима — с погашенным скримом).
+                if (thirdCol_->parentWidget() != splitter_) {
+                    fadeScrim(false);
+                    thirdCol_->setParent(splitter_);
+                    splitter_->addWidget(thirdCol_);
+                    splitter_->setStretchFactor(2, 0);
+                }
+                thirdCol_->setMinimumWidth(0);
+                thirdCol_->setMaximumWidth(0);
+                thirdCol_->hide();
+            } else if (!thirdColOverlayMode_) {
+                // Открыто в сплиттере: границы отпускаем — ручку можно тащить
+                // (во время анимации min=max=w держали ширину жёстко).
+                thirdCol_->setMinimumWidth(280);
+                thirdCol_->setMaximumWidth(qMax(360, width() / 2));
+            }
+            updateThirdColumnMode();   // режим мог поменяться за 200мс
+        });
+    }
+    if (thirdColAnim_->state() == QAbstractAnimation::Running) thirdColAnim_->stop();
+    thirdColAnim_->setStartValue(from);
+    thirdColAnim_->setEndValue(targetW);
+    thirdColAnim_->start();   // персистентная, живёт пока жива страница
+}
+
+void ChatPage::setThirdColumnOpen(bool open, bool full) {
+    if (!thirdCol_) return;
+    thirdColFull_ = open && full;
+    tcExpandBtn_->setText(thirdColFull_ ? QStringLiteral("⤡") : QStringLiteral("⤢"));
+
+    // Целевая ширина: 0 (закрыто) / 360 / 45% окна в «фулл».
+    int target = 0;
+    if (open) {
+        target = full ? qBound(360, width() * 45 / 100, width() - 420) : 360;
+        if (target < 360) target = 360;
+    }
+    thirdColTarget_ = target;
+    if (target > 0) {
+        setThirdColumnInfo();
+        thirdCol_->show();
+        // Оверлей-режим по ширине окна (<1000px): панель поверх чата + скрим.
+        updateThirdColumnMode();
+    }
+    animateThirdColumnTo(target);
+}
+
+void ChatPage::toggleThirdColumn() {
+    setThirdColumnOpen(!(thirdColTarget_ > 0), false);
+}
+
+void ChatPage::closeThirdColumn() {
+    setThirdColumnOpen(false);
+}
+
+void ChatPage::fadeScrim(bool on) {
+    if (!scrimFx_) return;
+    auto* fade = new QPropertyAnimation(scrimFx_, "opacity", this);
+    fade->setDuration(200);
+    fade->setStartValue(scrimFx_->opacity());
+    fade->setEndValue(on ? 0.55 : 0.0);
+    if (on) overlayScrim_->show();
+    connect(fade, &QPropertyAnimation::finished, this, [this, on]() {
+        if (!on) overlayScrim_->hide();
+    });
+    fade->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void ChatPage::updateThirdColumnMode() {
+    if (!thirdCol_ || thirdColTarget_ <= 0) return;
+    const bool wantOverlay = width() < 1000;
+    if (wantOverlay == thirdColOverlayMode_) {
+        // Режим тот же — только геометрия оверлея плывёт с окном.
+        if (thirdColOverlayMode_) {
+            const int w = qMin(thirdColTarget_,
+                               qMax(280, width() - sidebarWidth() - 24));
+            overlayScrim_->setGeometry(sidebarWidth(), 0,
+                                       width() - sidebarWidth(), height());
+            overlayScrim_->raise();
+            thirdCol_->setGeometry(width() - w, 0, w, height());
+            thirdCol_->raise();
+        }
+        return;
+    }
+    thirdColOverlayMode_ = wantOverlay;
+    if (wantOverlay) {
+        // Из сплиттера — в свободный оверлей правого края.
+        thirdCol_->setParent(this);
+        thirdCol_->setMaximumWidth(QWIDGETSIZE_MAX);
+        thirdCol_->setMinimumWidth(0);
+        thirdCol_->show();   // setParent() скрывает виджет
+        const int w = qMin(thirdColTarget_,
+                           qMax(280, width() - sidebarWidth() - 24));
+        overlayScrim_->setGeometry(sidebarWidth(), 0,
+                                   width() - sidebarWidth(), height());
+        overlayScrim_->show();
+        overlayScrim_->raise();
+        thirdCol_->setGeometry(width() - w, 0, w, height());
+        thirdCol_->raise();
+        fadeScrim(true);
+    } else {
+        // Обратно в сплиттер (границы отпущены — ручка тащится).
+        fadeScrim(false);
+        thirdCol_->setParent(splitter_);
+        splitter_->addWidget(thirdCol_);
+        splitter_->setStretchFactor(2, 0);
+        thirdCol_->setMinimumWidth(280);
+        thirdCol_->setMaximumWidth(qMax(360, width() / 2));
+        const int sbw = sidebarWidth();
+        splitter_->setSizes({sbw, qMax(0, width() - sbw - thirdColTarget_), thirdColTarget_});
+        thirdCol_->show();
+    }
+}
+
+int ChatPage::sidebarWidth() const {
+    return sidebar_ ? sidebar_->width() : 0;
+}
+
 void ChatPage::load() {
     api_->getChats();
     api_->getGroups();
@@ -1407,6 +1744,8 @@ void ChatPage::resizeEvent(QResizeEvent* e) {
         const int target = qBound(300, width() * 30 / 100, 380);
         if (sidebar_->width() != target) sidebar_->setFixedWidth(target);
     }
+    // Третья колонка (WIN-01): <1000px — оверлей, иначе — в сплиттере.
+    updateThirdColumnMode();
     clampBubbleWidths();
     // Повтор после layout-прохода: контейнер сообщений меняет ширину с отставанием.
     QTimer::singleShot(0, this, &ChatPage::clampBubbleWidths);
@@ -1455,6 +1794,12 @@ void ChatPage::clampBubbleWidths() {
 }
 
 void ChatPage::keyPressEvent(QKeyEvent* e) {
+    // Esc: сначала третья колонка (WIN-02 — «Esc закрывает»), затем прочее.
+    if (e->key() == Qt::Key_Escape && thirdColTarget_ > 0) {
+        e->accept();
+        closeThirdColumn();
+        return;
+    }
     // Супер-поиск: Ctrl+Shift+F — как в веб-клиенте.
     if ((e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))
             == (Qt::ControlModifier | Qt::ShiftModifier)
@@ -1962,6 +2307,7 @@ void ChatPage::openChat(const Chat& chat) {
     else status = chat.isSaved ? QStringLiteral("Заметки для себя")
                                : (chat.online ? QStringLiteral("в сети") : QStringLiteral("не в сети"));
     peerStatus_->setText(status);
+    setThirdColumnInfo();   // третья колонка: инфо нового чата (если открыта)
     currentForum_ = false;
     currentTopicId_.clear();
     currentCanManage_ = (chat.role == QStringLiteral("creator") || chat.role == QStringLiteral("owner")
@@ -2075,6 +2421,11 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
         closeAppMenu();
         return true;
     }
+    // Клик по скриму оверлей-режима третьей колонки — закрыть (WIN-01).
+    if (obj == overlayScrim_ && e->type() == QEvent::MouseButtonPress) {
+        closeThirdColumn();
+        return true;
+    }
     if (greeting_ && obj == msgScroll_->viewport() && e->type() == QEvent::Resize) {
         if (greeting_->isVisible()) greeting_->setGeometry(msgScroll_->viewport()->rect());
     }
@@ -2159,29 +2510,13 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
         }
     }
 
-    // Клик по шапке диалога → профиль / инфо канала-группы.
+    // Клик по шапке диалога → третья колонка с инфо (WIN-01); полные карточки
+    // (профиль/управление группой) — кнопками внутри колонки.
     if (obj == peerHeader_ && e->type() == QEvent::MouseButtonRelease && !currentPeerId_.isEmpty()) {
-        if (currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel) {
-            QString av;
-            const int idx = indexOfChat(currentPeerId_);
-            if (idx >= 0) av = chats_[idx].avatarUrl;
-            auto* info = new PeerInfoPanel(api_, currentPeerId_, currentKind_ == ChatKind::Channel,
-                                           currentPeerName_, av, window());
-            connect(info, &PeerInfoPanel::changed, this, [this]() { api_->getGroups(); api_->getChannels(); });
-            connect(info, &PeerInfoPanel::leftPeer, this, [this](const QString&) {
-                api_->getGroups(); api_->getChannels();
-                convStack_->setCurrentIndex(0);
-                currentPeerId_.clear();
-            });
-            info->showAnimated();
-            return true;
-        }
-        ensureProfilePanel();
-        // Превью из списка чатов: шапка профиля рисуется мгновенно (view.js).
-        const int pi = indexOfChat(currentPeerId_);
-        if (pi >= 0) profilePanel_->setKnownPreview(
-            chats_[pi].displayName, chats_[pi].avatarUrl, chats_[pi].online);
-        profilePanel_->openFor(currentPeerId_);
+        if (thirdColTarget_ > 0)
+            closeThirdColumn();
+        else
+            setThirdColumnOpen(true);
         return true;
     }
     return QWidget::eventFilter(obj, e);
@@ -3487,6 +3822,23 @@ static QString chatQSS() {
         "#stagedBar { background:%1; border-top:1px solid rgba(255,255,255,0.06); }"
         "#stagedChip { background:%3; border:1px solid rgba(255,255,255,0.10); border-radius:12px; }"
         "#dropOverlay { background:rgba(139,92,246,0.14); border:3px dashed rgba(139,92,246,0.65); }"
+        "QSplitter::handle:horizontal { background:transparent; width:4px; }"
+        "#thirdCol { background:%2; border-left:1px solid rgba(255,255,255,0.10); }"
+        "#thirdColHeader { background:%2; border-bottom:1px solid rgba(255,255,255,0.10); }"
+        "#tcTitle { color:#F3F1F8; font-size:15px; font-weight:700; }"
+        "#tcBtn { background:transparent; border:none; border-radius:18px; color:#ACA6BD; font-size:15px; }"
+        "#tcBtn:hover { background:%3; color:#F3F1F8; }"
+        "#tcName { color:#F3F1F8; font-size:17px; font-weight:600; }"
+        "#tcSub { color:#726C82; font-size:13px; }"
+        "#tcAction { background:rgba(%6,%7,%8,0.16); border:none; border-radius:12px;"
+        "  color:#F3F1F8; font-size:14px; font-weight:600; min-height:38px; }"
+        "#tcAction:hover { background:rgba(%6,%7,%8,0.28); }"
+        "#tcActionGhost { background:transparent; border:1px solid rgba(255,255,255,0.14);"
+        "  border-radius:12px; color:#ACA6BD; font-size:14px; min-height:36px; }"
+        "#tcActionGhost:hover { background:%3; color:#F3F1F8; }"
+        "#tcMetaKey { color:#726C82; font-size:12px; }"
+        "#tcMetaVal { color:#ACA6BD; font-size:13px; }"
+        "#overlayScrim { background:rgba(0,0,0,140); }"
         "#sendBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px; border:none;"
         "  border-radius:18px; background:transparent; color:%5; padding:0; }"
         "#sendBtn:hover { background:rgba(%6,%7,%8,0.10); }"

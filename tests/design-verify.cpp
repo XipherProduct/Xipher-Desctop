@@ -40,6 +40,7 @@
 #include <QDropEvent>
 #include <QDragEnterEvent>
 #include <QPointer>
+#include <QSplitter>
 #include <QThread>
 #include <QDeadlineTimer>
 #include <QElapsedTimer>
@@ -955,6 +956,80 @@ int main(int argc, char** argv) {
                 check(qsGuard.isNull(), QStringLiteral("Enter закрывает свитчер"));
             }
         }
+    }
+
+    // ── Третья колонка (WIN-01/02): сплиттер, 0/360/фулл, оверлей <1000px.
+    {
+        printf("\nТретья колонка (WIN-01/WIN-02)\n");
+        page.resize(1280, 800);
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+        auto* thirdCol = page.findChild<QFrame*>(QStringLiteral("thirdCol"));
+        auto* splitter = page.findChild<QSplitter*>(QStringLiteral("mainSplitter"));
+        check(thirdCol != nullptr && splitter != nullptr,
+              QStringLiteral("колонка и сплиттер существуют"));
+        check(thirdCol && thirdCol->width() == 0, QStringLiteral("исходно закрыта (0px)"));
+
+        // Открытие: анимация 200мс → ширина 360, контент от текущего чата.
+        page.setThirdColumnOpen(true);
+        const QDeadlineTimer tcOpen(600);
+        while (thirdCol && thirdCol->width() < 360 && !tcOpen.hasExpired()) {
+            QCoreApplication::processEvents();
+            QThread::msleep(10);
+        }
+        check(thirdCol && thirdCol->width() == 360,
+              QStringLiteral("открытие → 360px (анимация доиграла)"));
+        bool hasName = false;
+        if (thirdCol)
+            for (QLabel* l : thirdCol->findChildren<QLabel*>())
+                if (l->text() == QStringLiteral("Алиса")) hasName = true;
+        check(hasName, QStringLiteral("в колонке имя текущего чата"));
+
+        // Перетаскивание границы сплиттера (программный setSizes = drag).
+        if (splitter && thirdCol) {
+            splitter->setSizes({380, 420, 480});
+            for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+            check(thirdCol->width() >= 470,
+                  QStringLiteral("перетаскивание границы меняет ширину"));
+        }
+
+        // «Фулл»: 45% окна на 1280 = 576.
+        page.setThirdColumnOpen(true, /*full*/ true);
+        const QDeadlineTimer tcFull(700);
+        while (thirdCol && thirdCol->width() < 570 && !tcFull.hasExpired()) {
+            QCoreApplication::processEvents();
+            QThread::msleep(10);
+        }
+        check(thirdCol && thirdCol->width() >= 570 && thirdCol->width() <= 590,
+              QStringLiteral("режим «фулл» ≈45% окна"));
+
+        // Узкое окно (<1000px): оверлей поверх чата + скрим.
+        page.resize(900, 800);
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+        auto* scrim = page.findChild<QWidget*>(QStringLiteral("overlayScrim"));
+        check(thirdCol && thirdCol->x() + thirdCol->width() == page.width(),
+              QStringLiteral("<1000px: колонка — оверлей у правого края"));
+        check(scrim && scrim->isVisible(), QStringLiteral("скрим затемняет чат"));
+        // Сайдбар не перекрыт: скрим правее сайдбара.
+        auto* sb3 = page.findChild<QWidget*>(QStringLiteral("sidebar"));
+        check(sb3 && scrim && scrim->x() >= sb3->x() + sb3->width() - 1,
+              QStringLiteral("сайдбар вне затемнения"));
+
+        // Esc закрывает (анимация схлопывания + скрытие).
+        QKeyEvent esc(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(&page, &esc);
+        const QDeadlineTimer tcClose(800);
+        while (thirdCol && thirdCol->isVisible() && !tcClose.hasExpired()) {
+            QCoreApplication::processEvents();
+            QThread::msleep(10);
+        }
+        check(thirdCol && !thirdCol->isVisible(), QStringLiteral("Esc закрывает колонку"));
+        // Широкое окно снова: колонка вернулась в сплиттер с нулевой шириной.
+        page.resize(1280, 800);
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+        check(thirdCol && !thirdCol->isVisible() && thirdCol->width() == 0,
+              QStringLiteral("после закрытия ширина 0 в сплиттере"));
+        auto* sb4 = page.findChild<QWidget*>(QStringLiteral("sidebar"));
+        check(sb4 && sb4->width() == 380, QStringLiteral("сайдбар остался 380px"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

@@ -32,6 +32,10 @@ class QTimer;
 class QVariantAnimation;
 class QMediaPlayer;
 class QAudioOutput;
+class QSplitter;
+class QFrame;
+class QPropertyAnimation;
+class QGraphicsOpacityEffect;
 #include "ui/Stories.h"   // StoryUserGroup (QList<> требует полный тип)
 
 class StoriesBar;
@@ -60,6 +64,18 @@ public:
     void load();   // вызвать после входа: грузит чаты и запускает realtime
 
     void openQuickSwitcher();   // Ctrl+K — быстрый переход (DSC-01; публично для теста)
+
+    // Третья колонка (WIN-01/02): инфо о чате справа. 0/360/фулл, анимация
+    // 200мс; при узком окне (<1000px) — оверлей поверх чата со скримом.
+    void setThirdColumnOpen(bool open, bool full = false);
+    void toggleThirdColumn();
+    void closeThirdColumn();
+    bool isThirdColumnOpen() const { return thirdColTarget_ > 0; }
+    void updateThirdColumnMode();   // сплиттер ↔ оверлей по ширине окна
+    void setThirdColumnInfo();      // данные текущего чата в колонку
+    void animateThirdColumnTo(int targetW);   // 200мс ease-out (WIN-02)
+    void fadeScrim(bool on);        // затемнение чата в оверлей-режиме
+    int  sidebarWidth() const;
 
     void loadStoriesUi();   // сторис-бар (как в вебе)
 
@@ -353,6 +369,24 @@ private:
     QWidget*             sidebar_ = nullptr;       // сжимается 380→300 при узком окне
     QWidget*             emptyPage_  = nullptr;   // тематизируемые страницы
     QWidget*             topicsPage_ = nullptr;
+    // Третья колонка (WIN-01/02): QSplitter [сайдбар|чат|инфо], ширина 0/360/
+    // фулл; <1000px — оверлей поверх чата (thirdColOverlayMode_), под ним
+    // скрим с фейдом (затемнение чата). Анимация — QVariantAnimation по ширине.
+    QSplitter*           splitter_ = nullptr;
+    QFrame*              thirdCol_ = nullptr;
+    QVBoxLayout*         thirdColLay_ = nullptr;
+    QLabel*              tcAvatar_ = nullptr;
+    QLabel*              tcName_   = nullptr;
+    QLabel*              tcSub_    = nullptr;
+    QPushButton*         tcExpandBtn_ = nullptr;
+    QPushButton*         tcManageBtn_ = nullptr;   // «Управление» (группы/каналы)
+    QWidget*             tcMeta_  = nullptr;      // строки-мета (тип/участники/ссылка)
+    QWidget*             overlayScrim_ = nullptr; // затемнение чата в overlay-режиме
+    QGraphicsOpacityEffect* scrimFx_ = nullptr;
+    QVariantAnimation*   thirdColAnim_ = nullptr;
+    int                  thirdColTarget_ = 0;     // 0 = закрыто; 360; <full>
+    bool                 thirdColFull_ = false;   // режим «фулл» (45% окна)
+    bool                 thirdColOverlayMode_ = false;
     StoriesBar*          storiesBar_ = nullptr;
     QList<StoryUserGroup> storyGroups_;
     StoriesViewer*       storiesViewer_ = nullptr;
