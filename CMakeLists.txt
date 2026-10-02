@@ -60,6 +60,7 @@ set(SOURCES
     src/ui/ContactsPanel.cpp
     src/ui/PeerInfoPanel.cpp
     src/ui/ChatPickerDialog.cpp
+    src/ui/QuickSwitcher.cpp
     src/ui/ImageViewer.cpp
     src/ui/ComposerEdit.cpp
     src/util/QrCode.cpp

@@ -16,6 +16,7 @@
 #include "ui/AnimatedEmojiLabel.h"
 #include "ui/CallSounds.h"
 #include "ui/ImageViewer.h"
+#include "ui/QuickSwitcher.h"
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
 #include "net/Session.h"
@@ -41,6 +42,7 @@
 #include <QPointer>
 #include <QThread>
 #include <QDeadlineTimer>
+#include <QElapsedTimer>
 #include <QStandardPaths>
 #include <QWheelEvent>
 #include <QDir>
@@ -905,6 +907,54 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
         check(stagedBar && !stagedBar->isVisible(),
               QStringLiteral("после отправки очередь очистилась"));
+    }
+
+    // ── Quick Switcher (DSC-01): Ctrl+K, нечёткий поиск, ↑/↓ + Enter.
+    {
+        printf("\nQuick Switcher (DSC-01)\n");
+        // Пересобираем основной набор чатов (позже секции его перезаписывали).
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                 QStringLiteral("u_alice"), QList<ChatMessage>());
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        page.openQuickSwitcher();
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+        auto* qs = page.findChild<QuickSwitcher*>();
+        check(qs != nullptr && qs->isVisible(), QStringLiteral("Ctrl+K открывает свитчер"));
+        if (qs) {
+            // Пустой запрос — все чаты, выделена первая строка.
+            check(qs->resultIds().size() == chats.size(),
+                  QStringLiteral("пустой запрос: весь список чатов"));
+            check(qs->selectedId() == chats.first().id,
+                  QStringLiteral("первая строка выделена"));
+            // Нечёткий поиск: «ал» → Алиса сверху и за <100 мс.
+            QElapsedTimer tm; tm.start();
+            auto* qsInput = qs->findChild<QLineEdit*>();
+            if (qsInput) qsInput->setText(QStringLiteral("ал"));
+            for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+            const qint64 micros = tm.nsecsElapsed() / 1000;
+            check(qs->resultIds().first() == QStringLiteral("u_alice"),
+                  QStringLiteral("«ал» → первым чат Алисы"));
+            check(micros < 100000, QStringLiteral("фильтрация <100 мс: ")
+                  + QString::number(micros) + QStringLiteral(" мкс"));
+            // ↑/↓ двигают выделение, Enter выбирает.
+            if (qsInput) {
+                QKeyEvent down(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+                QApplication::sendEvent(qsInput, &down);
+                const QString afterDown = qs->selectedId();
+                check(afterDown != chats.first().id || qs->resultIds().size() == 1,
+                      QStringLiteral("↓ сдвигает выделение"));
+                QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+                QApplication::sendEvent(qsInput, &enter);
+                // closeAnimated: 140мс фейд → deleteLater; закрытие = удаление.
+                QPointer<QuickSwitcher> qsGuard(qs);
+                const QDeadlineTimer qsWait(1200);
+                while (!qsGuard.isNull() && !qsWait.hasExpired()) {
+                    QCoreApplication::processEvents();
+                    QThread::msleep(10);
+                }
+                check(qsGuard.isNull(), QStringLiteral("Enter закрывает свитчер"));
+            }
+        }
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

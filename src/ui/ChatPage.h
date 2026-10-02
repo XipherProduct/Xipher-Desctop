@@ -39,6 +39,7 @@ class StoriesViewer;
 class StoryCreatorDialog;
 class SuperSearchDialog;
 class LinkPreviewBar;
+class QuickSwitcher;
 class QDragEnterEvent;
 class QDragLeaveEvent;
 class QDragMoveEvent;
@@ -57,6 +58,8 @@ public:
     ChatPage(ApiClient* api, WsClient* ws, QWidget* parent = nullptr);
 
     void load();   // вызвать после входа: грузит чаты и запускает realtime
+
+    void openQuickSwitcher();   // Ctrl+K — быстрый переход (DSC-01; публично для теста)
 
     void loadStoriesUi();   // сторис-бар (как в вебе)
 
@@ -356,6 +359,7 @@ private:
     StoryCreatorDialog*  storyCreator_ = nullptr;
     SuperSearchDialog*   superSearch_ = nullptr;
     LinkPreviewBar*      linkPreview_ = nullptr;
+    QuickSwitcher*       quickSwitcher_ = nullptr;   // Ctrl+K (DSC-01)
     QList<UserHit> searchHits_;   // глобальный поиск людей в сайдбаре
     QList<DirectoryItem> directoryHits_;   // глобальный поиск: публичные каналы/группы
     QString     searchQuery_;

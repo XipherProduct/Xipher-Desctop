@@ -7,6 +7,7 @@
 #include "ui/ContactsPanel.h"
 #include "ui/PeerInfoPanel.h"
 #include "ui/ChatPickerDialog.h"
+#include "ui/QuickSwitcher.h"
 #include "ui/ImageViewer.h"
 #include "ui/ComposerEdit.h"
 #include "net/Prefs.h"
@@ -50,6 +51,7 @@
 #include <QInputDialog>
 #include <QContextMenuEvent>
 #include <QMouseEvent>
+#include <QShortcut>
 #include <QMimeData>
 #include <QDragEnterEvent>
 #include <QDragLeaveEvent>
@@ -1268,8 +1270,29 @@ void ChatPage::buildUi() {
     dropOverlay_->setObjectName(QStringLiteral("dropOverlay"));
     dropOverlay_->hide();
 
+    // Quick Switcher (DSC-01): Ctrl+K — мгновенный переход между чатами.
+    auto* qsHotkey = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_K), this);
+    connect(qsHotkey, &QShortcut::activated, this, [this]() { openQuickSwitcher(); });
+
     // Тема из настроек («Оформление»): перегенерировать QSS и инлайн-фоны.
     applyTheme();
+}
+
+// ── Quick Switcher (DSC-01) ──────────────────────────────────────────────────
+
+void ChatPage::openQuickSwitcher() {
+    if (!quickSwitcher_) {
+        quickSwitcher_ = new QuickSwitcher(chats_, window());
+        connect(quickSwitcher_, &QuickSwitcher::picked, this, [this](const Chat& c) {
+            openChat(c);
+        });
+        // ModalOverlay самоудаляется после закрытия — сбрасываем кэш.
+        connect(quickSwitcher_, &ModalOverlay::closed, this,
+                [this]() { quickSwitcher_ = nullptr; });
+    }
+    quickSwitcher_->setChats(chats_);   // список мог обновиться, пока был закрыт
+    quickSwitcher_->resetForOpen();
+    quickSwitcher_->showAnimated();
 }
 
 void ChatPage::load() {
