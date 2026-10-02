@@ -111,6 +111,16 @@ namespace {
 // и вешает create-poll на полученный id; получатель по префиксу тянет get-poll.
 const char kPollMarker[] = "\xF0\x9F\x93\x8A POLL: ";   // «📊 POLL: »
 
+// Streamer Mode (DSC-03): подмена имён «Участник N», свои — сохраняются.
+static int streamerCounter = 0;   // нумерация «Участник N» в текущем списке
+bool streamerModeOn() {
+    return Prefs::getBool(QStringLiteral("xipher_streamer_mode"), false);
+}
+QString streamerSafeName(const QString& name, int idx, bool own) {
+    if (!streamerModeOn() || own) return name;
+    return QStringLiteral("Участник %1").arg(qMax(1, idx));
+}
+
 QString elide(const QString& s, const QFont& f, int px) {
     return QFontMetrics(f).elidedText(s.isEmpty() ? QString() : s, Qt::ElideRight, px);
 }
@@ -639,7 +649,10 @@ ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
             if (idx >= 0) {
                 chats_[idx].unread += 1;
                 rebuildChatList();
-                emit notify(chats_[idx].displayName, QStringLiteral("Новое сообщение"));
+                emit notify(streamerModeOn()
+                                ? QStringLiteral("Новое сообщение")
+                                : chats_[idx].displayName,
+                            QStringLiteral("Новое сообщение"));
             }
         }
     });
@@ -1158,7 +1171,8 @@ void ChatPage::buildUi() {
         const bool hasText = !composer_->toPlainText().isEmpty();
         sendBtn_->setVisible(hasText);
         micBtn_->setVisible(!hasText);
-        linkPreview_->updateForText(composer_->toPlainText());   // превью ссылки
+        if (streamerModeOn()) linkPreview_->hide();   // DSC-03: без превью
+        else linkPreview_->updateForText(composer_->toPlainText());   // превью ссылки
     });
 
     // Страница 1 — запись (стиль Discord): пульс + waveform + таймер.
@@ -2013,6 +2027,7 @@ void ChatPage::debugAction(const QString& name, int arg) {
     }
     else if (name == QLatin1String("deleteSelectedConfirmed")) deleteSelectedConfirmed();
     else if (name == QLatin1String("exitSelection")) exitSelectionMode();
+    else if (name == QLatin1String("applyStreamerMode")) applyStreamerMode();
     else if (name == QLatin1String("archiveChat") && arg >= 0 && arg < chats_.size()) {
         const QString key = chatKeyFor(chats_[arg]);
         if (archivedChats_.contains(key)) archivedChats_.remove(key);
@@ -2306,7 +2321,8 @@ void ChatPage::createTopicDialog() {
 // Строка контакта (аватар + имя + подзаголовок + опц. время/бейдж).
 static QWidget* buildContactRow(const QString& url, const QString& avatarText,
                                 const QString& title, const QString& subtitle,
-                                const QString& time, int unread, bool pinned = false) {
+                                const QString& time, int unread, bool pinned = false,
+                                int streamerIdx = 0) {
     auto* row = new QWidget();
     row->setStyleSheet(QStringLiteral("background:transparent;"));
     auto* rl = new QHBoxLayout(row);
@@ -2315,7 +2331,11 @@ static QWidget* buildContactRow(const QString& url, const QString& avatarText,
     rl->setSpacing(12);
 
     auto* av = new QLabel();
-    Avatar::setRound(av, url, avatarText, 48);
+    // Streamer Mode (DSC-03): аватары нейтральные (личность не светится).
+    if (streamerModeOn())
+        Avatar::setRound(av, QString(), QStringLiteral("•"), 48);
+    else
+        Avatar::setRound(av, url, avatarText, 48);
     rl->addWidget(av);
 
     auto* mid = new QVBoxLayout();
@@ -2324,7 +2344,8 @@ static QWidget* buildContactRow(const QString& url, const QString& avatarText,
     topRow->setSpacing(6);
     auto* name = new QLabel(row);
     name->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:15px;font-weight:600;"));
-    name->setText(elide(title, name->font(), 200));
+    name->setText(elide(streamerIdx > 0 ? streamerSafeName(title, streamerIdx, false) : title,
+                        name->font(), 200));
     topRow->addWidget(name);
     topRow->addStretch();
     if (pinned) {
@@ -2375,6 +2396,7 @@ void ChatPage::rebuildChatList() {
 
     QSet<QString> shownChatIds;
     visibleChatIds_.clear();   // порядок видимого списка (KEY-02: Ctrl+PgUp/Dn)
+    streamerCounter = 0;       // нумерация «Участник N» с начала списка (DSC-03)
     // Пины — секцией сверху (LST-04, как sortChatsForDisplay веба):
     // закреплённые идут первыми, внутри секции — порядок сервера (~свежесть).
     QList<const Chat*> ordered;
@@ -2397,9 +2419,10 @@ void ChatPage::rebuildChatList() {
         const QString avatarText = c.isSaved ? QStringLiteral("★")
                                   : (c.avatarText.isEmpty() ? c.displayName : c.avatarText);
         const QString time = c.time == QStringLiteral("Нет сообщений") ? QString() : c.time;
+        const int sIdx = streamerModeOn() && !c.isSaved ? ++streamerCounter : 0;
         auto* row = buildContactRow(c.isSaved ? QString() : c.avatarUrl,
                                     avatarText, c.displayName, chatPreview(c.lastMessage), time,
-                                    c.unread, pinnedChats_.contains(chatKeyFor(c)));
+                                    c.unread, pinnedChats_.contains(chatKeyFor(c)), sIdx);
 
         auto* item = new QListWidgetItem(chatList_);
         item->setSizeHint(QSize(0, 72));
@@ -2597,9 +2620,13 @@ void ChatPage::openChat(const Chat& chat) {
     draftKey_ = QStringLiteral("draft:") + chat.id;
     currentPeerName_ = chat.displayName;
     currentKind_     = chat.kind;
-    peerName_->setText(chat.displayName);
-    Avatar::setRound(peerAvatar_, chat.isSaved ? QString() : chat.avatarUrl,
-                     chat.isSaved ? QStringLiteral("★") : chat.displayName, 40);
+    const int nmIdx = indexOfChat(chat.id) + 1;
+    peerName_->setText(chat.isSaved ? chat.displayName
+                                    : streamerSafeName(chat.displayName, nmIdx, chat.id == Session::instance().userId));
+    Avatar::setRound(peerAvatar_,
+                     (streamerModeOn() && !chat.isSaved) ? QString() : (chat.isSaved ? QString() : chat.avatarUrl),
+                     chat.isSaved ? QStringLiteral("★")
+                                  : (streamerModeOn() ? QStringLiteral("?") : chat.displayName), 40);
     QString status;
     if (chat.kind == ChatKind::Group)
         status = chat.membersCount > 0 ? QStringLiteral("%1 участников").arg(chat.membersCount)
@@ -3171,7 +3198,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     // имя не выводится). Клик по имени — профиль автора (1:1 с вебом).
     if (!out && (currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel)
         && !msg.senderName.isEmpty() && msg.senderId != Session::instance().userId) {
-        auto* author = new QLabel(msg.senderName, bubble);
+        auto* author = new QLabel(streamerSafeName(msg.senderName, indexOfChat(currentPeerId_) + 1, false), bubble);
         author->setStyleSheet(QStringLiteral("color:#8B5CF6;font-size:12px;font-weight:700;"));
         author->setCursor(Qt::PointingHandCursor);
         author->setProperty("openProfileFor", msg.senderId);
@@ -4124,7 +4151,9 @@ void ChatPage::onWsMessage(const QString& peerId, const ChatMessage& msgIn, cons
         && !msg.content.startsWith(ChecklistProto::kUpdatePrefix)) {
         const int idx = indexOfChat(peerId);
         const QString who = idx >= 0 ? chats_[idx].displayName : QStringLiteral("Сообщение");
-        emit notify(who, chatPreview(msg.content));
+        emit notify(streamerModeOn() ? QStringLiteral("Новое сообщение") : who,
+                    streamerModeOn() ? QStringLiteral("Откройте чат, чтобы прочитать")
+                                     : chatPreview(msg.content));
     }
 }
 
@@ -4397,7 +4426,43 @@ void ChatPage::buildAppMenu() {
     addItem(QStringLiteral("Настройки"), [this]() { openSettings(); });
     addItem(QStringLiteral("Каталог"), [this]() { openCatalog(); });
     root->addStretch();
+
+    // Streamer Mode (DSC-03): галка в меню — имена «Участник N», аватары
+    // нейтральные, превью ссылок и тексты уведомлений выключены.
+    auto* streamer = new QPushButton(appMenu_);
+    streamer->setObjectName(QStringLiteral("appMenuItem"));
+    streamer->setCursor(Qt::PointingHandCursor);
+    streamer->setCheckable(true);
+    streamer->setChecked(Prefs::getBool(QStringLiteral("xipher_streamer_mode"), false));
+    updateStreamerLabel(streamer);
+    connect(streamer, &QPushButton::toggled, this, [this, streamer](bool on) {
+        Prefs::setBool(QStringLiteral("xipher_streamer_mode"), on);
+        updateStreamerLabel(streamer);
+        applyStreamerMode();   // перерисовать список/чат/шапку/колонку
+    });
+    root->addWidget(streamer);
     appMenu_->hide();
+}
+
+void ChatPage::updateStreamerLabel(QPushButton* btn) {
+    if (!btn) return;
+    const bool on = Prefs::getBool(QStringLiteral("xipher_streamer_mode"), false);
+    btn->setText(on ? QStringLiteral("🎥 Режим стримера: ВКЛ")
+                    : QStringLiteral("🎥 Режим стримера: выкл"));
+}
+
+void ChatPage::applyStreamerMode() {
+    // Список чатов (имена/аватары), шапка диалога, третья колонка, бабблы.
+    rebuildChatList();
+    if (!currentPeerId_.isEmpty()) {
+        const int pi = indexOfChat(currentPeerId_);
+        if (pi >= 0) {
+            peerName_->setText(streamerSafeName(chats_[pi].displayName, pi + 1, false));
+            Avatar::setRound(peerAvatar_, QString(), QStringLiteral("?"), 40);
+        }
+        rerenderPreservingScroll();
+        setThirdColumnInfo();
+    }
 }
 
 void ChatPage::openSettings() {

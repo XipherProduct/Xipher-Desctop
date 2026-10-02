@@ -484,6 +484,9 @@ private:
                                const QJsonArray& scheduled);
     void addRecurringDraft(const QString& chatType, const QString& chatId,
                            const QString& content, int intervalDays);
+    // Streamer Mode (DSC-03).
+    void applyStreamerMode();
+    void updateStreamerLabel(QPushButton* btn);
 
     // Клавиатурная навигация (KEY-02/03): порядок видимого списка чатов
     // (обновляется в rebuildChatList) и стеки истории переходов.

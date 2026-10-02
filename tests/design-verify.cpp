@@ -1400,6 +1400,41 @@ int main(int argc, char** argv) {
               QStringLiteral("секция «Отложенные»: текст + время + отмена"));
     }
 
+    // ── Streamer Mode (DSC-03): имена «Участник N», аватары нейтральные.
+    {
+        printf("\nStreamer Mode (DSC-03)\n");
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        Prefs::setBool(QStringLiteral("xipher_streamer_mode"), true);
+        page.debugAction(QStringLiteral("applyStreamerMode"));
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        // objectName «peerName» носят и шапка тем — проверяем все экземпляры.
+        bool headerAnon = false;
+        for (QLabel* l : page.findChildren<QLabel*>(QStringLiteral("peerName")))
+            if (l->text().startsWith(QStringLiteral("Участник"))) headerAnon = true;
+        check(headerAnon, QStringLiteral("шапка чата: имя скрыто («Участник N»)"));
+        auto* lst = page.findChild<QListWidget*>(QStringLiteral("chatList"));
+        bool anonRow = false;
+        if (lst)
+            for (QWidget* w : lst->findChildren<QWidget*>())
+                for (QLabel* l : w->findChildren<QLabel*>())
+                    if (l->text() == QStringLiteral("Участник 1")) anonRow = true;
+        check(anonRow, QStringLiteral("список чатов: строки обезличены"));
+        bool leakName = false;
+        for (QLabel* l : page.findChildren<QLabel*>(QStringLiteral("peerName")))
+            if (l->text() == QStringLiteral("Алиса")) leakName = true;
+        check(!leakName, QStringLiteral("настоящее имя не светится"));
+        // Выключение возвращает имена.
+        Prefs::setBool(QStringLiteral("xipher_streamer_mode"), false);
+        page.debugAction(QStringLiteral("applyStreamerMode"));
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        bool headerBack = false;
+        for (QLabel* l : page.findChildren<QLabel*>(QStringLiteral("peerName")))
+            if (l->text() == QStringLiteral("Алиса")) headerBack = true;
+        check(headerBack, QStringLiteral("выключение возвращает имена"));
+    }
+
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).
     {
         printf("\nМедиавьюер: зум/пан (MDV-01)\n");
