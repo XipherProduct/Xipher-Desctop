@@ -222,6 +222,15 @@ if(NOT WIN32)
         OUTPUT_NAME "profile-live"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+    # Нагрузочный прогон (PRF-02): чат 10к сообщений — открытие/скролл/RSS.
+    qt_add_executable(bench-live ${SOURCES} ${HEADERS} tests/bench-live.cpp)
+    target_include_directories(bench-live PRIVATE src)
+    target_link_libraries(bench-live PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+    set_target_properties(bench-live PROPERTIES
+        OUTPUT_NAME "bench-live"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
     # Живой рендер медиавьюера (MDV-01): скрины зума/пана на тестовой картинке.
     qt_add_executable(viewer-grab ${SOURCES} ${HEADERS} tests/viewer-grab.cpp)
     target_include_directories(viewer-grab PRIVATE src)
@@ -243,7 +252,7 @@ if(NOT WIN32)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
     # Звонковая сборка у инструментов та же, что у приложения.
-    foreach(t design-verify profile-live call-live call-demo viewer-grab)
+    foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live)
         target_include_directories(${t} PRIVATE ${CALL_INCLUDES})
         target_link_libraries(${t} PRIVATE ${CALL_LIBS})
         target_compile_definitions(${t} PRIVATE ${CALL_DEFS})
