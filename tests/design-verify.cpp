@@ -28,6 +28,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QTextEdit>
+#include <QPlainTextEdit>
 #include <QPixmap>
 #include <QPushButton>
 #include <algorithm>
@@ -1030,6 +1032,70 @@ int main(int argc, char** argv) {
               QStringLiteral("после закрытия ширина 0 в сплиттере"));
         auto* sb4 = page.findChild<QWidget*>(QStringLiteral("sidebar"));
         check(sb4 && sb4->width() == 380, QStringLiteral("сайдбар остался 380px"));
+    }
+
+    // ── Клавиатурная навигация (KEY-01..04).
+    {
+        printf("\nКлавиатура (KEY-01..04)\n");
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+
+        // KEY-03: A→B→C, Alt+←×2 = A (действия — через шов: у шорткатов
+        // нужен живой фокус ввода).
+        const int bIdx = page.debugChatIndex(QStringLiteral("u_bob"));
+        const int cIdx = page.debugChatIndex(QStringLiteral("offscreen_user"));
+        if (bIdx >= 0 && cIdx >= 0) {
+            page.debugAction(QStringLiteral("open"), bIdx);   // A → B
+            page.debugAction(QStringLiteral("open"), cIdx);   // B → C (saved)
+            check(page.debugCurrentChatId() == QStringLiteral("offscreen_user"),
+                  QStringLiteral("старт: открыт последний чат (C)"));
+            page.debugAction(QStringLiteral("navHistory"), -1);
+            check(page.debugCurrentChatId() == QStringLiteral("u_bob"),
+                  QStringLiteral("Alt+← вернул в B"));
+            page.debugAction(QStringLiteral("navHistory"), -1);
+            check(page.debugCurrentChatId() == QStringLiteral("u_alice"),
+                  QStringLiteral("Alt+←×2 вернул в A (KEY-03)"));
+            page.debugAction(QStringLiteral("navHistory"), +1);
+            check(page.debugCurrentChatId() == QStringLiteral("u_bob"),
+                  QStringLiteral("Alt+→ ходит вперёд"));
+        } else {
+            check(false, QStringLiteral("тестовые чаты B/C найдены"));
+        }
+
+        // KEY-02: цикл по чатам Ctrl+PgDn — 3 чата, 3 шага = вернулись.
+        const QString before = page.debugCurrentChatId();
+        page.debugAction(QStringLiteral("cycleChat"), +1);
+        page.debugAction(QStringLiteral("cycleChat"), +1);
+        page.debugAction(QStringLiteral("cycleChat"), +1);
+        check(page.debugCurrentChatId() == before,
+              QStringLiteral("3×Ctrl+PgDn по 3 чатам = исходный (KEY-02)"));
+
+        // KEY-04: Ctrl+↑ открывает правку последнего своего сообщения.
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        page.debugAction(QStringLiteral("editLast"));
+        bool editing = false;
+        if (auto* comp = page.findChild<QPlainTextEdit*>())
+            editing = comp->toPlainText().contains(QStringLiteral("сообщение"));
+        check(editing, QStringLiteral("Ctrl+↑ открыл правку последнего своего (KEY-04)"));
+
+        // KEY-01: Esc-каскад — третья колонка + поиск закрываются по очереди.
+        page.setThirdColumnOpen(true);
+        const QDeadlineTimer tcW(600);
+        auto* tc = page.findChild<QFrame*>(QStringLiteral("thirdCol"));
+        while (tc && tc->width() < 360 && !tcW.hasExpired()) {
+            QCoreApplication::processEvents();
+            QThread::msleep(10);
+        }
+        auto* searchBox = page.findChild<QLineEdit*>(QStringLiteral("searchBox"));
+        if (searchBox) searchBox->setText(QStringLiteral("запрос"));
+        check(page.consumeEscape(), QStringLiteral("первый Esc закрыл колонку"));
+        check(searchBox && !searchBox->text().isEmpty(),
+              QStringLiteral("колонка закрылась раньше поиска"));
+        check(page.consumeEscape(), QStringLiteral("второй Esc очистил поиск"));
+        check(!page.consumeEscape(), QStringLiteral("третий Esc — уже нечего закрывать"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

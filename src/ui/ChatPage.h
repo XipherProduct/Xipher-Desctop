@@ -65,6 +65,15 @@ public:
 
     void openQuickSwitcher();   // Ctrl+K — быстрый переход (DSC-01; публично для теста)
 
+    // Esc-каскад (KEY-01): закрыть верхний оверлей; true = что-то было открыто.
+    // Порядок: модалки → шторка меню → эмодзи → третья колонка → поиск в сайдбаре.
+    bool consumeEscape();
+
+    // Тестовые швы навигации (design-verify): закрытые действия по имени.
+    void debugAction(const QString& name, int arg = 0);
+    QString debugCurrentChatId() const { return currentPeerId_; }
+    int debugChatIndex(const QString& id) const { return indexOfChat(id); }
+
     // Третья колонка (WIN-01/02): инфо о чате справа. 0/360/фулл, анимация
     // 200мс; при узком окне (<1000px) — оверлей поверх чата со скримом.
     void setThirdColumnOpen(bool open, bool full = false);
@@ -76,6 +85,10 @@ public:
     void animateThirdColumnTo(int targetW);   // 200мс ease-out (WIN-02)
     void fadeScrim(bool on);        // затемнение чата в оверлей-режиме
     int  sidebarWidth() const;
+    // Клавиатурная навигация (KEY-02..04).
+    void cycleChat(int delta);           // Ctrl+PgUp/PgDn по видимому списку
+    void navigateChatHistory(int delta); // Alt+←/→ по стекам переходов
+    void editLastOwnMessage();           // Ctrl+↑ — правка последнего своего
 
     void loadStoriesUi();   // сторис-бар (как в вебе)
 
@@ -404,4 +417,11 @@ private:
     QString     currentPeerName_;
     QSet<QString> shownIds_;   // дедуп сообщений в открытом чате
     int tempCounter_ = 0;
+
+    // Клавиатурная навигация (KEY-02/03): порядок видимого списка чатов
+    // (обновляется в rebuildChatList) и стеки истории переходов.
+    QList<QString> visibleChatIds_;
+    QStringList    navBack_;
+    QStringList    navForward_;
+    bool           navHistoryNavigating_ = false;   // Alt-переход не пишет в стек
 };

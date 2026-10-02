@@ -1414,6 +1414,19 @@ void ChatPage::buildUi() {
     auto* qsHotkey = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_K), this);
     connect(qsHotkey, &QShortcut::activated, this, [this]() { openQuickSwitcher(); });
 
+    // Клавиатурная навигация (KEY-02..04): Ctrl+PgUp/PgDn — соседний чат,
+    // Alt+←/→ — история переходов, Ctrl+↑ — правка последнего своего.
+    auto* nextChat = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_PageDown), this);
+    connect(nextChat, &QShortcut::activated, this, [this]() { cycleChat(+1); });
+    auto* prevChat = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_PageUp), this);
+    connect(prevChat, &QShortcut::activated, this, [this]() { cycleChat(-1); });
+    auto* navBack = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this);
+    connect(navBack, &QShortcut::activated, this, [this]() { navigateChatHistory(-1); });
+    auto* navFwd = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this);
+    connect(navFwd, &QShortcut::activated, this, [this]() { navigateChatHistory(+1); });
+    auto* editLast = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Up), this);
+    connect(editLast, &QShortcut::activated, this, &ChatPage::editLastOwnMessage);
+
     // Тема из настроек («Оформление»): перегенерировать QSS и инлайн-фоны.
     applyTheme();
 }
@@ -1794,10 +1807,9 @@ void ChatPage::clampBubbleWidths() {
 }
 
 void ChatPage::keyPressEvent(QKeyEvent* e) {
-    // Esc: сначала третья колонка (WIN-02 — «Esc закрывает»), затем прочее.
-    if (e->key() == Qt::Key_Escape && thirdColTarget_ > 0) {
+    // Esc-каскад (KEY-01): верхний оверлей закрывается первым.
+    if (e->key() == Qt::Key_Escape && consumeEscape()) {
         e->accept();
-        closeThirdColumn();
         return;
     }
     // Супер-поиск: Ctrl+Shift+F — как в веб-клиенте.
@@ -1809,6 +1821,75 @@ void ChatPage::keyPressEvent(QKeyEvent* e) {
         return;
     }
     QWidget::keyPressEvent(e);
+}
+
+// ── Клавиатурная навигация (KEY-01..04) ──────────────────────────────────────
+
+bool ChatPage::consumeEscape() {
+    // Модалки ловят свой Esc сами, когда в фокусе; здесь — если фокус убежал.
+    if (quickSwitcher_ && quickSwitcher_->isVisible()) { quickSwitcher_->closeAnimated(); return true; }
+    if (superSearch_ && superSearch_->isVisible())     { superSearch_->hide(); return true; }
+    if (appMenu_ && appMenu_->isVisible())             { closeAppMenu(); return true; }
+    if (emojiPicker_ && emojiPicker_->isVisible())     { emojiPicker_->hide(); return true; }
+    if (thirdColTarget_ > 0)                           { closeThirdColumn(); return true; }
+    // Поиск в сайдбаре: Esc чистит запрос и возвращает фокус в переписку.
+    if (search_ && !search_->text().isEmpty()) {
+        search_->clear();
+        if (composer_) composer_->setFocus();
+        return true;
+    }
+    return false;
+}
+
+void ChatPage::cycleChat(int delta) {
+    if (visibleChatIds_.isEmpty()) return;
+    const int idx = visibleChatIds_.indexOf(currentPeerId_);
+    // Не в списке (поиск человека/каталог) — начинаем с первого.
+    const int next = idx < 0 ? (delta > 0 ? 0 : visibleChatIds_.size() - 1)
+                             : (idx + delta + visibleChatIds_.size()) % visibleChatIds_.size();
+    const QString& id = visibleChatIds_[next];
+    const int ci = indexOfChat(id);
+    if (ci >= 0) openChat(chats_[ci]);
+}
+
+void ChatPage::navigateChatHistory(int delta) {
+    if (delta < 0) {   // Alt+← — назад
+        if (navBack_.isEmpty()) return;
+        const QString target = navBack_.takeLast();
+        if (!currentPeerId_.isEmpty()) navForward_.append(currentPeerId_);
+        navHistoryNavigating_ = true;   // openChat не должен писать в стек
+        const int ci = indexOfChat(target);
+        if (ci >= 0) openChat(chats_[ci]);
+        else openChatWith(target, QString(), QString());
+    } else {            // Alt+→ — вперёд
+        if (navForward_.isEmpty()) return;
+        const QString target = navForward_.takeLast();
+        if (!currentPeerId_.isEmpty()) navBack_.append(currentPeerId_);
+        navHistoryNavigating_ = true;
+        const int ci = indexOfChat(target);
+        if (ci >= 0) openChat(chats_[ci]);
+        else openChatWith(target, QString(), QString());
+    }
+}
+
+void ChatPage::editLastOwnMessage() {
+    // Последнее своё в ОТРИСОВАННОМ хвосте — то, что видит пользователь.
+    for (int i = currentMessages_.size() - 1; i >= 0; --i) {
+        const ChatMessage& m = currentMessages_[i];
+        if (!m.sent || m.id.startsWith(QStringLiteral("tmp")) || m.content.isEmpty()) continue;
+        if (!findMessage(m.id)) continue;   // ещё не материализовано — идём дальше
+        startEditing(m.id, m.content);
+        return;
+    }
+}
+
+// Тестовые швы (design-verify): закрытая навигация по имени действия.
+void ChatPage::debugAction(const QString& name, int arg) {
+    if (name == QLatin1String("open") && arg >= 0 && arg < chats_.size())
+        openChat(chats_[arg]);
+    else if (name == QLatin1String("navHistory")) navigateChatHistory(arg);
+    else if (name == QLatin1String("cycleChat"))   cycleChat(arg);
+    else if (name == QLatin1String("editLast"))    editLastOwnMessage();
 }
 
 int ChatPage::indexOfChat(const QString& id) const {
@@ -2146,6 +2227,7 @@ void ChatPage::rebuildChatList() {
     const bool folderActive = !folderKeys.isEmpty() || activeFolderId_ != QStringLiteral("all");
 
     QSet<QString> shownChatIds;
+    visibleChatIds_.clear();   // порядок видимого списка (KEY-02: Ctrl+PgUp/Dn)
     // Пины — секцией сверху (LST-04, как sortChatsForDisplay веба):
     // закреплённые идут первыми, внутри секции — порядок сервера (~свежесть).
     QList<const Chat*> ordered;
@@ -2162,6 +2244,7 @@ void ChatPage::rebuildChatList() {
             !c.name.toLower().contains(filter))
             continue;
         shownChatIds.insert(c.id);
+        visibleChatIds_.append(c.id);
 
         const QString avatarText = c.isSaved ? QStringLiteral("★")
                                   : (c.avatarText.isEmpty() ? c.displayName : c.avatarText);
@@ -2288,6 +2371,15 @@ void ChatPage::openChat(const Chat& chat) {
     cancelEditing();
     clearStagedFiles();   // вложения принадлежат чату, куда их бросили (MLT-06)
     if (emojiPicker_) emojiPicker_->hide();   // панель не висит над чужим чатом
+    // История переходов (KEY-03): обычный переход пишет предыдущий чат в стек,
+    // Alt+←/→ ходит по нему и не пишет (это делает сама navigateChatHistory).
+    if (!navHistoryNavigating_ && !currentPeerId_.isEmpty()
+            && currentPeerId_ != chat.id) {
+        navBack_.append(currentPeerId_);
+        if (navBack_.size() > 64) navBack_.removeFirst();
+        navForward_.clear();   // новая ветка — «вперёд» сбрасывается (как в браузере)
+    }
+    navHistoryNavigating_ = false;
     saveDraft();                              // черновик предыдущего чата — в Prefs
     if (typingTimer_) typingTimer_->stop();
     peerStatusBase_.clear();
