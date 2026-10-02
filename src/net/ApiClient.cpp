@@ -1193,6 +1193,94 @@ void ApiClient::setChatPinned(const QString& chatId, const QString& chatType, bo
     });
 }
 
+// ── Опросы (MSG-06; контракт: handleCreatePoll/GetPoll/VotePoll) ─────────────
+
+void ApiClient::createPoll(const QString& messageId, const QString& chatType,
+                           const QString& question, const QStringList& options,
+                           bool anonymous, bool multiple) {
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token},
+                     {QStringLiteral("message_id"), messageId},
+                     {QStringLiteral("message_type"), chatType},
+                     {QStringLiteral("question"), question},
+                     {QStringLiteral("is_anonymous"), anonymous},
+                     {QStringLiteral("allows_multiple"), multiple}};
+    for (int i = 0; i < options.size(); ++i)
+        body.insert(QStringLiteral("option%1").arg(i), options[i]);
+    postJson(QStringLiteral("/api/create-poll"), body,
+             [this, messageId](const QJsonObject& o, bool ok, const QString& netErr) {
+        const bool success = ok && o.value(QStringLiteral("success")).toBool(false);
+        emit pollCreated(success, messageId,
+                         success ? QString()
+                                 : o.value(QStringLiteral("message")).toString(
+                                       netErr.isEmpty() ? QStringLiteral("Сеть недоступна") : netErr));
+    });
+}
+
+void ApiClient::getPoll(const QString& messageId, const QString& chatType) {
+    postJson(QStringLiteral("/api/get-poll"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("message_id"), messageId},
+              {QStringLiteral("message_type"), chatType}},
+             [this, messageId](const QJsonObject& o, bool ok, const QString&) {
+        emit pollLoaded(messageId, o.value(QStringLiteral("poll")).toObject(),
+                        ok && o.value(QStringLiteral("success")).toBool(false));
+    });
+}
+
+void ApiClient::votePoll(const QString& pollId, const QString& optionId) {
+    postJson(QStringLiteral("/api/vote-poll"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("poll_id"), pollId},
+              {QStringLiteral("option_id"), optionId}},
+             [this, pollId, optionId](const QJsonObject& o, bool ok, const QString&) {
+        emit pollVoted(ok && o.value(QStringLiteral("success")).toBool(false), pollId, optionId);
+    });
+}
+
+// ── Отложенные (MSG-07; контракт: request_handler_editing.cpp) ────────────────
+
+void ApiClient::scheduleMessage(const QString& chatType, const QString& chatId,
+                                const QString& content, const QDateTime& sendAt,
+                                const QString& replyTo) {
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token},
+                     {QStringLiteral("chat_type"), chatType},
+                     {QStringLiteral("chat_id"), chatId},
+                     {QStringLiteral("content"), content},
+                     {QStringLiteral("send_at"),
+                      sendAt.toUTC().toString(QStringLiteral("yyyy-MM-ddTHH:mm:ssZ"))}};
+    if (!replyTo.isEmpty())
+        body.insert(QStringLiteral("reply_to_message_id"), replyTo);
+    postJson(QStringLiteral("/api/schedule-message"), body,
+             [this, sendAt](const QJsonObject& o, bool ok, const QString& netErr) {
+        const bool success = ok && o.value(QStringLiteral("success")).toBool(false);
+        emit scheduledCreated(success, o.value(QStringLiteral("id")).toString(),
+                              sendAt,
+                              success ? QString()
+                                      : o.value(QStringLiteral("message")).toString(
+                                            netErr.isEmpty() ? QStringLiteral("Сеть недоступна") : netErr));
+    });
+}
+
+void ApiClient::getScheduledMessages(const QString& chatType, const QString& chatId) {
+    postJson(QStringLiteral("/api/get-scheduled-messages"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("chat_type"), chatType},
+              {QStringLiteral("chat_id"), chatId}},
+             [this, chatId](const QJsonObject& o, bool ok, const QString&) {
+        if (!ok || !o.value(QStringLiteral("success")).toBool(false)) return;
+        emit scheduledLoaded(chatId, o.value(QStringLiteral("scheduled")).toArray());
+    });
+}
+
+void ApiClient::cancelScheduledMessage(const QString& messageId) {
+    postJson(QStringLiteral("/api/cancel-scheduled-message"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("message_id"), messageId}},
+             [this, messageId](const QJsonObject& o, bool ok, const QString&) {
+        emit scheduledCancelled(messageId, ok && o.value(QStringLiteral("success")).toBool(false));
+    });
+}
+
 
 void ApiClient::sendFriendRequest(const QString& username) {
     QJsonObject body{{QStringLiteral("token"), Session::instance().token},

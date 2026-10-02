@@ -228,6 +228,23 @@ public:
     void getChatPins();
     void setChatPinned(const QString& chatId, const QString& chatType, bool pinned);
 
+    // Опросы (MSG-06): create/vote/get-poll. Опрос вешается на СВОЁ сообщение
+    // (сначала send-message с маркером «📊 POLL: …», потом create-poll).
+    void createPoll(const QString& messageId, const QString& chatType,
+                    const QString& question, const QStringList& options,
+                    bool anonymous, bool multiple);
+    void getPoll(const QString& messageId, const QString& chatType);
+    void votePoll(const QString& pollId, const QString& optionId);
+
+    // Отложенные сообщения (MSG-07): schedule/get-scheduled/cancel.
+    // sendAt — ISO 8601 (сервер: +30с … +1 год). Recurrence — клиентский
+    // планировщик (перепланирует после фактической отправки).
+    void scheduleMessage(const QString& chatType, const QString& chatId,
+                         const QString& content, const QDateTime& sendAt,
+                         const QString& replyTo = QString());
+    void getScheduledMessages(const QString& chatType, const QString& chatId);
+    void cancelScheduledMessage(const QString& messageId);
+
 signals:
     void loginFinished(const AuthResult& result);
     void registerFinished(const AuthResult& result);
@@ -314,6 +331,17 @@ signals:
     // (error = «Pinned chats limit reached» и т.п. от сервера).
     void chatPinsLoaded(const QSet<QString>& pinnedKeys);
     void chatPinDone(const QString& key, bool pinned, bool ok, const QString& error);
+
+    // Опросы: полный ответ /api/get-poll по ключу message_id (обновление виджета).
+    void pollLoaded(const QString& messageId, const QJsonObject& poll, bool ok);
+    void pollCreated(bool ok, const QString& messageId, const QString& error);
+    void pollVoted(bool ok, const QString& pollId, const QString& optionId);
+
+    // Отложенные: список /api/get-scheduled-messages текущего чата.
+    void scheduledLoaded(const QString& chatId, const QJsonArray& scheduled);
+    void scheduledCreated(bool ok, const QString& id, const QDateTime& sendAt,
+                          const QString& error);
+    void scheduledCancelled(const QString& id, bool ok);
 
     // Боты и подарки.
     void botCallbackDone(bool ok, const QJsonObject& response);

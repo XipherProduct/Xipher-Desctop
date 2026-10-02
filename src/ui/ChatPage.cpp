@@ -45,6 +45,8 @@
 #include <QtMath>
 #include <QMenu>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QDateTimeEdit>
 #include <QWidgetAction>
 #include <QAction>
 #include <QApplication>
@@ -103,6 +105,11 @@
 #include <algorithm>
 
 namespace {
+
+// Маркер опроса (MSG-06): сервер не помечает poll-сообщения — конвенция
+// контента, как у чек-листов. Отправитель шлёт send-message с этим префиксом
+// и вешает create-poll на полученный id; получатель по префиксу тянет get-poll.
+const char kPollMarker[] = "\xF0\x9F\x93\x8A POLL: ";   // «📊 POLL: »
 
 QString elide(const QString& s, const QFont& f, int px) {
     return QFontMetrics(f).elidedText(s.isEmpty() ? QString() : s, Qt::ElideRight, px);
@@ -1019,6 +1026,15 @@ void ChatPage::buildUi() {
     replyBar_->setVisible(false);
     cblOuter->addWidget(replyBar_);
 
+    // Секция «Отложенные» (MSG-07): запланированные этого чата с отменой.
+    scheduledBar_ = new QWidget(composerBar);
+    scheduledBar_->setObjectName(QStringLiteral("replyBar"));
+    scheduledLay_ = new QVBoxLayout(scheduledBar_);
+    scheduledLay_->setContentsMargins(0, 0, 0, 0);
+    scheduledLay_->setSpacing(2);
+    scheduledBar_->setVisible(false);
+    cblOuter->addWidget(scheduledBar_);
+
     // Полоса отложенных аттачей (MLT-06): дроп файлов → чипы-превью здесь,
     // отправка — вместе со следующим «Отправить» (как pendingAttachments веба).
     stagedBar_ = new QWidget(composerBar);
@@ -1448,6 +1464,31 @@ void ChatPage::buildUi() {
         pinnedChats_ = keys;
         rebuildChatList();
     });
+    // Опросы (MSG-06): карточки обновляются ответами get-poll; после голоса —
+    // перезагрузка для счётчиков; после ack маркерного сообщения — create-poll.
+    connect(api_, &ApiClient::pollLoaded, this, &ChatPage::onPollLoaded);
+    connect(api_, &ApiClient::pollVoted, this,
+            [this](bool ok, const QString&, const QString& optionId) {
+        Q_UNUSED(optionId);
+        if (ok && !currentPeerId_.isEmpty()) {
+            const QString type = currentKind_ == ChatKind::Group   ? QStringLiteral("group")
+                               : currentKind_ == ChatKind::Channel ? QStringLiteral("channel")
+                                                                   : QStringLiteral("chat");
+            for (auto it = pollWidgets_.constBegin(); it != pollWidgets_.constEnd(); ++it)
+                api_->getPoll(it.key(), type);
+        }
+    });
+    connect(api_, &ApiClient::messageSent, this,
+            [this](const ChatMessage& m, const QString&, const QString& tempId) {
+        auto pd = pendingPolls_.find(tempId);
+        if (pd == pendingPolls_.end() || m.id.isEmpty()) return;
+        const QString type = currentKind_ == ChatKind::Group   ? QStringLiteral("group")
+                           : currentKind_ == ChatKind::Channel ? QStringLiteral("channel")
+                                                               : QStringLiteral("chat");
+        api_->createPoll(m.id, type, pd.value().question, pd.value().options,
+                         pd.value().anonymous, pd.value().multiple);
+        pendingPolls_.erase(pd);
+    });
     connect(api_, &ApiClient::chatPinDone, this,
             [this](const QString& key, bool pinned, bool ok, const QString& error) {
         if (ok) return;
@@ -1482,6 +1523,16 @@ void ChatPage::buildUi() {
     connect(navFwd, &QShortcut::activated, this, [this]() { navigateChatHistory(+1); });
     auto* editLast = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Up), this);
     connect(editLast, &QShortcut::activated, this, &ChatPage::editLastOwnMessage);
+
+    // Отложенные (MSG-07): список чата + отмена + recurrence-сверка раз в 60с.
+    connect(api_, &ApiClient::scheduledLoaded, this, &ChatPage::onScheduledLoaded);
+    connect(api_, &ApiClient::scheduledCreated, this, &ChatPage::onScheduledCreated);
+    connect(api_, &ApiClient::scheduledCancelled, this,
+            [this](const QString&, bool) { refreshScheduled(); });
+    scheduledCheckTimer_ = new QTimer(this);
+    scheduledCheckTimer_->setInterval(60000);
+    connect(scheduledCheckTimer_, &QTimer::timeout, this, &ChatPage::checkRecurring);
+    scheduledCheckTimer_->start();
 
     // Тема из настроек («Оформление»): перегенерировать QSS и инлайн-фоны.
     applyTheme();
@@ -2592,6 +2643,7 @@ void ChatPage::openChat(const Chat& chat) {
         chats_[idx].unread = 0;
         rebuildChatList();
     }
+    refreshScheduled();   // отложенные этого чата — секция над композером (MSG-07)
 }
 
 // ── Пины чатов (LST-04) ───────────────────────────────────────────────────────
@@ -2637,6 +2689,7 @@ void ChatPage::clearMessages() {
     msgLayout_->addStretch();
     shownIds_.clear();
     checklistWidgets_.clear();
+    pollWidgets_.clear();   // карточки опросов умирают вместе с бабблами (MSG-06)
     mergedChecklists_.clear();
     pendingImage_.clear();   // виджеты-картинки удалены — не держим устаревшие ключи
     bubbleCount_ = 0;
@@ -2676,6 +2729,17 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
     if (obj == overlayScrim_ && e->type() == QEvent::MouseButtonPress) {
         closeThirdColumn();
         return true;
+    }
+    // Голосование в опросе (MSG-06): клик по варианту → vote-poll.
+    if (e->type() == QEvent::MouseButtonRelease) {
+        if (auto* w = qobject_cast<QWidget*>(obj)) {
+            const QString pollId = w->property("pollId").toString();
+            const QString optionId = w->property("optionId").toString();
+            if (!pollId.isEmpty() && !optionId.isEmpty()) {
+                api_->votePoll(pollId, optionId);
+                return true;
+            }
+        }
     }
     // Мультивыбор (MLT-01): клик по области сообщений toggle'ит баббл под
     // курсором; Ctrl+клик в обычном режиме начинает выделение.
@@ -3369,6 +3433,10 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         }
         if (!out) el->addStretch();
         bl->addWidget(erow);
+    } else if (msg.content.startsWith(kPollMarker)) {
+        // Опрос (MSG-06): карточка с вопросом/вариантами/полосами процентов;
+        // данные подтягиваются get-poll по message_id (обновит pollLoaded).
+        addPollBubble(bubble, bl, msg);
     } else {
         auto* text = new MessageTextLabel(formatMessageHtml(msg.content, highlightQuery_), bubble);
         text->setContextMenuPolicy(Qt::NoContextMenu);   // ПКМ → меню баббла, не дефолтное
@@ -4440,6 +4508,8 @@ void ChatPage::onAttachClicked() {
     QAction* fileAct = menu.addAction(Icons::icon(Icons::File, 18, mclr), QStringLiteral("Файл"));
     QAction* checklist = menu.addAction(Icons::icon(Icons::Checklist, 18, mclr),
                                         QStringLiteral("Чек-лист"));
+    QAction* poll = menu.addAction(QStringLiteral("📊 Опрос"));   // MSG-06
+    QAction* later = menu.addAction(QStringLiteral("🕒 Отправить позже"));   // MSG-07
     menu.addSeparator();
     QMenu* geo = menu.addMenu(QStringLiteral("Геопозиция"));
     geo->setIcon(Icons::icon(Icons::Location, 18, mclr));
@@ -4450,6 +4520,8 @@ void ChatPage::onAttachClicked() {
     connect(photoAct, &QAction::triggered, this, &ChatPage::pickAndSendPhoto);
     connect(fileAct, &QAction::triggered, this, &ChatPage::pickAndSendFile);
     connect(checklist, &QAction::triggered, this, &ChatPage::openChecklistDialog);
+    connect(poll, &QAction::triggered, this, &ChatPage::openPollDialog);
+    connect(later, &QAction::triggered, this, [this]() { openScheduleDialog(); });
     connect(geoSend, &QAction::triggered, this, &ChatPage::sendLocation);
     QPoint pos = attachBtn_->mapToGlobal(QPoint(0, 0));
     pos.setY(pos.y() - menu.sizeHint().height() - 6);   // открываем ВВЕРХ
@@ -4819,6 +4891,405 @@ void ChatPage::copySelected() {
             parts << m.content;
     if (parts.isEmpty()) return;
     QApplication::clipboard()->setText(parts.join(QLatin1Char('\n')));
+}
+
+// ── Опросы (MSG-06) ──────────────────────────────────────────────────────────
+
+void ChatPage::addPollBubble(QWidget* bubble, QVBoxLayout* bl, const ChatMessage& msg) {
+    const QString marker = QString::fromUtf8(kPollMarker);
+    const QString question = msg.content.mid(marker.length()).trimmed();
+    auto* box = new QWidget(bubble);
+    box->setObjectName(QStringLiteral("pollBox"));
+    auto* v = new QVBoxLayout(box);
+    v->setContentsMargins(0, 2, 0, 2);
+    v->setSpacing(6);
+
+    auto* q = new QLabel(question, box);
+    q->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:15px;font-weight:700;"));
+    q->setWordWrap(true);
+    v->addWidget(q);
+
+    auto* opts = new QWidget(box);
+    opts->setObjectName(QStringLiteral("pollOptions"));
+    auto* ol = new QVBoxLayout(opts);
+    ol->setContentsMargins(0, 0, 0, 0);
+    ol->setSpacing(4);
+    v->addWidget(opts);
+
+    auto* total = new QLabel(QStringLiteral("Загрузка опроса…"), box);
+    total->setStyleSheet(QStringLiteral("color:#726C82;font-size:11px;"));
+    v->addWidget(total);
+
+    bl->addWidget(box);
+    bubble->setProperty("pollMsgId", msg.id);
+
+    // Данные — с сервера (вне сети виджет просто ждёт, сообщений не ломает).
+    const QString type = currentKind_ == ChatKind::Group   ? QStringLiteral("group")
+                       : currentKind_ == ChatKind::Channel ? QStringLiteral("channel")
+                                                           : QStringLiteral("chat");
+    pollWidgets_.insert(msg.id, {box, total});
+    if (!msg.id.isEmpty() && !msg.id.startsWith(QStringLiteral("tmp")))
+        api_->getPoll(msg.id, type);
+}
+
+// pollLoaded → перерисовать карточку опроса (полосы, проценты, мой голос).
+void ChatPage::onPollLoaded(const QString& messageId, const QJsonObject& poll, bool ok) {
+    auto it = pollWidgets_.find(messageId);
+    if (it == pollWidgets_.end()) return;
+    QWidget* box = it.value().first;
+    QLabel* total = it.value().second;
+    if (!box || !total) { pollWidgets_.erase(it); return; }
+    if (!ok || poll.isEmpty()) {
+        total->setText(QStringLiteral("Опрос недоступен"));
+        return;
+    }
+    auto* opts = box->findChild<QWidget*>(QStringLiteral("pollOptions"));
+    if (!opts) return;
+    QLayout* ol = opts->layout();
+    if (!ol) return;
+    {
+        while (ol->count() > 0) {
+            QLayoutItem* item = ol->takeAt(0);
+            if (item->widget()) item->widget()->deleteLater();
+            delete item;
+        }
+    }
+    const QJsonArray options = poll.value(QStringLiteral("options")).toArray();
+    int sum = 0;
+    for (const QJsonValue& o : options)
+        sum += o.toObject().value(QStringLiteral("vote_count")).toInt();
+    const bool multiple = poll.value(QStringLiteral("allows_multiple")).toBool(false);
+    const QString pollId = poll.value(QStringLiteral("id")).toString();
+
+    for (const QJsonValue& ov : options) {
+        const QJsonObject o = ov.toObject();
+        const int count = o.value(QStringLiteral("vote_count")).toInt();
+        const int pct = sum > 0 ? qRound(count * 100.0 / sum) : 0;
+        const QString text = o.value(QStringLiteral("option_text")).toString();
+        const QString optId = o.value(QStringLiteral("id")).toString();
+
+        auto* row = new QWidget(opts);
+        row->setObjectName(QStringLiteral("pollOption"));
+        row->setCursor(Qt::PointingHandCursor);
+        auto* rl = new QHBoxLayout(row);
+        rl->setContentsMargins(0, 0, 0, 0);
+        rl->setSpacing(8);
+        // Полоса-фон ширины pct%: контейнер + заливка (absolute layout).
+        auto* barRow = new QWidget(row);
+        barRow->setFixedHeight(30);
+        auto* barFill = new QWidget(barRow);
+        barFill->setStyleSheet(QStringLiteral("background:rgba(139,92,246,0.30);"
+                                              "border-radius:6px;"));
+        barFill->setGeometry(0, 0, 0, 30);
+        auto* lbl = new QLabel(barRow);
+        lbl->setStyleSheet(QStringLiteral("background:transparent;color:#F3F1F8;"
+                                          "font-size:14px;"));
+        lbl->setText(QStringLiteral("%1  %2%%3").arg(text).arg(pct)
+            .arg(sum > 0 ? QStringLiteral("  (%1)").arg(count) : QString()));
+        lbl->setWordWrap(true);
+        barFill->raise();   // текст поверх заливки
+        lbl->raise();
+        QTimer::singleShot(0, this, [barFill, lbl, pct]() {
+            barFill->setGeometry(0, 0, lbl->parentWidget()->width() * pct / 100, 30);
+        });
+        connect(this, &ChatPage::pollBarsNeedUpdate, barFill,
+                [barFill, lbl, pct]() {
+            barFill->setGeometry(0, 0, qMax(4, lbl->parentWidget()->width() * pct / 100), 30);
+        });
+        rl->addWidget(barRow, 1);
+        ol->addWidget(row);
+
+        // Голосование: клик по варианту (эхо обновит счётчики get-poll'ом).
+        row->installEventFilter(this);
+        row->setProperty("pollId", pollId);
+        row->setProperty("optionId", optId);
+    }
+    total->setText(sum > 0 ? QStringLiteral("Голосов: %1").arg(sum)
+                           : QStringLiteral("Пока никто не голосовал"));
+    emit pollBarsNeedUpdate();
+}
+
+// Создание опроса: диалог из композер-меню «Опрос».
+void ChatPage::openPollDialog() {
+    if (currentPeerId_.isEmpty()) return;
+    auto* ov = new ModalOverlay(window(), 440);
+    ov->card()->setStyleSheet(QStringLiteral(R"QSS(
+#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
+QLabel{color:#F3F1F8;}
+QLineEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+  min-height:34px;padding:0 10px;color:#F3F1F8;font-size:14px;}
+QLineEdit:focus{border:1px solid #8B5CF6;}
+QCheckBox{color:#ACA6BD;font-size:13px;}
+#pollTitle{font-size:16px;font-weight:800;}
+#pollGo{background:#8B5CF6;border:none;border-radius:10px;color:#fff;
+  font-size:14px;font-weight:600;min-height:36px;}
+)QSS"));
+    auto* lay = ov->cardLayout();
+    lay->setContentsMargins(18, 16, 18, 16);
+    lay->setSpacing(10);
+    auto* title = new QLabel(QStringLiteral("📊 Новый опрос"), ov->card());
+    title->setObjectName(QStringLiteral("pollTitle"));
+    lay->addWidget(title);
+    auto* q = new QLineEdit(ov->card());
+    q->setPlaceholderText(QStringLiteral("Вопрос"));
+    lay->addWidget(q);
+    QList<QLineEdit*> optEdits;
+    for (int i = 0; i < 4; ++i) {
+        auto* e = new QLineEdit(ov->card());
+        e->setPlaceholderText(i < 2
+            ? QStringLiteral("Вариант %1").arg(i + 1)
+            : QStringLiteral("Вариант %1 (необязательно)").arg(i + 1));
+        lay->addWidget(e);
+        optEdits.append(e);
+    }
+    auto* anon = new QCheckBox(QStringLiteral("Анонимное голосование"), ov->card());
+    anon->setChecked(true);
+    lay->addWidget(anon);
+    auto* multi = new QCheckBox(QStringLiteral("Несколько ответов"), ov->card());
+    lay->addWidget(multi);
+    auto* go = new QPushButton(QStringLiteral("Создать опрос"), ov->card());
+    go->setObjectName(QStringLiteral("pollGo"));
+    lay->addWidget(go);
+
+    connect(go, &QPushButton::clicked, this, [this, ov, q, optEdits, anon, multi]() {
+        const QString question = q->text().trimmed();
+        QStringList options;
+        for (QLineEdit* e : optEdits)
+            if (!e->text().trimmed().isEmpty()) options << e->text().trimmed();
+        if (question.isEmpty() || options.size() < 2) {
+            QMessageBox::information(ov, QStringLiteral("Опрос"),
+                QStringLiteral("Нужен вопрос и минимум два варианта."));
+            return;
+        }
+        // 1) маркерное сообщение; 2) на его id вешается create-poll (onMessageSent →
+        // pendingPolls_).
+        const QString content = QString::fromUtf8(kPollMarker) + question;
+        const QString tempId = QStringLiteral("tmp_%1").arg(++tempCounter_);
+        pendingPolls_.insert(tempId, {question, options, anon->isChecked(), multi->isChecked()});
+        const QString type = currentKind_ == ChatKind::Group   ? QStringLiteral("group")
+                           : currentKind_ == ChatKind::Channel ? QStringLiteral("channel")
+                                                               : QStringLiteral("chat");
+        if (type == QLatin1String("group"))          api_->sendGroupMessage(currentPeerId_, content, tempId);
+        else if (type == QLatin1String("channel"))   api_->sendChannelMessage(currentPeerId_, content, tempId);
+        else                                         api_->sendMessage(currentPeerId_, content, tempId);
+        ov->closeAnimated();
+    });
+    ov->showAnimated();
+}
+
+// ── Отложенные сообщения (MSG-07) ────────────────────────────────────────────
+
+// Меню «Отправить позже»: дата-время + повтор (нет/день/неделя).
+void ChatPage::openScheduleDialog() {
+    if (currentPeerId_.isEmpty()) return;
+    const QString text = composer_->toPlainText().trimmed();
+    if (text.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Отложить"),
+            QStringLiteral("Напишите сообщение в поле ввода — оно уйдёт в назначенное время."));
+        return;
+    }
+    auto* ov = new ModalOverlay(window(), 420);
+    ov->card()->setStyleSheet(QStringLiteral(R"QSS(
+#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
+QLabel{color:#F3F1F8;}
+#schTitle{font-size:16px;font-weight:800;}
+QDateTimeEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+  min-height:34px;padding:0 10px;color:#F3F1F8;font-size:14px;}
+QDateTimeEdit:focus{border:1px solid #8B5CF6;}
+QComboBox{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+  min-height:34px;padding:0 10px;color:#F3F1F8;font-size:14px;}
+#schGo{background:#8B5CF6;border:none;border-radius:10px;color:#fff;
+  font-size:14px;font-weight:600;min-height:36px;}
+#schGo:hover{background:#9B72F8;}
+)QSS"));
+    auto* lay = ov->cardLayout();
+    lay->setContentsMargins(18, 16, 18, 16);
+    lay->setSpacing(10);
+    auto* title = new QLabel(QStringLiteral("🕒 Отправить позже"), ov->card());
+    title->setObjectName(QStringLiteral("schTitle"));
+    lay->addWidget(title);
+    auto* dt = new QDateTimeEdit(QDateTime::currentDateTime().addSecs(3600), ov->card());
+    dt->setCalendarPopup(true);
+    dt->setDisplayFormat(QStringLiteral("dd.MM.yyyy  HH:mm"));
+    dt->setMinimumDateTime(QDateTime::currentDateTime().addSecs(60));
+    lay->addWidget(dt);
+    auto* recur = new QComboBox(ov->card());
+    recur->addItems({QStringLiteral("Без повтора"),
+                     QStringLiteral("Каждый день"),
+                     QStringLiteral("Каждую неделю")});
+    lay->addWidget(recur);
+    auto* go = new QPushButton(QStringLiteral("Запланировать"), ov->card());
+    go->setObjectName(QStringLiteral("schGo"));
+    lay->addWidget(go);
+
+    const QString chatType = currentKind_ == ChatKind::Group   ? QStringLiteral("group")
+                           : currentKind_ == ChatKind::Channel ? QStringLiteral("channel")
+                           : !currentTopicId_.isEmpty()        ? QStringLiteral("topic")
+                                                               : QStringLiteral("chat");
+    const QString chatId = chatType == QLatin1String("topic") ? currentTopicId_ : currentPeerId_;
+    connect(go, &QPushButton::clicked, this, [this, ov, dt, recur, text, chatType, chatId]() {
+        const QDateTime when = dt->dateTime();
+        if (when <= QDateTime::currentDateTime().addSecs(35)) {
+            QMessageBox::information(ov, QStringLiteral("Отложить"),
+                QStringLiteral("Сервер требует минимум 30 секунд запаса."));
+            return;
+        }
+        api_->scheduleMessage(chatType, chatId, text, when);
+        // Recurrence — клиентский планировщик: после фактической отправки
+        // создаст следующее (scheduledCheckTimer_ сверяет раз в 60 с).
+        const int intervalDays = recur->currentIndex() == 1 ? 1
+                               : recur->currentIndex() == 2 ? 7 : 0;
+        if (intervalDays > 0)
+            addRecurringDraft(chatType, chatId, text, intervalDays);
+        composer_->clear();
+        ov->closeAnimated();
+    });
+    ov->showAnimated();
+}
+
+void ChatPage::addRecurringDraft(const QString& chatType, const QString& chatId,
+                                 const QString& content, int intervalDays) {
+    QJsonArray arr = QJsonDocument::fromJson(
+        Prefs::getStr(QStringLiteral("xipher_recurring")).toUtf8()).array();
+    QJsonObject d;
+    d.insert(QStringLiteral("chat_type"), chatType);
+    d.insert(QStringLiteral("chat_id"), chatId);
+    d.insert(QStringLiteral("content"), content);
+    d.insert(QStringLiteral("interval_days"), intervalDays);
+    d.insert(QStringLiteral("scheduled_id"), QString());   // заполнит scheduledCreated
+    arr.append(d);
+    Prefs::setStr(QStringLiteral("xipher_recurring"),
+                  QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+}
+
+// Секция «Отложенные» над композером: время + текст + отмена.
+void ChatPage::onScheduledLoaded(const QString& chatId, const QJsonArray& scheduled) {
+    if (chatId != (currentTopicId_.isEmpty() ? currentPeerId_ : currentTopicId_)) return;
+    if (!scheduledLay_) return;
+    while (scheduledLay_->count() > 0) {
+        QLayoutItem* it = scheduledLay_->takeAt(0);
+        if (it->widget()) it->widget()->deleteLater();
+        delete it;
+    }
+    scheduledBar_->setVisible(!scheduled.isEmpty());
+    for (const QJsonValue& v : scheduled) {
+        const QJsonObject m = v.toObject();
+        const QDateTime when = QDateTime::fromString(
+            m.value(QStringLiteral("send_at")).toString(), Qt::ISODate);
+        auto* row = new QWidget(scheduledBar_);
+        auto* rl = new QHBoxLayout(row);
+        rl->setContentsMargins(8, 4, 8, 4);
+        rl->setSpacing(8);
+        auto* lbl = new QLabel(QStringLiteral("🕒 %1 — %2")
+            .arg(when.toLocalTime().toString(QStringLiteral("dd.MM HH:mm")),
+                 elide(m.value(QStringLiteral("content")).toString(), QFont(), 240)), row);
+        lbl->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:13px;"));
+        lbl->setWordWrap(true);
+        rl->addWidget(lbl, 1);
+        auto* x = new QPushButton(QStringLiteral("✕"), row);
+        x->setCursor(Qt::PointingHandCursor);
+        x->setFixedSize(24, 24);
+        x->setStyleSheet(QStringLiteral("background:transparent;border:none;"
+                                        "color:#726C82;font-size:13px;"));
+        const QString id = m.value(QStringLiteral("id")).toString();
+        connect(x, &QPushButton::clicked, this, [this, id]() {
+            api_->cancelScheduledMessage(id);
+        });
+        rl->addWidget(x, 0, Qt::AlignTop);
+        scheduledLay_->addWidget(row);
+    }
+}
+
+// Recurrence-сверка: расписание исчезло из списка → отправлено → создаём
+// следующее (+интервал). Вызывается таймером раз в минуту.
+void ChatPage::checkRecurring() {
+    QJsonArray arr = QJsonDocument::fromJson(
+        Prefs::getStr(QStringLiteral("xipher_recurring")).toUtf8()).array();
+    if (arr.isEmpty()) return;
+    QJsonArray kept;
+    for (const QJsonValue& v : arr) {
+        QJsonObject d = v.toObject();
+        const QString sid = d.value(QStringLiteral("scheduled_id")).toString();
+        if (!sid.isEmpty()) {
+            // Жив ли ещё этот scheduled_id? Список придёт в onScheduledLoaded —
+            // решение принимает checkRecurringForChat по факту ответа.
+            checkRecurringQueue_.append(d);
+            api_->getScheduledMessages(d.value(QStringLiteral("chat_type")).toString(),
+                                       d.value(QStringLiteral("chat_id")).toString());
+        }
+        kept.append(d);
+    }
+    Q_UNUSED(kept);
+}
+
+void ChatPage::checkRecurringForChat(const QString& chatType, const QString& chatId,
+                                     const QJsonArray& scheduled) {
+    bool changed = false;
+    QJsonArray arr = QJsonDocument::fromJson(
+        Prefs::getStr(QStringLiteral("xipher_recurring")).toUtf8()).array();
+    QJsonArray kept;
+    for (const QJsonValue& v : arr) {
+        QJsonObject d = v.toObject();
+        const bool ours = d.value(QStringLiteral("chat_type")).toString() == chatType
+                       && d.value(QStringLiteral("chat_id")).toString() == chatId
+                       && !d.value(QStringLiteral("scheduled_id")).toString().isEmpty();
+        bool stillThere = false;
+        if (ours) {
+            for (const QJsonValue& s : scheduled)
+                if (s.toObject().value(QStringLiteral("id")).toString()
+                        == d.value(QStringLiteral("scheduled_id")).toString())
+                    stillThere = true;
+            if (!stillThere) {
+                // Отправлено: создаём следующее через интервал.
+                const int days = d.value(QStringLiteral("interval_days")).toInt(1);
+                api_->scheduleMessage(chatType, chatId,
+                                      d.value(QStringLiteral("content")).toString(),
+                                      QDateTime::currentDateTime().addDays(days));
+                changed = true;
+                continue;   // id обновит scheduledCreated
+            }
+        }
+        kept.append(d);
+    }
+    if (changed)
+        Prefs::setStr(QStringLiteral("xipher_recurring"),
+                      QString::fromUtf8(QJsonDocument(kept).toJson(QJsonDocument::Compact)));
+    checkRecurringQueue_.clear();
+}
+
+void ChatPage::onScheduledCreated(bool ok, const QString& id, const QDateTime& sendAt,
+                                  const QString& error) {
+    Q_UNUSED(sendAt);
+    if (!ok) {
+        if (!error.isEmpty())
+            QMessageBox::warning(this, QStringLiteral("Отложить"), error);
+        return;
+    }
+    // Обновить/записать scheduled_id в recurring-черновиках этого чата.
+    QJsonArray arr = QJsonDocument::fromJson(
+        Prefs::getStr(QStringLiteral("xipher_recurring")).toUtf8()).array();
+    for (QJsonValueRef v : arr) {
+        QJsonObject d = v.toObject();
+        if (d.value(QStringLiteral("scheduled_id")).toString().isEmpty()
+            && d.value(QStringLiteral("chat_id")).toString() == currentPeerId_) {
+            d.insert(QStringLiteral("scheduled_id"), id);
+            v = d;
+        }
+    }
+    Prefs::setStr(QStringLiteral("xipher_recurring"),
+                  QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+    refreshScheduled();
+}
+
+void ChatPage::refreshScheduled() {
+    if (currentPeerId_.isEmpty()) return;
+    const QString chatType = currentKind_ == ChatKind::Group   ? QStringLiteral("group")
+                           : currentKind_ == ChatKind::Channel ? QStringLiteral("channel")
+                           : !currentTopicId_.isEmpty()        ? QStringLiteral("topic")
+                                                               : QStringLiteral("chat");
+    api_->getScheduledMessages(chatType,
+                               chatType == QLatin1String("topic") ? currentTopicId_
+                                                                  : currentPeerId_);
 }
 
 void ChatPage::sendPhotoBytesTo(const QString& receiverId, const QByteArray& bytes,

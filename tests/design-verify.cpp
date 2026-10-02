@@ -1326,6 +1326,80 @@ int main(int argc, char** argv) {
         QApplication::clipboard()->clear();
     }
 
+    // ── Опросы (MSG-06) и отложенные (MSG-07).
+    {
+        printf("\nОпросы и отложенные (MSG-06/07)\n");
+        // Опрос: сообщение с маркером → карточка с вопросом и вариантами.
+        ChatMessage pollMsg;
+        pollMsg.id = QStringLiteral("mpoll1");
+        pollMsg.content = QString::fromUtf8("\xF0\x9F\x93\x8A POLL: Какой цвет?");
+        pollMsg.senderName = QStringLiteral("Алиса");
+        pollMsg.time = QStringLiteral("12:58");
+        pollMsg.createdAt = QStringLiteral("2026-10-01T12:58:00");
+        QList<ChatMessage> withPoll = msgs;
+        withPoll.append(pollMsg);
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), withPoll);
+        for (int i = 0; i < 6; ++i) QCoreApplication::processEvents();
+        auto* pollBox = page.findChild<QWidget*>(QStringLiteral("pollBox"));
+        check(pollBox != nullptr, QStringLiteral("карточка опроса отрисована"));
+        bool qOk = false;
+        if (pollBox)
+            for (QLabel* l : pollBox->findChildren<QLabel*>())
+                if (l->text() == QStringLiteral("Какой цвет?")) qOk = true;
+        check(qOk, QStringLiteral("вопрос опроса виден"));
+
+        // Данные опроса (get-poll эхо): полосы/проценты/итог.
+        QJsonObject poll;
+        poll.insert(QStringLiteral("id"), QStringLiteral("poll_1"));
+        poll.insert(QStringLiteral("question"), QStringLiteral("Какой цвет?"));
+        poll.insert(QStringLiteral("allows_multiple"), false);
+        QJsonArray opts;
+        QJsonObject o1; o1.insert(QStringLiteral("id"), QStringLiteral("opt1"));
+        o1.insert(QStringLiteral("option_text"), QStringLiteral("Фиолетовый"));
+        o1.insert(QStringLiteral("vote_count"), 3);
+        QJsonObject o2; o2.insert(QStringLiteral("id"), QStringLiteral("opt2"));
+        o2.insert(QStringLiteral("option_text"), QStringLiteral("Зелёный"));
+        o2.insert(QStringLiteral("vote_count"), 1);
+        opts.append(o1); opts.append(o2);
+        poll.insert(QStringLiteral("options"), opts);
+        page.onPollLoadedForTest(QStringLiteral("mpoll1"), poll, true);
+        // Проверяем синхронно и по всем карточкам: офлайн-ответ get-poll
+        // перерисовывает виджеты, актуальный box — любой из живых.
+        const auto boxes = page.findChildren<QWidget*>(QStringLiteral("pollBox"));
+        bool votes = false, pct = false;
+        for (QWidget* b : boxes)
+            for (QLabel* l : b->findChildren<QLabel*>()) {
+                if (l->text() == QStringLiteral("Голосов: 4")) votes = true;
+                if (l->text().contains(QStringLiteral("75%"))) pct = true;
+            }
+        check(votes, QStringLiteral("итог «Голосов: 4»"));
+        check(pct, QStringLiteral("проценты посчитаны (75%/25%)"));
+
+        // Отложенные: эхо scheduledLoaded рисует секцию с отменой.
+        QJsonArray sched;
+        QJsonObject sm;
+        sm.insert(QStringLiteral("id"), QStringLiteral("sch1"));
+        sm.insert(QStringLiteral("content"), QStringLiteral("не забыть про релиз"));
+        sm.insert(QStringLiteral("send_at"), QStringLiteral("2026-10-03T12:00:00"));
+        sched.append(sm);
+        QMetaObject::invokeMethod(&api, "scheduledLoaded",
+            Q_ARG(QString, QStringLiteral("u_alice")), Q_ARG(QJsonArray, sched));
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        bool schedVisible = false, schedText = false, schedCancel = false;
+        QWidget* sbar = nullptr;
+        for (auto* w : page.findChildren<QWidget*>(QStringLiteral("replyBar")))
+            if (w->isVisible()) sbar = w;
+        if (sbar) {
+            schedVisible = true;
+            for (QLabel* l : sbar->findChildren<QLabel*>())
+                if (l->text().contains(QStringLiteral("не забыть про релиз"))) schedText = true;
+            schedCancel = !sbar->findChildren<QPushButton*>().isEmpty();
+        }
+        check(schedVisible && schedText && schedCancel,
+              QStringLiteral("секция «Отложенные»: текст + время + отмена"));
+    }
+
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).
     {
         printf("\nМедиавьюер: зум/пан (MDV-01)\n");

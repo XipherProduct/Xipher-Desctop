@@ -81,6 +81,10 @@ public:
                                      const QString& keywords) {
         onSearchResultPicked(chatId, messageId, keywords);
     }
+    // Обновление карточки опроса тестом (MSG-06).
+    void onPollLoadedForTest(const QString& mid, const QJsonObject& poll, bool ok) {
+        onPollLoaded(mid, poll, ok);
+    }
 
     // Третья колонка (WIN-01/02): инфо о чате справа. 0/360/фулл, анимация
     // 200мс; при узком окне (<1000px) — оверлей поверх чата со скримом.
@@ -122,6 +126,7 @@ signals:
     void logoutRequested();
     void callRequested(const QString& peerId, const QString& peerName, const QString& avatarUrl);
     void notify(const QString& title, const QString& body);   // системное уведомление
+    void pollBarsNeedUpdate();   // опрос: пересчитать полосы после layout-прохода
 
 public:
     void openChatWith(const QString& userId, const QString& displayName, const QString& username);
@@ -436,6 +441,18 @@ private:
     // прыжка из поиска до смены чата.
     QString highlightQuery_;
 
+    // Опросы (MSG-06): живые карточки по message_id и черновики создания
+    // (pendingPolls_: temp_id → параметры, отправляются create-poll на ack).
+    QHash<QString, QPair<QWidget*, QLabel*>> pollWidgets_;
+    struct PollDraft { QString question; QStringList options; bool anonymous = true; bool multiple = false; };
+    QHash<QString, PollDraft> pendingPolls_;
+    // Отложенные (MSG-07): секция над композером + recurrence-планировщик
+    // (сверяет scheduled_id раз в минуту; исчез → отправлено → следующее).
+    QWidget*      scheduledBar_ = nullptr;
+    QVBoxLayout*  scheduledLay_ = nullptr;
+    QTimer*       scheduledCheckTimer_ = nullptr;
+    QList<QJsonObject> checkRecurringQueue_;
+
     // Мультивыбор сообщений (MLT-01/02): рамка на баббле, панель действий
     // над композером, Esc выходит. Выделяются только материализованные.
     bool         selectionMode_ = false;
@@ -452,6 +469,21 @@ private:
     void deleteSelectedConfirmed();   // без диалога (тесты)
     void forwardSelected();    // MLT-02
     void copySelected();       // MLT-02
+    // Опросы (MSG-06): рендер карточки, обновление по get-poll, создание.
+    void addPollBubble(QWidget* bubble, QVBoxLayout* bl, const ChatMessage& msg);
+    void onPollLoaded(const QString& messageId, const QJsonObject& poll, bool ok);
+    void openPollDialog();
+    // Отложенные (MSG-07): диалог, секция над композером, recurrence-планировщик.
+    void openScheduleDialog();
+    void onScheduledLoaded(const QString& chatId, const QJsonArray& scheduled);
+    void onScheduledCreated(bool ok, const QString& id, const QDateTime& sendAt,
+                            const QString& error);
+    void refreshScheduled();
+    void checkRecurring();
+    void checkRecurringForChat(const QString& chatType, const QString& chatId,
+                               const QJsonArray& scheduled);
+    void addRecurringDraft(const QString& chatType, const QString& chatId,
+                           const QString& content, int intervalDays);
 
     // Клавиатурная навигация (KEY-02/03): порядок видимого списка чатов
     // (обновляется в rebuildChatList) и стеки истории переходов.
