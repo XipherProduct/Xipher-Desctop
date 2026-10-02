@@ -134,6 +134,8 @@ public:
     void muteGroupMember(const QString& groupId, const QString& userId, bool muted);
     void setGroupPermission(const QString& groupId, const QString& permission, bool enabled);
     void pinMessage(const QString& messageId, ChatKind kind, const QString& peerId, bool pin);
+    // Правка своего сообщения: {chat_type, message_id, content}; эхо — WS message_edited.
+    void editMessage(const QString& messageId, const QString& content, ChatKind kind);
 
     // Форум-топики (группы).
     void getGroupTopics(const QString& groupId);
@@ -229,6 +231,7 @@ signals:
     void contactActionDone(bool ok);
     void chatActionDone(bool ok);
     void profileLoaded(const QJsonObject& profile);
+    void messageEditedOnServer(bool ok);
     // Профиль v2: полный ответ /api/profile/view + id запроса (для отмены
     // устаревшего) и флаг ошибки сети.
     void profileViewLoaded(qint64 reqId, const QJsonObject& data, bool ok, const QString& error);

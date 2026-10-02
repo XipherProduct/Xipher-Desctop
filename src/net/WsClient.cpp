@@ -124,6 +124,15 @@ void WsClient::onTextMessage(const QString& text) {
         emit callIceReceived(o.value(QStringLiteral("from_user_id")).toString(),
                              o.value(QStringLiteral("candidate")).toString());
     }
+    else if (type == QStringLiteral("message_edited")) {
+        // {chat_type, chat_id, message_id, content, is_edited} — обеим сторонам.
+        emit messageEdited(o.value(QStringLiteral("message_id")).toString(),
+                           o.value(QStringLiteral("content")).toString());
+    }
+    else if (type == QStringLiteral("message_pinned") || type == QStringLiteral("message_unpinned")) {
+        emit messagePinned(o.value(QStringLiteral("message_id")).toString(),
+                           type == QStringLiteral("message_pinned"));
+    }
     else if (type == QStringLiteral("reaction_update")) {
         // Эхо обеим сторонам: {message_id, reaction, user_id, action, message_context}.
         emit reactionUpdated(o.value(QStringLiteral("message_id")).toString(),

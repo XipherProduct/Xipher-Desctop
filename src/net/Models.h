@@ -147,6 +147,7 @@ struct ChatMessage {
     bool    sent = false;  // true → исходящее (моё)
     bool    isRead = false;
     bool    isDelivered = false;
+    bool    edited = false;   // «изменено» (is_edited)
     int     ttlSeconds = 0;   // исчезающее сообщение (0 = обычное)
 
     // Вложение (voice/file/image): путь вида "/files/<имя>"

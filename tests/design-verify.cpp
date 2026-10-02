@@ -125,6 +125,12 @@ int main(int argc, char** argv) {
         r.reactions = {Reaction{QString::fromUtf8("\U0001F525"), 3, true},
                        Reaction{QString::fromUtf8("\U0001F44D"), 1, false}};
         msgs.insert(1, r);   // в видимую зону: список материализует только её
+        // Правка: метка «· изм.» у времени.
+        ChatMessage ed;
+        ed.id = "ed1"; ed.sent = true; ed.edited = true;
+        ed.content = "отредактированное сообщение";
+        ed.time = "10:03"; ed.createdAt = "2026-09-21T10:03:00";
+        msgs.insert(2, ed);
     }
 
     page.injectForDesignTest(chats, QList<Folder>{work}, QStringLiteral("u_alice"), msgs);
@@ -147,6 +153,25 @@ int main(int argc, char** argv) {
         }();
         check(chipQss.contains(QStringLiteral("#8B5CF6")),
               QStringLiteral("своя реакция — фиолетовая рамка"));
+    }
+    {
+        bool editedMark = false;
+        for (QLabel* l : page.findChildren<QLabel*>())
+            if (l->text().contains(QStringLiteral("изм."))) editedMark = true;
+        check(editedMark, QStringLiteral("правка: метка «· изм.» у времени"));
+        // Закреп: панель появляется и прячется.
+        page.setPinnedMessage(QStringLiteral("ed1"), QStringLiteral("отредактированное сообщение"));
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        bool barVisible = false;
+        for (QWidget* w : page.findChildren<QWidget*>(QStringLiteral("pinnedBar")))
+            if (w->isVisible()) barVisible = true;
+        check(barVisible, QStringLiteral("закреп: панель закрепа видна"));
+        page.clearPinnedMessage();
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        bool barHidden = true;
+        for (QWidget* w : page.findChildren<QWidget*>(QStringLiteral("pinnedBar")))
+            if (w->isVisible()) barHidden = false;
+        check(barHidden, QStringLiteral("закреп: откреп прячет панель"));
     }
 
     // Базовые проверки — на «Стандартной» теме (предыдущий прогон мог

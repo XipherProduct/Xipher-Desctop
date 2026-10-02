@@ -371,6 +371,23 @@ static QString chatQSS();   // единый шаблон стилей чата (
 
 ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
     : QWidget(parent), api_(api), ws_(ws) {
+    // Правка (обе стороны) и закрепление.
+    connect(ws_, &WsClient::messageEdited, this,
+            [this](const QString& messageId, const QString& content) {
+        if (ChatMessage* m = findMessage(messageId)) {
+            m->content = content;
+            m->edited = true;
+            rerenderPreservingScroll();
+        }
+    });
+    connect(ws_, &WsClient::messagePinned, this,
+            [this](const QString& messageId, bool pinned) {
+        if (!pinned) { clearPinnedMessage(); return; }
+        if (const ChatMessage* m = findMessage(messageId))
+            setPinnedMessage(messageId, m->content);
+        else setPinnedMessage(messageId, QStringLiteral("сообщение"));
+    });
+
     // Реакции собеседника: эхо reaction_update (приходит и за свои — сверка).
     connect(ws_, &WsClient::reactionUpdated, this,
             [this](const QString& messageId, const QString& emoji,
@@ -2496,6 +2513,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         addInlineKeyboard(bl, msg);
 
     QString metaText = msg.time;
+    if (msg.edited) metaText += QStringLiteral(" · изм.");
     if (out) {
         const QString tick = (msg.status == QStringLiteral("read"))
             ? QStringLiteral("✓✓") : (msg.status == QStringLiteral("delivered")
@@ -2667,6 +2685,93 @@ void ChatPage::toggleReaction(const QString& messageId, const QString& emoji) {
     else         api_->removeMessageReaction(messageId, emoji, ctx);
 }
 
+
+// ── Правка своего сообщения ─────────────────────────────────────────────────
+
+void ChatPage::startEditing(const QString& id, const QString& text) {
+    if (id.isEmpty() || id.startsWith(QStringLiteral("tmp_"))) return;
+    cancelEditing();
+    clearReplyTo();
+    editingId_ = id;
+    if (composer_) composer_->setPlainText(text);
+    if (replyBarText_)
+        replyBarText_->setText(QStringLiteral("Редактирование: %1")
+            .arg(elide(text, replyBarText_->font(), 300)));
+    if (replyBar_) replyBar_->setVisible(true);
+    if (composer_) composer_->setFocus();
+}
+
+void ChatPage::cancelEditing() {
+    if (editingId_.isEmpty()) return;
+    editingId_.clear();
+    if (replyBar_) replyBar_->setVisible(false);
+    if (composer_) composer_->clear();
+}
+
+// Перерисовка чата с сохранением позиции прокрутки (для правок содержимого).
+void ChatPage::rerenderPreservingScroll() {
+    QScrollBar* sb = msgScroll_->verticalScrollBar();
+    const int v = sb->value(), mx = sb->maximum();
+    const bool stick = stickBottom_;
+    renderMessages(QString());
+    for (int i = 0; i < 8; ++i) QCoreApplication::processEvents();
+    sb->setValue(mx > 0 ? int(double(v) / mx * sb->maximum()) : 0);
+    stickBottom_ = stick;
+}
+
+// ── Закреплённое сообщение ──────────────────────────────────────────────────
+
+void ChatPage::setPinnedMessage(const QString& id, const QString& snippet) {
+    pinnedMsgId_ = id;
+    if (!pinnedBar_) {
+        pinnedBar_ = new QWidget(this);
+        pinnedBar_->setObjectName(QStringLiteral("pinnedBar"));
+        pinnedBar_->setStyleSheet(QStringLiteral(
+            "QWidget#pinnedBar{background:#1A1822;border-bottom:1px solid #221F2C;}"));
+        pinnedBar_->setAttribute(Qt::WA_StyledBackground, true);
+        auto* pl = new QHBoxLayout(pinnedBar_);
+        pl->setContentsMargins(14, 6, 10, 6);
+        pl->setSpacing(10);
+        auto* pinIc = new QLabel(QStringLiteral("📌"), pinnedBar_);
+        pinIc->setStyleSheet(QStringLiteral("font-size:14px;background:transparent;"));
+        pinnedText_ = new QLabel(pinnedBar_);
+        pinnedText_->setStyleSheet(QStringLiteral(
+            "color:#ACA6BD;font-size:13px;background:transparent;"));
+        auto* unpin = new QPushButton(QStringLiteral("✕"), pinnedBar_);
+        unpin->setCursor(Qt::PointingHandCursor);
+        unpin->setFixedSize(22, 22);
+        unpin->setStyleSheet(QStringLiteral(
+            "QPushButton{border:none;border-radius:11px;color:#726C82;font-size:12px;}"
+            "QPushButton:hover{background:#221F2C;color:#F3F1F8;}"));
+        connect(unpin, &QPushButton::clicked, this, [this]() {
+            if (!pinnedMsgId_.isEmpty())
+                api_->pinMessage(pinnedMsgId_, currentKind_, currentPeerId_, false);
+            clearPinnedMessage();
+        });
+        // Клик по плашке — прыжок к сообщению.
+        pinnedBar_->installEventFilter(new SuperSearchClickFilter([this]() {
+            if (!pinnedMsgId_.isEmpty()) jumpToMessage(pinnedMsgId_);
+        }, pinnedBar_));
+        pl->addWidget(pinIc);
+        pl->addWidget(pinnedText_, 1);
+        pl->addWidget(unpin);
+        // Плашка ставится над областью сообщений: первым виджетом convLayout?
+        if (auto* outer = qobject_cast<QVBoxLayout*>(msgScroll_->parentWidget()->layout())) {
+            const int idx = outer->indexOf(msgScroll_);
+            if (idx >= 0) outer->insertWidget(idx, pinnedBar_);
+            else outer->insertWidget(0, pinnedBar_);
+        }
+    }
+    if (pinnedText_)
+        pinnedText_->setText(elide(snippet, pinnedText_->font(), 420));
+    pinnedBar_->setVisible(true);
+}
+
+void ChatPage::clearPinnedMessage() {
+    pinnedMsgId_.clear();
+    if (pinnedBar_) pinnedBar_->hide();
+}
+
 void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     const QString id     = bubble->property("msgId").toString();
     const QString text   = bubble->property("msgText").toString();
@@ -2722,6 +2827,9 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     if ((currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel)
         && !id.isEmpty() && !id.startsWith(QStringLiteral("tmp_")))
         pin = menu.addAction(QStringLiteral("Закрепить"));
+    QAction* edit = nullptr;
+    if (sent && plain && !id.isEmpty() && !id.startsWith(QStringLiteral("tmp_")))
+        edit = menu.addAction(QStringLiteral("Изменить"));
     QAction* del = nullptr;
     if (sent && !id.isEmpty() && !id.startsWith(QStringLiteral("tmp_"))) {
         menu.addSeparator();
@@ -2730,6 +2838,7 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     QAction* ch = menu.exec(pos);
     if (!ch) return;
     if (ch == reply)         setReplyTo(id, author, text);
+    else if (edit && ch == edit) startEditing(id, text);
     else if (ch == copy)     QApplication::clipboard()->setText(text);
     else if (ch == del)      api_->deleteMessage(id, currentKind_, currentPeerId_);
     else if (ch == forward)  forwardMessage(text);
@@ -2787,6 +2896,19 @@ void ChatPage::reloadCurrentMessages() {
 void ChatPage::onSendClicked() {
     const QString text = composer_->toPlainText().trimmed();
     if (text.isEmpty() || currentPeerId_.isEmpty()) return;
+
+    // Режим правки: уходит edit-message, баббл обновляется на месте.
+    if (!editingId_.isEmpty()) {
+        const QString eid = editingId_;
+        api_->editMessage(eid, text, currentKind_);
+        if (ChatMessage* m = findMessage(eid)) {
+            m->content = text;
+            m->edited = true;
+            rerenderPreservingScroll();
+        }
+        cancelEditing();
+        return;
+    }
 
     const QString replyTo = replyToId_;
     const QString tempId = QStringLiteral("tmp_%1").arg(++tempCounter_);

@@ -79,6 +79,9 @@ public:
     // подсадить чаты/папки/историю без сети и открыть чат.
     void injectForDesignTest(const QList<Chat>& chats, const QList<Folder>& folders,
                              const QString& openChatId, const QList<ChatMessage>& messages);
+    // Закреп: панель над списком (публично — тест и WS-обработчик).
+    void setPinnedMessage(const QString& id, const QString& snippet);
+    void clearPinnedMessage();
 
 private slots:
     void openNewChatDialog();
@@ -173,6 +176,10 @@ private:
     void refreshReactionChips(const QString& messageId);
     void toggleReaction(const QString& messageId, const QString& emoji);
     ChatMessage* findMessage(const QString& id);
+    // Правка своего сообщения: вход в режим, отправка, выход.
+    void startEditing(const QString& id, const QString& text);
+    void cancelEditing();
+    void rerenderPreservingScroll();
     // Создаёт ProfilePanel (один экземпляр) и вешает ВСЕ связи, включая
     // «Избранное»/настройки/канал из профиля — обе точки открытия общие.
     void ensureProfilePanel();
@@ -236,6 +243,10 @@ private:
     EmojiPicker*  emojiPicker_ = nullptr;
     int           disappearTtl_ = 0;   // сек, 0 = выкл (пока UI-состояние)
     QWidget*      replyBar_     = nullptr;   // полоса «ответ на…» над вводом
+    QString       editingId_;                 // режим правки своего сообщения
+    QWidget*      pinnedBar_    = nullptr;    // полоса закреплённого сообщения
+    QLabel*       pinnedText_   = nullptr;
+    QString       pinnedMsgId_;
     QLabel*       replyBarText_ = nullptr;
     QString       replyToId_, replyToName_, replyToText_;
     QTimer*       peerReloadTimer_ = nullptr;

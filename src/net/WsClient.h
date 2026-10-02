@@ -40,6 +40,9 @@ signals:
     void callAnswerReceived(const QString& fromUserId, const QString& sdp);
     void callIceReceived(const QString& fromUserId, const QString& candidate);
     void callEnded(const QString& fromUserId);
+    // Правка сообщения (content уже новый) и закрепление/откреп.
+    void messageEdited(const QString& messageId, const QString& content);
+    void messagePinned(const QString& messageId, bool pinned);
     // Реакция добавлена/убрана (user_id — кто, для пометки своей).
     void reactionUpdated(const QString& messageId, const QString& emoji,
                          const QString& userId, const QString& action);

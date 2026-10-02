@@ -191,6 +191,7 @@ static ChatMessage parseMessage(const QJsonObject& o) {
     m.replySnippet = reply.value(QStringLiteral("snippet")).toString();
     m.replyMarkup  = parseReplyMarkup(o.value(QStringLiteral("reply_markup")));
     m.reactions    = parseReactions(o);
+    m.edited       = o.value(QStringLiteral("is_edited")).toBool(false);
     return m;
 }
 
@@ -375,6 +376,7 @@ QList<ChatMessage> parseGroupChannelMessages(const QJsonObject& obj) {
         m.fileSize    = static_cast<long long>(o.value(QStringLiteral("file_size")).toDouble(0));
         m.replyMarkup = parseReplyMarkup(o.value(QStringLiteral("reply_markup")));
         m.reactions   = parseReactions(o);
+        m.edited      = o.value(QStringLiteral("is_edited")).toBool(false);
         m.sent        = (m.senderId == myId);
         out.append(m);
     }
@@ -728,6 +730,20 @@ void ApiClient::setGroupPermission(const QString& groupId, const QString& permis
               {QStringLiteral("enabled"), enabled ? QStringLiteral("true") : QStringLiteral("false")}},
              [this](const QJsonObject& o, bool ok, const QString& e) {
         emit peerActionDone(ok && o.value(QStringLiteral("success")).toBool(false), e);
+    });
+}
+
+void ApiClient::editMessage(const QString& messageId, const QString& content, ChatKind kind) {
+    const QString chatType = kind == ChatKind::Group   ? QStringLiteral("group")
+                           : kind == ChatKind::Channel ? QStringLiteral("channel")
+                                                       : QStringLiteral("chat");
+    postJson(QStringLiteral("/api/edit-message"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("chat_type"), chatType},
+              {QStringLiteral("message_id"), messageId},
+              {QStringLiteral("content"), content}},
+             [this](const QJsonObject& o, bool ok, const QString&) {
+        emit messageEditedOnServer(ok && o.value(QStringLiteral("success")).toBool(false));
     });
 }
 
