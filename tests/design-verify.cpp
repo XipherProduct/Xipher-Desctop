@@ -20,6 +20,7 @@
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
 #include "net/Session.h"
+#include "net/Prefs.h"
 
 #include <QApplication>
 #include <QColor>
@@ -1096,6 +1097,51 @@ int main(int argc, char** argv) {
               QStringLiteral("колонка закрылась раньше поиска"));
         check(page.consumeEscape(), QStringLiteral("второй Esc очистил поиск"));
         check(!page.consumeEscape(), QStringLiteral("третий Esc — уже нечего закрывать"));
+    }
+
+    // ── Архивная секция (LST-03).
+    {
+        printf("\nАрхив (LST-03)\n");
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        // Архивируем Боба (индекс в chats_): он исчезает из основного списка.
+        const int bobIdx = page.debugChatIndex(QStringLiteral("u_bob"));
+        page.debugAction(QStringLiteral("archiveChat"), bobIdx);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        auto* list2 = page.findChild<QListWidget*>(QStringLiteral("chatList"));
+        bool bobVisible = false, archiveHeader = false;
+        if (list2) {
+            for (int i = 0; i < list2->count(); ++i) {
+                const QString id = list2->item(i)->data(Qt::UserRole).toString();
+                if (id == QStringLiteral("u_bob")) bobVisible = true;
+                if (id == QStringLiteral("__archive__")) archiveHeader = true;
+            }
+        }
+        check(!bobVisible, QStringLiteral("архивированный исчез из основной секции"));
+        check(archiveHeader, QStringLiteral("заголовок «Архив (1)» появился"));
+        // Разворот: клик по заголовку — Боб появляется в секции.
+        page.debugAction(QStringLiteral("toggleArchiveSection"));
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        bobVisible = false;
+        if (list2)
+            for (int i = 0; i < list2->count(); ++i)
+                if (list2->item(i)->data(Qt::UserRole).toString()
+                        == QStringLiteral("u_bob")) bobVisible = true;
+        check(bobVisible, QStringLiteral("разворот секции показывает архивного"));
+        // Персистентность: ключ в Prefs (тестовая org изолирована).
+        check(Prefs::getStr(QStringLiteral("xipher_archived_chats"))
+                  .contains(QStringLiteral("chat:u_bob")),
+              QStringLiteral("ключ архива сохранён в Prefs"));
+        // Возврат из архива чистит секцию.
+        page.debugAction(QStringLiteral("archiveChat"), bobIdx);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        archiveHeader = false;
+        if (list2)
+            for (int i = 0; i < list2->count(); ++i)
+                if (list2->item(i)->data(Qt::UserRole).toString()
+                        == QStringLiteral("__archive__")) archiveHeader = true;
+        check(!archiveHeader, QStringLiteral("возврат из архива убирает секцию"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

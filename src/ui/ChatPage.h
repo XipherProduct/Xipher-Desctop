@@ -362,6 +362,12 @@ private:
     // Закреплённые чаты (LST-04): ключи «type:id» из /api/get-chat-pins,
     // показываются секцией сверху списка.
     QSet<QString> pinnedChats_;
+    // Архив (LST-03): локальные ключи «type:id» (Prefs xipher_archived_chats),
+    // секция «Архив (N)» внизу списка, клик по заголовку разворачивает.
+    QSet<QString> archivedChats_;
+    bool          archiveOpen_ = false;
+    void loadArchivedChats();
+    void saveArchivedChats();
     ChatKind    currentKind_ = ChatKind::User;   // тип открытого чата
     bool        currentForum_ = false;           // открытая группа в режиме форума
     bool        currentCanManage_ = false;       // я создатель/админ открытой группы/канала

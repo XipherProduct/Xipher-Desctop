@@ -1323,8 +1323,8 @@ void ChatPage::buildUi() {
                                          + QStringLiteral(","));
         QAction* mute = menu.addAction(muted ? QStringLiteral("🔔 Со звуком")
                                              : QStringLiteral("🔇 Без звука"));
-        // Архив: чат уезжает в секцию «Архив» (флаг на элементе списка).
-        const bool archived = it->data(Qt::UserRole + 3).toBool();
+        // Архив: чат уезжает в секцию «Архив» (локальные ключи в Prefs, LST-03).
+        const bool archived = archivedChats_.contains(chatKeyFor(c));
         QAction* arch = menu.addAction(archived ? QStringLiteral("📤 Вернуть из архива")
                                                 : QStringLiteral("📥 В архив"));
         QAction* clear = menu.addAction(QStringLiteral("🧹 Очистить переписку"));
@@ -1344,7 +1344,10 @@ void ChatPage::buildUi() {
             Prefs::setStr(QStringLiteral("xipher_muted_chats"), cur);
         }
         else if (ch == arch) {
-            it->setData(Qt::UserRole + 3, !archived);
+            const QString akey = chatKeyFor(c);
+            if (archived) archivedChats_.remove(akey);
+            else          archivedChats_.insert(akey);
+            saveArchivedChats();
             rebuildChatList();
         }
         else if (ch == clear) {
@@ -1890,6 +1893,17 @@ void ChatPage::debugAction(const QString& name, int arg) {
     else if (name == QLatin1String("navHistory")) navigateChatHistory(arg);
     else if (name == QLatin1String("cycleChat"))   cycleChat(arg);
     else if (name == QLatin1String("editLast"))    editLastOwnMessage();
+    else if (name == QLatin1String("toggleArchiveSection")) {
+        archiveOpen_ = !archiveOpen_;
+        rebuildChatList();
+    }
+    else if (name == QLatin1String("archiveChat") && arg >= 0 && arg < chats_.size()) {
+        const QString key = chatKeyFor(chats_[arg]);
+        if (archivedChats_.contains(key)) archivedChats_.remove(key);
+        else                              archivedChats_.insert(key);
+        saveArchivedChats();
+        rebuildChatList();
+    }
 }
 
 int ChatPage::indexOfChat(const QString& id) const {
@@ -1909,8 +1923,25 @@ void ChatPage::mergeAllChats() {
     chats_ += personalChats_;
     chats_ += groupChats_;
     chats_ += channelChats_;
+    loadArchivedChats();   // локальный архив мог измениться с прошлого merge
     rebuildFolderStrip();   // обновить счётчики папок
     rebuildChatList();
+}
+
+// ── Архив (LST-03): локальные ключи «type:id» в Prefs, как мьюты ─────────────
+
+void ChatPage::loadArchivedChats() {
+    archivedChats_.clear();
+    const QString raw = Prefs::getStr(QStringLiteral("xipher_archived_chats"));
+    for (const QString& part : raw.split(QLatin1Char(','), Qt::SkipEmptyParts))
+        archivedChats_.insert(part.trimmed());
+}
+
+void ChatPage::saveArchivedChats() {
+    QStringList keys(archivedChats_.begin(), archivedChats_.end());
+    keys.sort();
+    Prefs::setStr(QStringLiteral("xipher_archived_chats"),
+                  keys.join(QLatin1Char(',')) + QStringLiteral(","));
 }
 
 // ── Папки ─────────────────────────────────────────────────────────────────────
@@ -2238,6 +2269,7 @@ void ChatPage::rebuildChatList() {
         if (!pinnedChats_.contains(chatKeyFor(c))) ordered.append(&c);
     for (const Chat* cp : ordered) {
         const Chat& c = *cp;
+        if (archivedChats_.contains(chatKeyFor(c))) continue;   // архив — своей секцией
         if (folderActive && !folderKeys.contains(chatKeyFor(c))) continue;
         if (!filter.isEmpty() &&
             !c.displayName.toLower().contains(filter) &&
@@ -2260,6 +2292,60 @@ void ChatPage::rebuildChatList() {
         chatList_->addItem(item);
         chatList_->setItemWidget(item, row);
         if (c.id == currentPeerId_) item->setSelected(true);
+    }
+
+    // Архивная секция (LST-03): свёрнутый блок «Архив (N)» внизу, клик — разворот.
+    {
+        QList<const Chat*> archived;
+        for (const Chat& c : chats_) {
+            if (!archivedChats_.contains(chatKeyFor(c))) continue;
+            if (folderActive && !folderKeys.contains(chatKeyFor(c))) continue;
+            if (!filter.isEmpty() &&
+                !c.displayName.toLower().contains(filter) &&
+                !c.name.toLower().contains(filter))
+                continue;
+            archived.append(&c);
+        }
+        if (!archived.isEmpty()) {
+            auto* head = new QWidget();
+            auto* hl = new QHBoxLayout(head);
+            hl->setContentsMargins(16, 8, 16, 8);
+            hl->setSpacing(8);
+            auto* arrow = new QLabel(archiveOpen_ ? QStringLiteral("▾") : QStringLiteral("▸"), head);
+            arrow->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+            auto* title = new QLabel(
+                QStringLiteral("Архив (%1)").arg(archived.size()), head);
+            title->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:13px;"
+                                                "font-weight:700;text-transform:uppercase;"));
+            hl->addWidget(arrow);
+            hl->addWidget(title);
+            hl->addStretch();
+            auto* hItem = new QListWidgetItem(chatList_);
+            hItem->setSizeHint(QSize(0, 36));
+            hItem->setData(Qt::UserRole, QStringLiteral("__archive__"));
+            hItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            chatList_->addItem(hItem);
+            chatList_->setItemWidget(hItem, head);
+
+            if (archiveOpen_) {
+                for (const Chat* cp : archived) {
+                    const Chat& c = *cp;
+                    const QString avatarText = c.isSaved ? QStringLiteral("★")
+                                          : (c.avatarText.isEmpty() ? c.displayName : c.avatarText);
+                    const QString time = c.time == QStringLiteral("Нет сообщений") ? QString() : c.time;
+                    auto* row = buildContactRow(c.isSaved ? QString() : c.avatarUrl,
+                                                avatarText, c.displayName,
+                                                chatPreview(c.lastMessage), time, c.unread);
+                    auto* item = new QListWidgetItem(chatList_);
+                    item->setSizeHint(QSize(0, 72));
+                    item->setData(Qt::UserRole, c.id);
+                    item->setData(Qt::UserRole + 1, false);
+                    chatList_->addItem(item);
+                    chatList_->setItemWidget(item, row);
+                    visibleChatIds_.append(c.id);
+                }
+            }
+        }
     }
 
     // Глобальный поиск людей (как в Telegram): показываем найденных, кого ещё нет в чатах.
@@ -2332,6 +2418,12 @@ void ChatPage::onChatClicked() {
     auto* item = chatList_->currentItem();
     if (!item) return;
     const QString id = item->data(Qt::UserRole).toString();
+    // Заголовок архива (LST-03): клик разворачивает/сворачивает секцию.
+    if (id == QStringLiteral("__archive__")) {
+        archiveOpen_ = !archiveOpen_;
+        rebuildChatList();
+        return;
+    }
     const QVariant kind = item->data(Qt::UserRole + 1);
     if (kind.toInt() == 2) {   // публичный канал/группа из каталога
         const QString type = item->data(Qt::UserRole + 2).toString();
