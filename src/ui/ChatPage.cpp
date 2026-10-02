@@ -50,6 +50,11 @@
 #include <QInputDialog>
 #include <QContextMenuEvent>
 #include <QMouseEvent>
+#include <QMimeData>
+#include <QDragEnterEvent>
+#include <QDragLeaveEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -672,6 +677,7 @@ ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
 
 void ChatPage::buildUi() {
     setStyleSheet(chatQSS());
+    setAcceptDrops(true);   // drag-n-drop файлов в чат (MLT-06)
 
     auto* root = new QHBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -1000,6 +1006,16 @@ void ChatPage::buildUi() {
     replyBar_->setVisible(false);
     cblOuter->addWidget(replyBar_);
 
+    // Полоса отложенных аттачей (MLT-06): дроп файлов → чипы-превью здесь,
+    // отправка — вместе со следующим «Отправить» (как pendingAttachments веба).
+    stagedBar_ = new QWidget(composerBar);
+    stagedBar_->setObjectName(QStringLiteral("stagedBar"));
+    stagedLay_ = new QVBoxLayout(stagedBar_);
+    stagedLay_->setContentsMargins(8, 4, 8, 8);
+    stagedLay_->setSpacing(6);
+    stagedBar_->setVisible(false);
+    cblOuter->addWidget(stagedBar_);
+
     composerStack_ = new QStackedWidget(composerBar);
     cblOuter->addWidget(composerStack_);
 
@@ -1246,6 +1262,11 @@ void ChatPage::buildUi() {
         if (msg.isEmpty()) msg = QStringLiteral("Не удалось обновить закрепление");
         QMessageBox::warning(this, QStringLiteral("Закрепления"), msg);
     });
+
+    // Подсветка дропа (MLT-06): полупрозрачный слой поверх всего экрана чата.
+    dropOverlay_ = new QWidget(this);
+    dropOverlay_->setObjectName(QStringLiteral("dropOverlay"));
+    dropOverlay_->hide();
 
     // Тема из настроек («Оформление»): перегенерировать QSS и инлайн-фоны.
     applyTheme();
@@ -1897,6 +1918,7 @@ void ChatPage::openChat(const Chat& chat) {
     }
     clearReplyTo();
     cancelEditing();
+    clearStagedFiles();   // вложения принадлежат чату, куда их бросили (MLT-06)
     if (emojiPicker_) emojiPicker_->hide();   // панель не висит над чужим чатом
     saveDraft();                              // черновик предыдущего чата — в Prefs
     if (typingTimer_) typingTimer_->stop();
@@ -3145,10 +3167,17 @@ void ChatPage::reloadCurrentMessages() {
 
 void ChatPage::onSendClicked() {
     const QString text = composer_->toPlainText().trimmed();
-    if (text.isEmpty() || currentPeerId_.isEmpty()) return;
+    const bool hasStaged = !stagedFiles_.isEmpty();
+    if ((text.isEmpty() && !hasStaged) || currentPeerId_.isEmpty()) {
+        if (hasStaged && currentPeerId_.isEmpty())
+            QMessageBox::information(this, QStringLiteral("Отправка"),
+                                     QStringLiteral("Выберите чат для отправки вложений"));
+        return;
+    }
 
     // Режим правки: уходит edit-message, баббл обновляется на месте.
-    if (!editingId_.isEmpty()) {
+    // (пустой текст в правке ничем не оправдан — ждём непустой)
+    if (!editingId_.isEmpty() && !text.isEmpty()) {
         const QString eid = editingId_;
         api_->editMessage(eid, text, currentKind_);
         if (ChatMessage* m = findMessage(eid)) {
@@ -3160,32 +3189,43 @@ void ChatPage::onSendClicked() {
         return;
     }
 
-    const QString replyTo = replyToId_;
-    const QString tempId = QStringLiteral("tmp_%1").arg(++tempCounter_);
-    ChatMessage m;
-    m.content = text;
-    m.sent = true;
-    m.status = QStringLiteral("sent");
-    m.time = QTime::currentTime().toString(QStringLiteral("HH:mm"));
-    m.id = tempId;
-    m.ttlSeconds = disappearTtl_;
-    m.createdAt = QDateTime::currentDateTime().toString(Qt::ISODate);
-    if (!replyTo.isEmpty()) { m.replyAuthor = replyToName_; m.replySnippet = replyToText_; }
-    shownIds_.insert(tempId);
+    // Текст уходит первым сообщением; только аттачи — без текстового баббла.
+    if (!text.isEmpty()) {
+        const QString replyTo = replyToId_;
+        const QString tempId = QStringLiteral("tmp_%1").arg(++tempCounter_);
+        ChatMessage m;
+        m.content = text;
+        m.sent = true;
+        m.status = QStringLiteral("sent");
+        m.time = QTime::currentTime().toString(QStringLiteral("HH:mm"));
+        m.id = tempId;
+        m.ttlSeconds = disappearTtl_;
+        m.createdAt = QDateTime::currentDateTime().toString(Qt::ISODate);
+        if (!replyTo.isEmpty()) { m.replyAuthor = replyToName_; m.replySnippet = replyToText_; }
+        shownIds_.insert(tempId);
 
-    currentMessages_.append(m);
-    addBubble(m);
-    scrollToBottom();
-    cacheCurrent();   // отправленное сразу в локальном кэше
-    composer_->clear();
-    clearReplyTo();
+        currentMessages_.append(m);
+        addBubble(m);
+        scrollToBottom();
+        cacheCurrent();   // отправленное сразу в локальном кэше
+        composer_->clear();
+        clearReplyTo();
 
-    if (!currentTopicId_.isEmpty())             api_->sendTopicMessage(currentTopicId_, text, tempId, replyTo);
-    else if (currentKind_ == ChatKind::Group)   api_->sendGroupMessage(currentPeerId_, text, tempId, replyTo);
-    else if (currentKind_ == ChatKind::Channel) api_->sendChannelMessage(currentPeerId_, text, tempId, replyTo);
-    else                                        api_->sendMessage(currentPeerId_, text, tempId, disappearTtl_, replyTo);
-    if (currentTopicId_.isEmpty())
-        bumpChat(currentPeerId_, text, m.time, /*incrementUnread*/ false);
+        if (!currentTopicId_.isEmpty())             api_->sendTopicMessage(currentTopicId_, text, tempId, replyTo);
+        else if (currentKind_ == ChatKind::Group)   api_->sendGroupMessage(currentPeerId_, text, tempId, replyTo);
+        else if (currentKind_ == ChatKind::Channel) api_->sendChannelMessage(currentPeerId_, text, tempId, replyTo);
+        else                                        api_->sendMessage(currentPeerId_, text, tempId, disappearTtl_, replyTo);
+        if (currentTopicId_.isEmpty())
+            bumpChat(currentPeerId_, text, m.time, /*incrementUnread*/ false);
+    }
+
+    // Отложенные аттачи (MLT-06): уходят следом за текстом, каждый своим
+    // сообщением (как отправка файлов по одному в вебе).
+    if (hasStaged) {
+        const QList<StagedAttachment> toSend = stagedFiles_;
+        clearStagedFiles();
+        for (const StagedAttachment& a : toSend) sendLocalFile(a.path, a.isImage);
+    }
 }
 
 void ChatPage::onMessageSent(const ChatMessage& msg, const QString& receiverId, const QString& tempId) {
@@ -3421,6 +3461,9 @@ static QString chatQSS() {
         "#replyClose { background:transparent; border:none; color:#726C82; font-size:14px; }"
         "#replyClose:hover { color:#F3F1F8; }"
         "#replyBar { background:%1; border-top:1px solid rgba(255,255,255,0.06); }"
+        "#stagedBar { background:%1; border-top:1px solid rgba(255,255,255,0.06); }"
+        "#stagedChip { background:%3; border:1px solid rgba(255,255,255,0.10); border-radius:12px; }"
+        "#dropOverlay { background:rgba(139,92,246,0.14); border:3px dashed rgba(139,92,246,0.65); }"
         "#sendBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px; border:none;"
         "  border-radius:18px; background:transparent; color:%5; padding:0; }"
         "#sendBtn:hover { background:rgba(%6,%7,%8,0.10); }"
@@ -3739,25 +3782,40 @@ void ChatPage::pickAndSendFile() {
     if (currentPeerId_.isEmpty()) return;
     const QString fn = QFileDialog::getOpenFileName(this, QStringLiteral("Выберите файл"));
     if (fn.isEmpty()) return;
-    QFile f(fn);
+    sendLocalFile(fn, /*asImage*/ false);
+}
+
+void ChatPage::pickAndSendPhoto() {
+    if (currentPeerId_.isEmpty()) return;
+    const QString fn = QFileDialog::getOpenFileName(this, QStringLiteral("Выберите фото"),
+        QString(), QStringLiteral("Изображения (*.jpg *.jpeg *.png *.gif *.webp)"));
+    if (fn.isEmpty()) return;
+    sendLocalFile(fn, /*asImage*/ true);
+}
+
+// Один путь отправки локального файла (диалог / дроп / стейджинг): оптимистичный
+// баббл с локальным путём + upload; эхо fileUploaded шлёт send-message.
+void ChatPage::sendLocalFile(const QString& path, bool asImage) {
+    if (currentPeerId_.isEmpty() || path.isEmpty()) return;
+    QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) return;
     const QByteArray bytes = f.readAll();
     f.close();
 
-    const QString base = QFileInfo(fn).fileName();
+    const QString base = QFileInfo(path).fileName();
     const QString tempId = QStringLiteral("tmpf_%1").arg(++tempCounter_);
     shownIds_.insert(tempId);
     pendingFileReceiver_ = currentPeerId_;
+    if (asImage) pendingPhotoIds_.insert(tempId);   // пометка: это фото, а не файл
 
-    // Оптимистичный баббл (клик открывает локальный файл).
     ChatMessage m;
     m.id = tempId;
     m.sent = true;
     m.status = QStringLiteral("sent");
-    m.messageType = QStringLiteral("file");
+    m.messageType = asImage ? QStringLiteral("image") : QStringLiteral("file");
     m.fileName = base;
     m.fileSize = bytes.size();
-    m.filePath = fn;   // локальный путь
+    m.filePath = path;   // локальный путь → клик/превью работают сразу
     m.time = QTime::currentTime().toString(QStringLiteral("HH:mm"));
     m.createdAt = QDateTime::currentDateTime().toString(Qt::ISODate);
     currentMessages_.append(m);
@@ -3767,34 +3825,156 @@ void ChatPage::pickAndSendFile() {
     api_->uploadFile(bytes, base, tempId);
 }
 
-void ChatPage::pickAndSendPhoto() {
-    if (currentPeerId_.isEmpty()) return;
-    const QString fn = QFileDialog::getOpenFileName(this, QStringLiteral("Выберите фото"),
-        QString(), QStringLiteral("Изображения (*.jpg *.jpeg *.png *.gif *.webp)"));
-    if (fn.isEmpty()) return;
-    QFile f(fn);
-    if (!f.open(QIODevice::ReadOnly)) return;
-    const QByteArray bytes = f.readAll();
-    f.close();
+// ── Drag-n-drop аттачей (MLT-06) ─────────────────────────────────────────────
 
-    const QString base = QFileInfo(fn).fileName();
-    const QString tempId = QStringLiteral("tmpf_%1").arg(++tempCounter_);
-    shownIds_.insert(tempId);
-    pendingFileReceiver_ = currentPeerId_;
-    pendingPhotoIds_.insert(tempId);   // пометка: это фото, а не файл
+static bool stagedIsImage(const QString& name) {
+    static const char* kExt[] = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"};
+    const QString low = name.toLower();
+    for (const char* e : kExt)
+        if (low.endsWith(QLatin1String(e))) return true;
+    return false;
+}
 
-    ChatMessage m;
-    m.id = tempId; m.sent = true; m.status = QStringLiteral("sent");
-    m.messageType = QStringLiteral("image");
-    m.fileName = base; m.fileSize = bytes.size();
-    m.filePath = fn;   // локальный путь → превью сразу
-    m.time = QTime::currentTime().toString(QStringLiteral("HH:mm"));
-    m.createdAt = QDateTime::currentDateTime().toString(Qt::ISODate);
-    currentMessages_.append(m);
-    addBubble(m);
-    scrollToBottom();
+void ChatPage::stageFiles(const QList<QUrl>& urls) {
+    int added = 0;
+    for (const QUrl& u : urls) {
+        if (!u.isLocalFile()) continue;
+        const QFileInfo fi(u.toLocalFile());
+        if (!fi.isFile() || fi.size() <= 0) continue;
+        StagedAttachment a;
+        a.path = fi.absoluteFilePath();
+        a.name = fi.fileName();
+        a.size = fi.size();
+        a.isImage = stagedIsImage(a.name);
+        stagedFiles_.append(a);
+        ++added;
+    }
+    if (added > 0) {
+        renderStagedBar();
+        composer_->setFocus();   // дальше можно сразу дописать подпись и отправить
+    }
+}
 
-    api_->uploadFile(bytes, base, tempId);
+void ChatPage::renderStagedBar() {
+    if (!stagedLay_) return;
+    // Пересобираем ряд: чип = превью 56px (или иконка) + имя + размер + ✕.
+    while (stagedLay_->count() > 0) {
+        QLayoutItem* it = stagedLay_->takeAt(0);
+        if (it->widget()) it->widget()->deleteLater();
+        delete it;
+    }
+    stagedBar_->setVisible(!stagedFiles_.isEmpty());
+    if (stagedFiles_.isEmpty()) return;
+
+    auto* head = new QLabel(stagedFiles_.size() == 1
+        ? QStringLiteral("Вложение к отправке")
+        : QStringLiteral("Вложений к отправке: %1").arg(stagedFiles_.size()), stagedBar_);
+    head->setStyleSheet(QStringLiteral("color:#726C82;font-size:11px;font-weight:700;"
+                                       "text-transform:uppercase;padding:0 8px;"));
+    stagedLay_->addWidget(head);
+
+    auto* row = new QWidget(stagedBar_);
+    auto* rl = new QHBoxLayout(row);
+    rl->setContentsMargins(0, 0, 0, 0);
+    rl->setSpacing(8);
+    for (int i = 0; i < stagedFiles_.size(); ++i) {
+        const StagedAttachment& a = stagedFiles_[i];
+        auto* chip = new QFrame(row);
+        chip->setObjectName(QStringLiteral("stagedChip"));
+        chip->setFixedSize(220, 68);
+        auto* cl = new QHBoxLayout(chip);
+        cl->setContentsMargins(6, 6, 6, 6);
+        cl->setSpacing(8);
+
+        auto* thumb = new QLabel(chip);
+        thumb->setFixedSize(56, 56);
+        thumb->setAlignment(Qt::AlignCenter);
+        thumb->setStyleSheet(QStringLiteral("background:#221F2C;border-radius:8px;"));
+        if (a.isImage) {
+            QPixmap pm(a.path);
+            if (!pm.isNull())
+                thumb->setPixmap(pm.scaled(56, 56, Qt::KeepAspectRatio,
+                                           Qt::SmoothTransformation));
+        } else {
+            thumb->setText(QStringLiteral("📎"));
+        }
+        cl->addWidget(thumb);
+
+        auto* meta = new QVBoxLayout();
+        meta->setSpacing(2);
+        auto* nm = new QLabel(elide(a.name, QFont(), 120), chip);
+        nm->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:12px;font-weight:600;"));
+        const QString mb = a.size < 1024*1024
+            ? QStringLiteral("%1 КБ").arg(a.size / 1024)
+            : QStringLiteral("%1 МБ").arg(QString::number(a.size / (1024.0 * 1024.0), 'f', 1));
+        auto* sz = new QLabel(mb, chip);
+        sz->setStyleSheet(QStringLiteral("color:#726C82;font-size:11px;"));
+        meta->addWidget(nm);
+        meta->addWidget(sz);
+        cl->addLayout(meta, 1);
+
+        auto* x = new QPushButton(QStringLiteral("✕"), chip);
+        x->setObjectName(QStringLiteral("stagedRemove"));
+        x->setCursor(Qt::PointingHandCursor);
+        x->setFixedSize(22, 22);
+        x->setStyleSheet(QStringLiteral("background:transparent;border:none;color:#726C82;"
+                                        "font-size:13px;"));
+        const int idx = i;
+        connect(x, &QPushButton::clicked, this, [this, idx]() {
+            if (idx >= 0 && idx < stagedFiles_.size()) {
+                stagedFiles_.removeAt(idx);
+                renderStagedBar();
+            }
+        });
+        cl->addWidget(x, 0, Qt::AlignTop);
+        rl->addWidget(chip);
+    }
+    auto* scrollWrap = new QScrollArea(stagedBar_);
+    scrollWrap->setWidget(row);
+    scrollWrap->setWidgetResizable(true);
+    scrollWrap->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scrollWrap->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scrollWrap->setFrameShape(QFrame::NoFrame);
+    scrollWrap->setFixedHeight(76);
+    stagedLay_->addWidget(scrollWrap);
+}
+
+void ChatPage::clearStagedFiles() {
+    stagedFiles_.clear();
+    renderStagedBar();
+}
+
+void ChatPage::setDropOverlayActive(bool on) {
+    if (!dropOverlay_) return;
+    if (on) {
+        dropOverlay_->setGeometry(rect());
+        dropOverlay_->raise();
+        dropOverlay_->show();
+    } else {
+        dropOverlay_->hide();
+    }
+}
+
+void ChatPage::dragEnterEvent(QDragEnterEvent* e) {
+    if (!e->mimeData()->hasUrls()) { QWidget::dragEnterEvent(e); return; }
+    for (const QUrl& u : e->mimeData()->urls())
+        if (u.isLocalFile()) { e->acceptProposedAction(); setDropOverlayActive(true); return; }
+}
+
+void ChatPage::dragMoveEvent(QDragMoveEvent* e) {
+    if (e->mimeData()->hasUrls()) e->acceptProposedAction();
+}
+
+void ChatPage::dragLeaveEvent(QDragLeaveEvent* e) {
+    setDropOverlayActive(false);
+    QWidget::dragLeaveEvent(e);
+}
+
+void ChatPage::dropEvent(QDropEvent* e) {
+    if (!e->mimeData()->hasUrls()) { QWidget::dropEvent(e); return; }
+    e->acceptProposedAction();
+    setDropOverlayActive(false);
+    stageFiles(e->mimeData()->urls());
 }
 
 void ChatPage::sendPhotoBytesTo(const QString& receiverId, const QByteArray& bytes,

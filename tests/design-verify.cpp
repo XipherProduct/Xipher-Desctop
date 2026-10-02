@@ -35,6 +35,9 @@
 #include <QScrollBar>
 #include <QWidget>
 #include <QFile>
+#include <QMimeData>
+#include <QDropEvent>
+#include <QDragEnterEvent>
 #include <QPointer>
 #include <QThread>
 #include <QDeadlineTimer>
@@ -852,6 +855,56 @@ int main(int argc, char** argv) {
         }
         check(pinnedFirst, QStringLiteral("закреплённый чат — первым сверху"));
         check(pinIcon, QStringLiteral("индикатор 📌 в строке закрепа"));
+    }
+
+    // ── Drag-n-drop файлов в чат (MLT-06): стейджинг + превью + отправка.
+    {
+        printf("\nDrag-n-drop аттачей (MLT-06)\n");
+        // Два тестовых файла (картинка + «документ»).
+        const QString imgPath = QDir::temp().filePath(QStringLiteral("dv_mlt06_img.png"));
+        const QString docPath = QDir::temp().filePath(QStringLiteral("dv_mlt06_doc.txt"));
+        {
+            QPixmap tp(60, 40); tp.fill(Qt::darkGreen);
+            tp.save(imgPath, "PNG");
+            QFile f(docPath);
+            if (f.open(QIODevice::WriteOnly)) f.write("drag-n-drop test");
+        }
+        auto* stagedBar = page.findChild<QWidget*>(QStringLiteral("stagedBar"));
+        check(stagedBar != nullptr, QStringLiteral("полоса стейджинга существует"));
+        check(stagedBar && !stagedBar->isVisible(), QStringLiteral("исходно полоса скрыта"));
+
+        // Дроп симулируем швом: Qt 6.11 глотает синтетические QDropEvent.
+        page.injectDroppedUrlsForTest({QUrl::fromLocalFile(imgPath),
+                                       QUrl::fromLocalFile(docPath)});
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        check(stagedBar && stagedBar->isVisible(), QStringLiteral("после дропа полоса видна"));
+        const int chips = page.findChildren<QFrame*>(QStringLiteral("stagedChip")).size();
+        check(chips == 2, QStringLiteral("два чипа-превью после дропа 2 файлов"));
+
+        // Удаление одного чипа: ✕ убирает вложение из очереди. Считываем
+        // состояние по заголовку полосы («Вложение к отправке» = один) — сам
+        // старый чип уходит отложенным deleteLater и в момент проверки ещё жив.
+        auto* rm = page.findChild<QPushButton*>(QStringLiteral("stagedRemove"));
+        if (rm) rm->click();
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        bool oneLeft = false;
+        if (stagedBar)
+            for (QLabel* l : stagedBar->findChildren<QLabel*>())
+                if (l->text() == QStringLiteral("Вложение к отправке")) oneLeft = true;
+        check(oneLeft, QStringLiteral("✕ на чипе убирает вложение"));
+
+        // Отправка: очередь уходит, полоса пустеет (чат открыт тестовым швом).
+        page.injectForDesignTest(chats, QList<Folder>(),
+                                  QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        page.injectDroppedUrlsForTest({QUrl::fromLocalFile(imgPath),
+                                       QUrl::fromLocalFile(docPath)});
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        auto* sendBtn = page.findChild<QPushButton*>(QStringLiteral("sendBtn"));
+        if (sendBtn) sendBtn->click();
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        check(stagedBar && !stagedBar->isVisible(),
+              QStringLiteral("после отправки очередь очистилась"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

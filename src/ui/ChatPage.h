@@ -39,6 +39,12 @@ class StoriesViewer;
 class StoryCreatorDialog;
 class SuperSearchDialog;
 class LinkPreviewBar;
+class QDragEnterEvent;
+class QDragLeaveEvent;
+class QDragMoveEvent;
+class QDropEvent;
+class QMimeData;
+class QPropertyAnimation;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ChatPage — основной экран мессенджера (раскладка как в Telegram/веб-чате):
@@ -66,6 +72,11 @@ public:
 protected:
     void resizeEvent(QResizeEvent* e) override;  // адаптация под узкое окно
     void keyPressEvent(QKeyEvent* e) override;   // Ctrl+Shift+F → супер-поиск
+    // Drag-n-drop файлов в чат (MLT-06): дроп anywhere → очередь аттачей.
+    void dragEnterEvent(QDragEnterEvent* e) override;
+    void dragMoveEvent(QDragMoveEvent* e) override;
+    void dragLeaveEvent(QDragLeaveEvent* e) override;
+    void dropEvent(QDropEvent* e) override;
 
 signals:
     void logoutRequested();
@@ -80,6 +91,9 @@ public:
     void injectForDesignTest(const QList<Chat>& chats, const QList<Folder>& folders,
                              const QString& openChatId, const QList<ChatMessage>& messages,
                              const QStringList& pinnedKeys = QStringList());
+    // Тестовый шов для дропа (MLT-06): Qt 6.11 глотает синтетические
+    // QDropEvent в sendEvent, поэтому стейджинг дергаем напрямую.
+    void injectDroppedUrlsForTest(const QList<QUrl>& urls) { stageFiles(urls); }
     // Закреп: панель над списком (публично — тест и WS-обработчик).
     void setPinnedMessage(const QString& id, const QString& snippet);
     void clearPinnedMessage();
@@ -141,6 +155,14 @@ private:
     void openChat(const Chat& chat);
     // Пины чатов (LST-04): оптимистично + подтверждение сервера; лимит 3/10.
     void setChatPinned(const Chat& c, bool pinned);
+    // Drag-n-drop аттачи (MLT-06): очередь перед отправкой + превью над композером.
+    void stageFiles(const QList<QUrl>& urls);     // добавить в очередь (валидация)
+    void renderStagedBar();                        // пересобрать полосу превью
+    void clearStagedFiles();
+    void setDropOverlayActive(bool on);            // «Отпустите, чтобы прикрепить»
+    // Отправка локального файла (диалог, дроп, стейджинг — один путь):
+    // оптимистичный баббл + upload; asImage → превью сразу.
+    void sendLocalFile(const QString& path, bool asImage);
     void addBubble(const ChatMessage& msg, bool prepend = false, bool animate = true);
     void showMessageMenu(QWidget* bubble, const QPoint& pos);
     void forwardMessage(const QString& text);
@@ -266,6 +288,20 @@ private:
     QString pendingFileReceiver_;
     QSet<QString> pendingPhotoIds_;   // temp_id'ы, которые надо отправить как image
     QHash<QString, QString> pendingFileOpen_;   // серверный путь → имя для сохранения
+
+    // Drag-n-drop аттачи (MLT-06): стейджинг перед отправкой, как
+    // pendingAttachments в вебе — превью-чипы над композером, отправка вместе
+    // с текстом (текст уходит первым сообщением, файлы следом).
+    struct StagedAttachment {
+        QString path;
+        QString name;
+        qint64  size = 0;
+        bool    isImage = false;
+    };
+    QList<StagedAttachment> stagedFiles_;
+    QWidget* stagedBar_    = nullptr;   // полоса превью над композером
+    QVBoxLayout* stagedLay_ = nullptr;  // ряд чипов внутри полосы
+    QWidget* dropOverlay_  = nullptr;   // подсветка «Отпустите, чтобы прикрепить»
 
     // Чек-листы (live-обновления) + гео
     QHash<QString, ChecklistWidget*> checklistWidgets_;   // id → виджет
