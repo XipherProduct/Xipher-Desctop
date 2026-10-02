@@ -1138,6 +1138,20 @@ void ApiClient::unblockUser(const QString& userId) {
     });
 }
 
+// Очистить переписку (как «Очистить историю» веба). Контекст по типу чата.
+void ApiClient::clearHistory(const QString& chatId, ChatKind kind) {
+    const QString chatType = kind == ChatKind::Group   ? QStringLiteral("group")
+                           : kind == ChatKind::Channel ? QStringLiteral("channel")
+                                                       : QStringLiteral("chat");
+    postJson(QStringLiteral("/api/clear-chat-history"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("chat_type"), chatType},
+              {QStringLiteral("chat_id"), chatId}},
+             [this, chatId](const QJsonObject& o, bool ok, const QString&) {
+        emit historyCleared(chatId, ok && o.value(QStringLiteral("success")).toBool(false));
+    });
+}
+
 void ApiClient::deleteChat(const QString& chatId) {
     postJson(QStringLiteral("/api/delete-chat"),
              {{QStringLiteral("token"), Session::instance().token},

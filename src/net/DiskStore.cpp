@@ -54,6 +54,10 @@ bool DiskStore::touch(const QString& id) {
     return QFile::resize(path, sz);
 }
 
+bool DiskStore::clear(const QString& id) {
+    return QFile::remove(filePath(id));
+}
+
 void DiskStore::clearAll() const {
     const QDir d(dirPath());
     const auto files = d.entryList(QDir::Files | QDir::NoDotAndDotDot);

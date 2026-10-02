@@ -20,6 +20,7 @@ public:
     bool save(const QString& id, const QByteArray& bytes);   // атомарно (QSaveFile)
     bool touch(const QString& id);              // обновить mtime (для LRU-вытеснения)
     void clearAll() const;
+    bool clear(const QString& id);   // удалить один блоб
 
     QString dirPath() const;                    // AppDataLocation/<ns>
     qint64  totalBytes() const;                 // суммарный размер файлов каталога

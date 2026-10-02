@@ -1155,12 +1155,42 @@ void ChatPage::buildUi() {
         const Chat c = chats_[idx];
         QMenu menu(this);
         QAction* open = menu.addAction(QStringLiteral("Открыть"));
+        // Без звука: локальный мьют (как в вебе, ключ xipher_muted_chats).
+        const bool muted = Prefs::getStr(QStringLiteral("xipher_muted_chats"))
+                               .contains(QStringLiteral("chat:") + c.id
+                                         + QStringLiteral(","));
+        QAction* mute = menu.addAction(muted ? QStringLiteral("🔔 Со звуком")
+                                             : QStringLiteral("🔇 Без звука"));
+        // Архив: чат уезжает в секцию «Архив» (флаг на элементе списка).
+        const bool archived = it->data(Qt::UserRole + 3).toBool();
+        QAction* arch = menu.addAction(archived ? QStringLiteral("📤 Вернуть из архива")
+                                                : QStringLiteral("📥 В архив"));
+        QAction* clear = menu.addAction(QStringLiteral("🧹 Очистить переписку"));
         QAction* del = nullptr;
         if (c.kind == ChatKind::Group)        del = menu.addAction(QStringLiteral("Выйти из группы"));
         else if (c.kind == ChatKind::Channel) del = menu.addAction(QStringLiteral("Отписаться"));
         else if (!c.isSaved)                  del = menu.addAction(QStringLiteral("Удалить чат"));
         QAction* ch = menu.exec(chatList_->mapToGlobal(p));
         if (ch == open) openChat(c);
+        else if (ch == mute) {
+            // Локальная пара add/remove, как в старом кольце-реализации.
+            QString cur = Prefs::getStr(QStringLiteral("xipher_muted_chats"));
+            const QString key = QStringLiteral("chat:") + c.id + QStringLiteral(",");
+            if (muted) cur.replace(key, QString());
+            else cur += key;
+            Prefs::setStr(QStringLiteral("xipher_muted_chats"), cur);
+        }
+        else if (ch == arch) {
+            it->setData(Qt::UserRole + 3, !archived);
+            rebuildChatList();
+        }
+        else if (ch == clear) {
+            if (QMessageBox::question(this, QStringLiteral("Очистка"),
+                    QStringLiteral("Удалить всю переписку в «%1»?").arg(c.displayName))
+                == QMessageBox::Yes) {
+                api_->clearHistory(c.id, c.kind);
+            }
+        }
         else if (del && ch == del) {
             if (c.kind == ChatKind::Group)        api_->leaveGroup(c.id);
             else if (c.kind == ChatKind::Channel) api_->unsubscribeChannel(c.id);
@@ -1177,6 +1207,15 @@ void ChatPage::buildUi() {
     connect(attachBtn_, &QPushButton::clicked, this, &ChatPage::onAttachClicked);
     connect(timerBtn_, &QPushButton::clicked, this, &ChatPage::onTimerClicked);
     connect(api_, &ApiClient::fileUploaded, this, &ChatPage::onFileUploaded);
+    connect(api_, &ApiClient::historyCleared, this,
+            [this](const QString& chatId, bool ok) {
+        if (!ok || chatId != currentPeerId_) return;
+        currentMessages_.clear();
+        shownIds_.clear();
+        renderedFrom_ = 0;
+        renderMessages(QString());
+        ChatCache::instance().remove(cacheKey());
+    });
     connect(api_, &ApiClient::contactRenamed, this,
             [this](const QString& cid, const QString& name, bool ok) {
         if (!ok) return;

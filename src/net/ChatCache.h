@@ -16,6 +16,9 @@ public:
     static ChatCache& instance();
 
     // Пустой список = кэша нет, не расшифровался или повреждён (молча грузим с сервера).
+    // Удалить кэш одного чата (очистка переписки).
+    void remove(const QString& key) { store_.clear(key); }
+
     QList<ChatMessage> load(const QString& peerId);
     void save(const QString& peerId, const QList<ChatMessage>& msgs);
     void clearAll();   // выход из аккаунта

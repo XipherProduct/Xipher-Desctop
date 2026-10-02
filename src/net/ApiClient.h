@@ -202,6 +202,7 @@ public:
     void blockUser(const QString& userId);
     void unblockUser(const QString& userId);
     void deleteChat(const QString& chatId);
+    void clearHistory(const QString& chatId, ChatKind kind);
     void sendFriendRequest(const QString& username);
     void getFriendRequests();
     void acceptFriend(const QString& requestId);
@@ -236,6 +237,7 @@ signals:
     void chatActionDone(bool ok);
     void profileLoaded(const QJsonObject& profile);
     void messageEditedOnServer(bool ok);
+    void historyCleared(const QString& chatId, bool ok);
     // Профиль v2: полный ответ /api/profile/view + id запроса (для отмены
     // устаревшего) и флаг ошибки сети.
     void profileViewLoaded(qint64 reqId, const QJsonObject& data, bool ok, const QString& error);
