@@ -192,6 +192,9 @@ public:
     // Счётчик общих медиа — POST /api/media/list { chat_type:'dm', chat_id }.
     void mediaCount(const QString& chatId);
     void callsMissedCount();
+    void requestMediaList(const QString& chatId, const QString& category,
+                          const QString& cursor = QString(), int limit = 60);
+    void requestMediaCounts(const QString& chatId);
     void setContactName(const QString& contactId, const QString& customName);
     void searchUsers(const QString& query);
     void getFriends();
@@ -238,6 +241,8 @@ signals:
     void profileViewLoaded(qint64 reqId, const QJsonObject& data, bool ok, const QString& error);
     void mediaCountLoaded(const QString& chatId, int total);
     void callsMissedLoaded(int count);
+    void mediaListLoaded(const QString& chatId, const QJsonArray& items);
+    void mediaCountsLoaded(const QString& chatId, const QJsonObject& counts, int total);
 
     // Супер-поиск / превью ссылок / сторис.
     void messagesSearched(const QString& requestId, const QJsonArray& messages);

@@ -1076,6 +1076,24 @@ QWidget* ProfilePanel::makeInfo(const QJsonObject& p) {
     if (!joined.isEmpty())
         rows << makeInfoRow(Icons::Calendar, joined, QStringLiteral("В Xipher с"));
 
+    // Часы работы (business_hours): строкой «Пн–Пт 09:00–18:00».
+    const QJsonObject bh = p.value(QStringLiteral("business_hours")).toObject();
+    if (!bh.isEmpty()) {
+        static const char* days[] = {"mon","tue","wed","thu","fri","sat","sun"};
+        QStringList parts;
+        for (const char* d : days) {
+            const QJsonObject o = bh.value(QLatin1String(d)).toObject();
+            if (!o.value(QStringLiteral("enabled")).toBool(false)) continue;
+            const QString t = QStringLiteral("%1–%2")
+                .arg(o.value(QStringLiteral("start")).toString(),
+                     o.value(QStringLiteral("end")).toString());
+            if (!parts.contains(t)) parts << t;
+        }
+        if (!parts.isEmpty())
+            rows << makeInfoRow(Icons::Clock, parts.join(QStringLiteral(", ")),
+                                QStringLiteral("Часы работы"));
+    }
+
     if (rows.isEmpty()) return nullptr;
 
     auto* sec = new QFrame();
@@ -1362,6 +1380,133 @@ QWidget* ProfilePanel::makeGifts(const QJsonObject& gifts) {
     return wrap;
 }
 
+
+// Экран «Общие медиа» (xp-md веба): чипы категорий + сетка плиток.
+void ProfilePanel::openMediaScreen() {
+    auto* host = new QWidget();
+    host->setStyleSheet(QStringLiteral("background:transparent;"));
+    auto* v = new QVBoxLayout(host);
+    v->setContentsMargins(0, 0, 0, 0);
+    v->setSpacing(0);
+
+    // Чипы категорий с счётчиками (без category сервер отдаёт counts/total).
+    auto* chips = new QWidget(host);
+    chips->setStyleSheet(QStringLiteral(
+        "QWidget{background:#131218;border-bottom:1px solid #221F2C;}"));
+    chips->setAttribute(Qt::WA_StyledBackground, true);
+    auto* chl = new QHBoxLayout(chips);
+    chl->setContentsMargins(12, 8, 12, 8);
+    chl->setSpacing(8);
+
+    auto* gridHost = new QWidget(host);
+    auto* gl = new QVBoxLayout(gridHost);
+    gl->setContentsMargins(12, 12, 12, 16);
+    auto* loading = new QLabel(QStringLiteral("Загрузка…"), gridHost);
+    loading->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+    gl->addWidget(loading);
+    auto* body = new QGridLayout();
+    body->setContentsMargins(0, 0, 0, 0);
+    body->setSpacing(4);
+    gl->addLayout(body);
+
+    const auto rebuild = [gridHost, body](const QJsonArray& items) {
+        QLayoutItem* it;
+        while ((it = body->takeAt(0)) != nullptr) {
+            if (it->widget()) it->widget()->deleteLater();
+            delete it;
+        }
+        if (items.isEmpty()) {
+            auto* empty = new QLabel(QStringLiteral("Ничего нет"), gridHost);
+            empty->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+            body->addWidget(empty, 0, 0);
+            return;
+        }
+        int row = 0, col = 0;
+        for (const QJsonValue& iv : items) {
+            const QJsonObject o = iv.toObject();
+            const QString type = o.value(QStringLiteral("type")).toString();
+            auto* tile = new QWidget(gridHost);
+            tile->setObjectName(QStringLiteral("mediaTile"));
+            tile->setStyleSheet(QStringLiteral(
+                "QWidget#mediaTile{background:#221F2C;border-radius:12px;}"));
+            tile->setAttribute(Qt::WA_StyledBackground, true);
+            tile->setFixedSize(96, 96);
+            auto* tl = new QVBoxLayout(tile);
+            tl->setContentsMargins(6, 6, 6, 6);
+            const QString glyph = type == QStringLiteral("video") ? QString::fromUtf8("\U0001F3AC")
+                             : type == QStringLiteral("voice") ? QString::fromUtf8("\U0001F3A4")
+                             : type == QStringLiteral("audio") ? QString::fromUtf8("\u266A")
+                             : type == QStringLiteral("link")  ? QString::fromUtf8("\U0001F517")
+                             : type == QStringLiteral("file")  ? QString::fromUtf8("\U0001F4C4")
+                                                               : QString::fromUtf8("\U0001F5BC");
+            auto* ic = new QLabel(glyph, tile);
+            ic->setAlignment(Qt::AlignCenter);
+            ic->setStyleSheet(QStringLiteral("font-size:26px;background:transparent;"));
+            tl->addWidget(ic, 1);
+            const QString nm = o.value(QStringLiteral("name")).toString(
+                o.value(QStringLiteral("title")).toString());
+            if (!nm.isEmpty()) {
+                auto* nmL = new QLabel(nm, tile);
+                nmL->setStyleSheet(QStringLiteral(
+                    "color:#ACA6BD;font-size:10px;background:transparent;"));
+                nmL->setWordWrap(true);
+                tl->addWidget(nmL);
+            }
+            body->addWidget(tile, row, col);
+            if (++col >= 6) { col = 0; ++row; }
+        }
+    };
+
+    struct Cat { const char* key; const char* label; };
+    static const Cat cats[] = {
+        {"photo", "Фото"}, {"video", "Видео"}, {"voice", "Голосовые"},
+        {"audio", "Аудио"}, {"file", "Файлы"}, {"link", "Ссылки"},
+    };
+    QList<QPair<QString, QPushButton*>> chipList;
+    for (const Cat& c : cats) {
+        auto* chip = new QPushButton(QString::fromUtf8(c.label), chips);
+        chip->setCursor(Qt::PointingHandCursor);
+        chip->setCheckable(true);
+        chip->setStyleSheet(QStringLiteral(
+            "QPushButton{border:1px solid #2B2737;border-radius:999px;padding:6px 14px;"
+            "background:transparent;color:#ACA6BD;font-size:12px;}"
+            "QPushButton:checked{background:#8B5CF6;border-color:#8B5CF6;color:#fff;}"));
+        chl->addWidget(chip);
+        chipList.append({QString::fromLatin1(c.key), chip});
+    }
+    v->addWidget(chips);
+    v->addWidget(gridHost, 1);
+
+    const QString peer = userId_;
+    // Счётчики на чипы.
+    connect(api_, &ApiClient::mediaCountsLoaded, host,
+            [chipList](const QString&, const QJsonObject& counts, int total) {
+        for (auto& pair : chipList) {
+            const int n = pair.first == QLatin1String("all")
+                ? total : counts.value(pair.first).toInt(0);
+            pair.second->setText(QStringLiteral("%1 · %2")
+                                     .arg(pair.second->text().section(QStringLiteral(" ·"), 0, 0))
+                                     .arg(n));
+        }
+    });
+    // Предметы по клику на чип (первый — фото — грузим сразу).
+    connect(api_, &ApiClient::mediaListLoaded, host,
+            [rebuild, loading](const QString&, const QJsonArray& items) {
+        if (loading) loading->hide();
+        rebuild(items);
+    });
+    for (auto& pair : chipList) {
+        const QString cat = pair.first;
+        connect(pair.second, &QPushButton::clicked, host, [this, cat, peer]() {
+            api_->requestMediaList(peer, cat);
+        });
+    }
+    api_->requestMediaCounts(peer);
+    chipList.first().second->setChecked(true);
+    api_->requestMediaList(peer, QString::fromLatin1("photo"));
+    pushScreen(QStringLiteral("Общие медиа"), host);
+}
+
 QWidget* ProfilePanel::makeMediaEntry(const QJsonObject& p) {
     const QString id = p.value(QStringLiteral("id")).toString();
     auto* sec = new QFrame();
@@ -1379,9 +1524,7 @@ QWidget* ProfilePanel::makeMediaEntry(const QJsonObject& p) {
     cnt->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:13px;"));
     hl->addWidget(btn, 1);
     hl->addWidget(cnt, 0, Qt::AlignVCenter);
-    connect(btn, &QPushButton::clicked, this, [this, id]() {
-        emit mediaRequested(id, qMax(mediaTotal_, 0));
-    });
+    connect(btn, &QPushButton::clicked, this, [this]() { openMediaScreen(); });
     mediaRow_ = sec;
     // Ноль кэшируется наравне с числом: без медиа строки нет (renderMediaEntry).
     sec->setVisible(mediaTotal_ != 0);

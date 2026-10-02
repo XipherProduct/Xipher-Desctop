@@ -60,6 +60,7 @@ public:
     // Полный ответ /api/profile/view (public — design-verify вызывает напрямую).
     void applyProfileView(qint64 reqId, const QJsonObject& data, bool ok, const QString& error);
     void applyMediaCount(const QString& chatId, int total);
+    void openMediaScreen();            // вложенный экран из /api/media/list
 
 signals:
     void messageRequested(const QString& userId);

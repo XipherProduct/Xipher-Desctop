@@ -347,6 +347,39 @@ void ApiClient::profileView(const QString& userId) {
     });
 }
 
+// Медиа чата: без category сервер отдаёт только counts/total; items —
+// по конкретной категории (курсорная пагинация, как xp-md веба).
+void ApiClient::requestMediaCounts(const QString& chatId) {
+    postJson(QStringLiteral("/api/media/list"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("chat_type"), QStringLiteral("dm")},
+              {QStringLiteral("chat_id"), chatId}},
+             [this, chatId](const QJsonObject& o, bool ok, const QString&) {
+        if (ok && o.value(QStringLiteral("success")).toBool(false))
+            emit mediaCountsLoaded(chatId,
+                                   o.value(QStringLiteral("counts")).toObject(),
+                                   o.value(QStringLiteral("total")).toInt(0));
+    });
+}
+
+void ApiClient::requestMediaList(const QString& chatId, const QString& category,
+                                 const QString& cursor, int limit) {
+    QJsonObject body{{QStringLiteral("token"), Session::instance().token},
+                     {QStringLiteral("chat_type"), QStringLiteral("dm")},
+                     {QStringLiteral("chat_id"), chatId},
+                     {QStringLiteral("category"), category},
+                     {QStringLiteral("limit"), limit}};
+    if (!cursor.isEmpty()) body.insert(QStringLiteral("cursor"), cursor);
+    postJson(QStringLiteral("/api/media/list"), body,
+             [this, chatId, category](const QJsonObject& o, bool ok, const QString&) {
+        if (ok && o.value(QStringLiteral("success")).toBool(false))
+            emit mediaListLoaded(chatId, o.value(QStringLiteral("items")).toArray());
+        else
+            emit mediaListLoaded(chatId, QJsonArray());
+        Q_UNUSED(category);
+    });
+}
+
 // Бейдж пропущенных звонков (панель звонков/список).
 void ApiClient::callsMissedCount() {
     postJson(QStringLiteral("/api/calls/missed-count"),
