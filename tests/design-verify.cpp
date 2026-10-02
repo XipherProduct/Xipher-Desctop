@@ -15,6 +15,7 @@
 #include "ui/EmojiPicker.h"
 #include "ui/AnimatedEmojiLabel.h"
 #include "ui/CallSounds.h"
+#include "ui/ImageViewer.h"
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
 #include "net/Session.h"
@@ -824,6 +825,62 @@ int main(int argc, char** argv) {
         CallSounds::instance().startRingtone();   // не должно падать без устройства
         CallSounds::instance().stopRingtone();
         check(true, QStringLiteral("рингтон стартует/стопится без аудиоустройства"));
+    }
+
+    // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).
+    {
+        printf("\nМедиавьюер: зум/пан (MDV-01)\n");
+        QPixmap test(400, 300);
+        test.fill(QColor(80, 120, 200));
+        ImageViewer::show(&page, test);
+        ImageViewer* viewer = page.findChild<ImageViewer*>();
+        check(viewer != nullptr, QStringLiteral("вьюер открылся"));
+        if (viewer) {
+            for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+            check(viewer->isFitMode(), QStringLiteral("исходно — режим «вписать»"));
+            // Колесо вверх: зум растёт, режим ручной.
+            const qreal before = viewer->zoomPercent();
+            QWheelEvent up(QPointF(200, 150), QPointF(200, 150), QPoint(), QPoint(0, 120),
+                           Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+            QApplication::sendEvent(viewer, &up);
+            check(!viewer->isFitMode() && viewer->zoomPercent() > before,
+                  QStringLiteral("колесо вверх увеличивает"));
+            // Двойной клик возвращает «вписать».
+            QMouseEvent dbl(QEvent::MouseButtonDblClick, QPointF(200, 150), QPointF(200, 150),
+                            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(viewer, &dbl);
+            check(viewer->isFitMode(), QStringLiteral("двойной клик — обратно «вписать»"));
+            // Поклонение вниз до клампа: не ниже 10%.
+            for (int i = 0; i < 40; ++i) {
+                QWheelEvent dn(QPointF(200, 150), QPointF(200, 150), QPoint(), QPoint(0, -120),
+                               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+                QApplication::sendEvent(viewer, &dn);
+            }
+            check(viewer->zoomPercent() >= 9.9 && viewer->zoomPercent() <= 10.1,
+                  QStringLiteral("нижний кламп зума 10%"));
+            // Вверх до клампа: не выше 1000%.
+            for (int i = 0; i < 60; ++i) {
+                QWheelEvent up2(QPointF(200, 150), QPointF(200, 150), QPoint(), QPoint(0, 120),
+                                Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+                QApplication::sendEvent(viewer, &up2);
+            }
+            check(viewer->zoomPercent() >= 999.0 && viewer->zoomPercent() <= 1000.1,
+                  QStringLiteral("верхний кламп зума 1000%"));
+            // Пан средней кнопкой: смещение меняется и клампится.
+            const QPoint panBefore = viewer->panOffset();
+            QMouseEvent mPress(QEvent::MouseButtonPress, QPointF(200, 150), QPointF(1200, 150),
+                               Qt::MiddleButton, Qt::MiddleButton, Qt::NoModifier);
+            QApplication::sendEvent(viewer, &mPress);
+            QMouseEvent mMove(QEvent::MouseMove, QPointF(120, 150), QPointF(1120, 150),
+                              Qt::MiddleButton, Qt::MiddleButton, Qt::NoModifier);
+            QApplication::sendEvent(viewer, &mMove);
+            QMouseEvent mRel(QEvent::MouseButtonRelease, QPointF(120, 150), QPointF(1120, 150),
+                             Qt::MiddleButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(viewer, &mRel);
+            check(viewer->panOffset() != panBefore,
+                  QStringLiteral("пан средней кнопкой двигает картинку"));
+            viewer->close();
+        }
     }
 
     if (auto* tile = page.findChild<QLabel*>(QStringLiteral("folderRailIcon"))) {

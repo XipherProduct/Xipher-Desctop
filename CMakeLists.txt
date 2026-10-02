@@ -216,9 +216,18 @@ if(NOT WIN32)
     qt_add_executable(profile-live ${SOURCES} ${HEADERS} tests/profile-live.cpp)
     target_include_directories(profile-live PRIVATE src)
     target_link_libraries(profile-live PRIVATE
-        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::MultimediaWidgets)
     set_target_properties(profile-live PROPERTIES
         OUTPUT_NAME "profile-live"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+    # Живой рендер медиавьюера (MDV-01): скрины зума/пана на тестовой картинке.
+    qt_add_executable(viewer-grab ${SOURCES} ${HEADERS} tests/viewer-grab.cpp)
+    target_include_directories(viewer-grab PRIVATE src)
+    target_link_libraries(viewer-grab PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::MultimediaWidgets)
+    set_target_properties(viewer-grab PROPERTIES
+        OUTPUT_NAME "viewer-grab"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
     # ASAN-сборка верификатора: гонять в цикле при подозрении на утечки/краши.
@@ -233,7 +242,7 @@ if(NOT WIN32)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
     # Звонковая сборка у инструментов та же, что у приложения.
-    foreach(t design-verify profile-live call-live call-demo)
+    foreach(t design-verify profile-live call-live call-demo viewer-grab)
         target_include_directories(${t} PRIVATE ${CALL_INCLUDES})
         target_link_libraries(${t} PRIVATE ${CALL_LIBS})
         target_compile_definitions(${t} PRIVATE ${CALL_DEFS})
