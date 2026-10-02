@@ -20,12 +20,14 @@
 - [x] A4 Мини-бар: cleanup() делает deleteLater (проверено кодом), утечки нет.
 
 ## Блок B (90м) — Реакции на сообщения (веб имеет, десктоп нет)
-- [ ] B1 Разведка веба: /api/add|remove-message-reaction, /api/get-message-reactions,
-      WS-event обновления; формат reactions в payload сообщений.
-- [ ] B2 ApiClient: три метода + сигнал; WsClient: событие реакции → точечное обновление бабла.
-- [ ] B3 UI: стрип реакций (наведение/ПКМ) из недавних эмодзи, счётчики-чипы под баблом,
-      своя подсвечена фиолетовым, toggle по клику; анимация появления чипа.
-- [ ] B4 design-verify: реакция добавляется, счётчик растёт, своя подсвечена.
+- [x] B1 Разведка: add/remove-message-reaction {message_id, reaction, message_context};
+      WS reaction_update эхом ОБОИМ сторонам ({message_id, reaction, user_id, action});
+      payload: reactions=[{reaction, count, user_reacted}].
+- [x] B2 ApiClient::add/removeMessageReaction; WsClient::reactionUpdated → ChatPage.
+- [x] B3 UI: чипы [эмодзи ×N] под бабблом (своя — фиолетовая рамка/подложка),
+      клик — тумбл с оптимистичным UI, сверка по WS-эху; ПКМ по бабблу — сегмент
+      быстрых реакций (👍❤️😂😮😢🔥👏🎉) над пунктами меню, как в вебе.
+- [x] B4 design-verify 73/73: чипы (2), своя помечена, фиолетовая рамка.
 
 ## Блок C (90м) — Редактирование и закрепление сообщений
 - [ ] C1 Разведка веба: edit-message, pin/unpin, message_pinned WS, PinnedBar разметка.

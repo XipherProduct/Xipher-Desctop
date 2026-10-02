@@ -1,6 +1,22 @@
 #include "net/ApiClient.h"
 #include "net/Session.h"
 
+namespace {
+QList<Reaction> parseReactions(const QJsonObject& o) {
+    QList<Reaction> out;
+    for (const QJsonValue& v : o.value(QStringLiteral("reactions")).toArray()) {
+        const QJsonObject r = v.toObject();
+        Reaction x;
+        x.emoji = r.value(QStringLiteral("reaction")).toString();
+        x.count = r.value(QStringLiteral("count")).toInt(0);
+        x.mine  = r.value(QStringLiteral("user_reacted")).toBool(false);
+        if (!x.emoji.isEmpty() && x.count > 0) out.append(x);
+    }
+    return out;
+}
+}
+
+
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -174,6 +190,7 @@ static ChatMessage parseMessage(const QJsonObject& o) {
     m.replyAuthor  = reply.value(QStringLiteral("author")).toString();
     m.replySnippet = reply.value(QStringLiteral("snippet")).toString();
     m.replyMarkup  = parseReplyMarkup(o.value(QStringLiteral("reply_markup")));
+    m.reactions    = parseReactions(o);
     return m;
 }
 
@@ -280,6 +297,28 @@ void ApiClient::setContactName(const QString& contactId, const QString& customNa
     });
 }
 
+// Реакции: сервер отвечает {success}, актуальный счётчик приходит эхом
+// WS reaction_update (рассылается обеим сторонам, включая меня).
+void ApiClient::addMessageReaction(const QString& messageId, const QString& emoji,
+                                   const QString& messageContext) {
+    postJson(QStringLiteral("/api/add-message-reaction"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("message_id"), messageId},
+              {QStringLiteral("reaction"), emoji},
+              {QStringLiteral("message_context"), messageContext}},
+             [this](const QJsonObject&, bool, const QString&) {});
+}
+
+void ApiClient::removeMessageReaction(const QString& messageId, const QString& emoji,
+                                      const QString& messageContext) {
+    postJson(QStringLiteral("/api/remove-message-reaction"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("message_id"), messageId},
+              {QStringLiteral("reaction"), emoji},
+              {QStringLiteral("message_context"), messageContext}},
+             [this](const QJsonObject&, bool, const QString&) {});
+}
+
 void ApiClient::getUserProfile(const QString& userId) {
     QJsonObject body{{QStringLiteral("token"), Session::instance().token},
                      {QStringLiteral("user_id"), userId}};
@@ -335,6 +374,7 @@ QList<ChatMessage> parseGroupChannelMessages(const QJsonObject& obj) {
         m.fileName    = o.value(QStringLiteral("file_name")).toString();
         m.fileSize    = static_cast<long long>(o.value(QStringLiteral("file_size")).toDouble(0));
         m.replyMarkup = parseReplyMarkup(o.value(QStringLiteral("reply_markup")));
+        m.reactions   = parseReactions(o);
         m.sent        = (m.senderId == myId);
         out.append(m);
     }

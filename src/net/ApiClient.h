@@ -177,6 +177,11 @@ public:
 
     // Люди и друзья.
     void getUserProfile(const QString& userId);
+    // Реакции на сообщения (эхо состояния — WS reaction_update).
+    void addMessageReaction(const QString& messageId, const QString& emoji,
+                            const QString& messageContext = QStringLiteral("chat"));
+    void removeMessageReaction(const QString& messageId, const QString& emoji,
+                               const QString& messageContext = QStringLiteral("chat"));
     // Профиль v2 — как js/profile/view.js веба: /api/profile/view отдаёт
     // profile + relation + marks + gifts одним ответом, правила приватности
     // решает сервер. Ответ помечается id запроса — быстрое переключение

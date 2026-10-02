@@ -127,6 +127,14 @@ struct FriendRequest {
 };
 
 // Сообщение (/api/messages → messages[], /api/send-message ack).
+// Реакция на сообщение (payload: [{reaction, count, user_reacted}]).
+struct Reaction {
+    QString emoji;
+    int     count = 0;
+    bool    mine  = false;   // user_reacted
+    bool operator==(const Reaction& o) const { return emoji == o.emoji; }
+};
+
 struct ChatMessage {
     QString id;
     QString senderId;
@@ -153,6 +161,9 @@ struct ChatMessage {
     // Разметка бота (reply_markup): inline_keyboard / keyboard / web_app-кнопки.
     // Пустой объект = обычное сообщение без кнопок.
     QJsonObject replyMarkup;
+
+    // Реакции (приходят с сообщением, обновляются WS reaction_update).
+    QList<Reaction> reactions;
 
     bool isVoice() const { return messageType == QStringLiteral("voice"); }
 };

@@ -124,6 +124,13 @@ void WsClient::onTextMessage(const QString& text) {
         emit callIceReceived(o.value(QStringLiteral("from_user_id")).toString(),
                              o.value(QStringLiteral("candidate")).toString());
     }
+    else if (type == QStringLiteral("reaction_update")) {
+        // Эхо обеим сторонам: {message_id, reaction, user_id, action, message_context}.
+        emit reactionUpdated(o.value(QStringLiteral("message_id")).toString(),
+                             o.value(QStringLiteral("reaction")).toString(),
+                             o.value(QStringLiteral("user_id")).toString(),
+                             o.value(QStringLiteral("action")).toString(QStringLiteral("added")));
+    }
     else if (type == QStringLiteral("call_end") || type == QStringLiteral("call_ended")) {
         emit callEnded(o.value(QStringLiteral("from_user_id")).toString());
     }

@@ -117,10 +117,37 @@ int main(int argc, char** argv) {
         u.content = "https://lknpd.nalog.ru/api/v1/receipt/615491216850/201v1q7qbe/print";
         u.time = "10:01"; u.createdAt = "2026-09-21T10:01:00";
         msgs.append(u);
+        // Реакции: своя (фиолетовая) и чужая — чипы под бабблом.
+        ChatMessage r;
+        r.id = "re1"; r.sent = false;
+        r.content = "сообщение с реакциями";
+        r.time = "10:02"; r.createdAt = "2026-09-21T10:02:00";
+        r.reactions = {Reaction{QString::fromUtf8("\U0001F525"), 3, true},
+                       Reaction{QString::fromUtf8("\U0001F44D"), 1, false}};
+        msgs.insert(1, r);   // в видимую зону: список материализует только её
     }
 
     page.injectForDesignTest(chats, QList<Folder>{work}, QStringLiteral("u_alice"), msgs);
     for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+
+    {
+        int chips = 0, mine = 0;
+        for (QPushButton* c : page.findChildren<QPushButton*>())
+            if (c->objectName() == QStringLiteral("reactionChip")) {
+                ++chips;
+                if (c->property("mine").toBool()) ++mine;
+            }
+        check(chips == 2, QStringLiteral("реакции: чипы под бабблом (%1)").arg(chips));
+        check(mine == 1, QStringLiteral("своя реакция помечена"));
+        const QString chipQss = [&page]{
+            for (QPushButton* c : page.findChildren<QPushButton*>())
+                if (c->objectName() == QStringLiteral("reactionChip") && c->property("mine").toBool())
+                    return c->styleSheet();
+            return QString();
+        }();
+        check(chipQss.contains(QStringLiteral("#8B5CF6")),
+              QStringLiteral("своя реакция — фиолетовая рамка"));
+    }
 
     // Базовые проверки — на «Стандартной» теме (предыдущий прогон мог
     // сохранить другую в Prefs).

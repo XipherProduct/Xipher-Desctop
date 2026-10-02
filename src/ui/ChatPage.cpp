@@ -43,6 +43,7 @@
 #include <QTextDocument>
 #include <QtMath>
 #include <QMenu>
+#include <QWidgetAction>
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
@@ -370,6 +371,30 @@ static QString chatQSS();   // единый шаблон стилей чата (
 
 ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
     : QWidget(parent), api_(api), ws_(ws) {
+    // Реакции собеседника: эхо reaction_update (приходит и за свои — сверка).
+    connect(ws_, &WsClient::reactionUpdated, this,
+            [this](const QString& messageId, const QString& emoji,
+                   const QString& userId, const QString& action) {
+        ChatMessage* m = findMessage(messageId);
+        if (!m) return;
+        const bool own = (userId == Session::instance().userId);
+        const bool added = (action == QStringLiteral("added"));
+        bool changed = false;
+        Reaction* found = nullptr;
+        for (Reaction& r : m->reactions)
+            if (r.emoji == emoji) { found = &r; break; }
+        if (added) {
+            if (!found) { m->reactions.append(Reaction{emoji, 1, own}); changed = true; }
+            else if (own && !found->mine) { found->mine = true; changed = true; }
+            else if (!own) { ++found->count; changed = true; }
+        } else if (found) {
+            if (own && found->mine) { found->mine = false; changed = true; }
+            else if (!own && --found->count <= 0) { m->reactions.removeOne(*found); changed = true; }
+            else if (!own) changed = true;
+        }
+        if (changed) refreshReactionChips(messageId);
+    });
+
     recorder_ = new VoiceRecorder(this);
     player_   = new QMediaPlayer(this);
     audioOut_ = new QAudioOutput(this);
@@ -2181,6 +2206,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     bubble->setContextMenuPolicy(Qt::CustomContextMenu);
     bubble->setProperty("msgId", msg.id);
     bubble->setProperty("msgText", msg.content);
+    bubble->setProperty("msgId", msg.id);
     bubble->setProperty("msgSent", msg.sent);
     bubble->setProperty("msgAuthor", msg.sent ? QStringLiteral("Вы")
                         : (msg.senderName.isEmpty() ? currentPeerName_ : msg.senderName));
@@ -2462,6 +2488,9 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         bl->addWidget(text);
     }
 
+    // Реакции: чипы [эмодзи ×N] под содержимым; своя — фиолетовая.
+    addReactionChips(bubble, bl, msg);
+
     // Inline-кнопки бота (reply_markup.inline_keyboard): callback / url / web_app.
     if (!msg.replyMarkup.isEmpty())
         addInlineKeyboard(bl, msg);
@@ -2556,6 +2585,88 @@ void ChatPage::scrollToBottom() {
     programmaticScroll_ = false;
 }
 
+
+// ── Реакции (1:1 с message-reactions веба) ───────────────────────────────────
+
+ChatMessage* ChatPage::findMessage(const QString& id) {
+    for (ChatMessage& m : currentMessages_)
+        if (m.id == id) return &m;
+    return nullptr;
+}
+
+// Чипы [эмодзи ×N] под содержимым баббла. Своя реакция — фиолетовая.
+void ChatPage::addReactionChips(QWidget* bubble, QVBoxLayout* bl, const ChatMessage& msg) {
+    if (msg.reactions.isEmpty()) return;
+    auto* row = new QWidget(bubble);
+    row->setObjectName(QStringLiteral("reactionRow"));
+    auto* lay = new QHBoxLayout(row);
+    lay->setContentsMargins(2, 2, 2, 0);
+    lay->setSpacing(4);
+    const QString mid = msg.id;
+    for (const Reaction& r : msg.reactions) {
+        auto* chip = new QPushButton(row);
+        chip->setObjectName(QStringLiteral("reactionChip"));
+        chip->setCursor(Qt::PointingHandCursor);
+        chip->setText(QStringLiteral("%1  %2").arg(r.emoji).arg(r.count));
+        chip->setProperty("mine", r.mine);
+        chip->setStyleSheet(QStringLiteral(
+            "QPushButton{border:1px solid %1;background:%2;border-radius:11px;"
+            "padding:2px 10px;color:%3;font-size:13px;}"
+            "QPushButton:hover{background:%4;}")
+            .arg(r.mine ? QStringLiteral("#8B5CF6") : QStringLiteral("rgba(255,255,255,0.10)"),
+                 r.mine ? QStringLiteral("rgba(139,92,246,0.22)") : QStringLiteral("#221F2C"),
+                 QStringLiteral("#F3F1F8"),
+                 r.mine ? QStringLiteral("rgba(139,92,246,0.34)") : QStringLiteral("#2B2737")));
+        const QString emoji = r.emoji;
+        connect(chip, &QPushButton::clicked, this, [this, mid, emoji]() {
+            toggleReaction(mid, emoji);
+        });
+        lay->addWidget(chip);
+    }
+    lay->addStretch(1);
+    bl->addWidget(row);
+}
+
+// Точечное обновление чипов одного сообщения (без перерисовки всего чата).
+void ChatPage::refreshReactionChips(const QString& messageId) {
+    QWidget* target = nullptr;
+    for (QWidget* w : msgContainer_->findChildren<QWidget*>()) {
+        if (w->property("msgId").toString() == messageId) { target = w; break; }
+    }
+    const ChatMessage* m = findMessage(messageId);
+    if (!target || !m) return;
+    if (auto* old = target->findChild<QWidget*>(QStringLiteral("reactionRow"))) {
+        if (auto* lay = qobject_cast<QVBoxLayout*>(target->layout())) {
+            const int at = lay->indexOf(old);
+            if (at >= 0) delete lay->takeAt(at);
+        }
+        old->deleteLater();
+    }
+    if (auto* lay = qobject_cast<QVBoxLayout*>(target->layout()))
+        addReactionChips(target, lay, *m);
+}
+
+// Тумбл: оптимистично меняем модель+UI, эхо WS reaction_update сверит.
+void ChatPage::toggleReaction(const QString& messageId, const QString& emoji) {
+    ChatMessage* m = findMessage(messageId);
+    if (!m || messageId.isEmpty()) return;
+    const QString ctx = currentKind_ == ChatKind::Group ? QStringLiteral("group")
+                                                      : QStringLiteral("chat");
+    bool found = false;
+    for (Reaction& r : m->reactions) {
+        if (r.emoji != emoji) continue;
+        found = true;
+        if (r.mine) { r.mine = false; if (--r.count <= 0) m->reactions.removeOne(r); }
+        else        { r.mine = true;  ++r.count; }
+        break;
+    }
+    if (!found) m->reactions.append(Reaction{emoji, 1, true});
+    const bool nowMine = [&]{ for (const Reaction& r : m->reactions) if (r.emoji==emoji) return r.mine; return false; }();
+    refreshReactionChips(messageId);
+    if (nowMine) api_->addMessageReaction(messageId, emoji, ctx);
+    else         api_->removeMessageReaction(messageId, emoji, ctx);
+}
+
 void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     const QString id     = bubble->property("msgId").toString();
     const QString text   = bubble->property("msgText").toString();
@@ -2568,6 +2679,39 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
         return idx >= 0 && chats_[idx].isSaved;
     }();
     QMenu menu(this);
+    // Быстрые реакции (Telegram-class): сегмент из 8 эмодзи над пунктами меню.
+    if (!id.isEmpty() && currentKind_ != ChatKind::Channel) {
+        auto* bar = new QWidget(&menu);
+        auto* bl2 = new QHBoxLayout(bar);
+        bl2->setContentsMargins(10, 6, 10, 6);
+        bl2->setSpacing(2);
+        const QStringList quick = {QString::fromUtf8("\U0001F44D"),
+                                   QString::fromUtf8("\u2764\uFE0F"),
+                                   QString::fromUtf8("\U0001F602"),
+                                   QString::fromUtf8("\U0001F62E"),
+                                   QString::fromUtf8("\U0001F622"),
+                                   QString::fromUtf8("\U0001F525"),
+                                   QString::fromUtf8("\U0001F44F"),
+                                   QString::fromUtf8("\U0001F389")};
+        for (const QString& e : quick) {
+            auto* b = new QPushButton(e, bar);
+            b->setFlat(true);
+            b->setCursor(Qt::PointingHandCursor);
+            b->setStyleSheet(QStringLiteral(
+                "QPushButton{border:none;border-radius:8px;font-size:18px;padding:4px 6px;}"
+                "QPushButton:hover{background:rgba(139,92,246,0.25);}"));
+            const QString emoji = e, mid = id;
+            connect(b, &QPushButton::clicked, this, [this, mid, emoji, &menu]() {
+                toggleReaction(mid, emoji);
+                menu.close();
+            });
+            bl2->addWidget(b);
+        }
+        auto* wa = new QWidgetAction(&menu);
+        wa->setDefaultWidget(bar);
+        menu.addAction(wa);
+        menu.addSeparator();
+    }
     QAction* reply = menu.addAction(QStringLiteral("Ответить"));
     QAction* forward = plain ? menu.addAction(QStringLiteral("Переслать")) : nullptr;
     QAction* fav = nullptr;

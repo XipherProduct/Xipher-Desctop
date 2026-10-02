@@ -40,6 +40,9 @@ signals:
     void callAnswerReceived(const QString& fromUserId, const QString& sdp);
     void callIceReceived(const QString& fromUserId, const QString& candidate);
     void callEnded(const QString& fromUserId);
+    // Реакция добавлена/убрана (user_id — кто, для пометки своей).
+    void reactionUpdated(const QString& messageId, const QString& emoji,
+                         const QString& userId, const QString& action);
     // Push входящего звонка (как notifyIncomingCall в вебе): offer уже в событии.
     void callOfferArrived(const QString& fromUserId, const QString& fromUsername,
                           const QString& avatarUrl, const QString& callType,

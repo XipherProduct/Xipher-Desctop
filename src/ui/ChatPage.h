@@ -168,6 +168,11 @@ private:
     void openSuperSearch();                                          // Ctrl+Shift+F
     void jumpToMessage(const QString& messageId);                    // из результатов поиска
     void bumpChat(const QString& peerId, const QString& lastText, const QString& time, bool incrementUnread);
+    // Реакции: чипы под бабблом, точечное обновление, тумбл.
+    void addReactionChips(QWidget* bubble, QVBoxLayout* bl, const ChatMessage& msg);
+    void refreshReactionChips(const QString& messageId);
+    void toggleReaction(const QString& messageId, const QString& emoji);
+    ChatMessage* findMessage(const QString& id);
     // Создаёт ProfilePanel (один экземпляр) и вешает ВСЕ связи, включая
     // «Избранное»/настройки/канал из профиля — обе точки открытия общие.
     void ensureProfilePanel();
