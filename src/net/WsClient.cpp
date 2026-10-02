@@ -86,6 +86,16 @@ void WsClient::sendTyping(const QString& chatType, const QString& chatId, bool t
     sock_->sendTextMessage(QString::fromUtf8(QJsonDocument(m).toJson(QJsonDocument::Compact)));
 }
 
+void WsClient::sendCallMediaState(const QString& targetId, const QString& mediaType,
+                                  bool enabled) {
+    QJsonObject m{{QStringLiteral("type"), QStringLiteral("call_media_state")},
+                  {QStringLiteral("token"), token_},
+                  {QStringLiteral("target_user_id"), targetId},
+                  {QStringLiteral("media_type"), mediaType},
+                  {QStringLiteral("enabled"), enabled}};
+    sock_->sendTextMessage(QString::fromUtf8(QJsonDocument(m).toJson(QJsonDocument::Compact)));
+}
+
 void WsClient::sendCallEnd(const QString& targetId) {
     QJsonObject m{{QStringLiteral("type"), QStringLiteral("call_end")},
                   {QStringLiteral("token"), token_},
@@ -142,6 +152,11 @@ void WsClient::onTextMessage(const QString& text) {
     else if (type == QStringLiteral("message_pinned") || type == QStringLiteral("message_unpinned")) {
         emit messagePinned(o.value(QStringLiteral("message_id")).toString(),
                            type == QStringLiteral("message_pinned"));
+    }
+    else if (type == QStringLiteral("call_media_state")) {
+        emit callMediaStateReceived(o.value(QStringLiteral("from_user_id")).toString(),
+                                    o.value(QStringLiteral("media_type")).toString(),
+                                    o.value(QStringLiteral("enabled")).toBool(false));
     }
     else if (type == QStringLiteral("typing")) {
         const bool on = o.value(QStringLiteral("is_typing")).toString() == QStringLiteral("1")

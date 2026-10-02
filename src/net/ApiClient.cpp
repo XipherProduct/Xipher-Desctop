@@ -347,6 +347,17 @@ void ApiClient::profileView(const QString& userId) {
     });
 }
 
+// Бейдж пропущенных звонков (панель звонков/список).
+void ApiClient::callsMissedCount() {
+    postJson(QStringLiteral("/api/calls/missed-count"),
+             {{QStringLiteral("token"), Session::instance().token}},
+             [this](const QJsonObject& o, bool ok, const QString&) {
+        emit callsMissedLoaded(
+            (ok && o.value(QStringLiteral("success")).toBool(false))
+                ? o.value(QStringLiteral("count")).toInt(0) : 0);
+    });
+}
+
 void ApiClient::mediaCount(const QString& chatId) {
     QJsonObject body{{QStringLiteral("token"), Session::instance().token},
                      {QStringLiteral("chat_type"), QStringLiteral("dm")},

@@ -30,6 +30,8 @@ public:
     void sendCallEnd(const QString& targetId);
     // «Печатает…»: chat_type chat|group, is_typing как в вебе.
     void sendTyping(const QString& chatType, const QString& chatId, bool typing);
+    // Состояние микрофона/камеры/экрана в звонке (call_media_state веба).
+    void sendCallMediaState(const QString& targetId, const QString& mediaType, bool enabled);
 
 signals:
     // Пришло новое сообщение. peerId — id чата с моей точки зрения (собеседник).
@@ -42,6 +44,8 @@ signals:
     void callAnswerReceived(const QString& fromUserId, const QString& sdp);
     void callIceReceived(const QString& fromUserId, const QString& candidate);
     void callEnded(const QString& fromUserId);
+    // Собеседник включил/выключил микрофон/камеру/экран.
+    void callMediaStateReceived(const QString& fromUser, const QString& mediaType, bool enabled);
     // «Печатает…» от собеседника (peerId чата с моей стороны).
     void typingReceived(const QString& chatId, const QString& fromUser, bool typing);
     // Правка сообщения (content уже новый) и закрепление/откреп.

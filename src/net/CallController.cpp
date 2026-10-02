@@ -123,6 +123,14 @@ CallController::CallController(ApiClient* api, WsClient* ws, QWidget* window, QO
         else cleanup();   // не дозвонились — мгновенно, как в вебе
     });
     // Push входящего звонка: offer уже здесь — поллинг не нужен.
+    // Собеседник замьютился — видно в шапке звонка.
+    connect(ws_, &WsClient::callMediaStateReceived, this,
+            [this](const QString& from, const QString& mediaType, bool enabled) {
+        if (from != peerId_ || mediaType != QStringLiteral("audio") || !overlay_) return;
+        if (connected_)
+            overlay_->setStatusHint(enabled ? QStringLiteral("Голосовой звонок")
+                                            : QStringLiteral("🔇 Собеседник в мьюте"));
+    });
     connect(ws_, &WsClient::callOfferArrived, this,
             [this](const QString& from, const QString& fromName, const QString& avatar,
                    const QString& callType, const QString& offer) {

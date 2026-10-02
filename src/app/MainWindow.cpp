@@ -102,6 +102,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             [this](const QString& id, const QString& name, const QString& type) {
         callCtl_->onIncoming(id, name, type);
     });
+    // Бейдж пропущенных звонков: при старте, после call_missed и раз в минуту.
+    connect(api_, &ApiClient::callsMissedLoaded, this, [this](int count) {
+        setProperty("missedCalls", count);
+        chat_->setProperty("missedCalls", count);
+        const QString tip = count > 0
+            ? QStringLiteral("Xipher — пропущенных звонков: %1").arg(count)
+            : QStringLiteral("Xipher");
+        if (tray_) tray_->setToolTip(tip);
+    });
+    api_->callsMissedCount();
+
     callPoll_ = new QTimer(this);
     callPoll_->setInterval(2500);
     connect(callPoll_, &QTimer::timeout, this, [this]() {

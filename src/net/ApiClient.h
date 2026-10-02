@@ -191,6 +191,7 @@ public:
     void profileView(const QString& userId);
     // Счётчик общих медиа — POST /api/media/list { chat_type:'dm', chat_id }.
     void mediaCount(const QString& chatId);
+    void callsMissedCount();
     void setContactName(const QString& contactId, const QString& customName);
     void searchUsers(const QString& query);
     void getFriends();
@@ -236,6 +237,7 @@ signals:
     // устаревшего) и флаг ошибки сети.
     void profileViewLoaded(qint64 reqId, const QJsonObject& data, bool ok, const QString& error);
     void mediaCountLoaded(const QString& chatId, int total);
+    void callsMissedLoaded(int count);
 
     // Супер-поиск / превью ссылок / сторис.
     void messagesSearched(const QString& requestId, const QJsonArray& messages);
