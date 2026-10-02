@@ -182,6 +182,10 @@ static ChatMessage parseMessage(const QJsonObject& o) {
     m.sent        = o.value(QStringLiteral("sent")).toBool(false);
     m.isRead      = o.value(QStringLiteral("is_read")).toBool(false);
     m.isDelivered = o.value(QStringLiteral("is_delivered")).toBool(false);
+    // Галочки: сервер держит статус в is_read/is_delivered; «status» есть не
+    // везде — выводим точный из флагов.
+    if (m.isRead)        m.status = QStringLiteral("read");
+    else if (m.isDelivered) m.status = QStringLiteral("delivered");
     m.filePath    = o.value(QStringLiteral("file_path")).toString();
     m.fileName    = o.value(QStringLiteral("file_name")).toString();
     m.fileSize    = static_cast<long long>(o.value(QStringLiteral("file_size")).toDouble(0));

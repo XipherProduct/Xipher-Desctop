@@ -371,6 +371,34 @@ static QString chatQSS();   // единый шаблон стилей чата (
 
 ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
     : QWidget(parent), api_(api), ws_(ws) {
+    // «Печатает…»: гасится через 4 с молчания, свой статус троттлится 5 с.
+    typingTimer_ = new QTimer(this);
+    typingTimer_->setSingleShot(true);
+    typingTimer_->setInterval(4000);
+    connect(typingTimer_, &QTimer::timeout, this, [this]() {
+        if (!peerStatusBase_.isEmpty()) peerStatus_->setText(peerStatusBase_);
+    });
+    connect(ws_, &WsClient::typingReceived, this,
+            [this](const QString& chatId, const QString& from, bool on) {
+        if (from == Session::instance().userId) return;   // своё эхо
+        showTyping(chatId, on);
+    });
+    {
+        auto* typingThrottle = new QTimer(this);
+        typingThrottle->setSingleShot(true);
+        typingThrottle->setInterval(5000);
+        connect(typingThrottle, &QTimer::timeout, this, [this]() { typingSent_ = false; });
+        connect(composer_, &ComposerEdit::textChanged, this, [this, typingThrottle]() {
+            saveDraft();
+            if (currentPeerId_.isEmpty() || typingSent_) return;
+            typingSent_ = true;
+            ws_->sendTyping(currentKind_ == ChatKind::Group ? QStringLiteral("group")
+                                                            : QStringLiteral("chat"),
+                            currentPeerId_, true);
+            typingThrottle->start();
+        });
+    }
+
     // Правка (обе стороны) и закрепление.
     connect(ws_, &WsClient::messageEdited, this,
             [this](const QString& messageId, const QString& content) {
@@ -1709,7 +1737,13 @@ void ChatPage::openChat(const Chat& chat) {
         return;
     }
     clearReplyTo();
+    cancelEditing();
+    if (emojiPicker_) emojiPicker_->hide();   // панель не висит над чужим чатом
+    saveDraft();                              // черновик предыдущего чата — в Prefs
+    if (typingTimer_) typingTimer_->stop();
+    peerStatusBase_.clear();
     currentPeerId_   = chat.id;
+    draftKey_ = QStringLiteral("draft:") + chat.id;
     currentPeerName_ = chat.displayName;
     currentKind_     = chat.kind;
     peerName_->setText(chat.displayName);
@@ -1747,7 +1781,8 @@ void ChatPage::openChat(const Chat& chat) {
         api_->getChannelMessages(chat.id, /*limit*/ 50);
     } else {
         convStack_->setCurrentIndex(1); clearMessages(); renderCached();
-        api_->getMessages(chat.id, /*limit*/ 50);
+        restoreDraft();
+    api_->getMessages(chat.id, /*limit*/ 50);
     }
 
     // Сброс непрочитанных в списке
@@ -2770,6 +2805,36 @@ void ChatPage::setPinnedMessage(const QString& id, const QString& snippet) {
 void ChatPage::clearPinnedMessage() {
     pinnedMsgId_.clear();
     if (pinnedBar_) pinnedBar_->hide();
+}
+
+
+// «Печатает…»: подменяет статус в шапке и гасится через 4 с.
+void ChatPage::showTyping(const QString& chatId, bool on) {
+    if (chatId != currentPeerId_ || !peerStatus_) return;
+    if (peerStatusBase_.isEmpty()) peerStatusBase_ = peerStatus_->text();
+    if (on) {
+        peerStatus_->setText(QStringLiteral("печатает…"));
+        typingTimer_->start();
+    } else {
+        peerStatus_->setText(peerStatusBase_);
+        typingTimer_->stop();
+    }
+}
+
+// Черновики: текст композера живёт per-chat (Prefs), восстанавливается
+// при переключении, уходит после отправки.
+void ChatPage::saveDraft() {
+    if (draftKey_.isEmpty() || !composer_) return;
+    Prefs::setStr(draftKey_, composer_->toPlainText());
+}
+
+void ChatPage::restoreDraft() {
+    if (!composer_) return;
+    composer_->blockSignals(true);
+    composer_->clear();
+    const QString t = Prefs::getStr(draftKey_);
+    if (!t.isEmpty()) composer_->setPlainText(t);
+    composer_->blockSignals(false);
 }
 
 void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {

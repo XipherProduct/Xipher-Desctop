@@ -28,6 +28,8 @@ public:
     void sendCallAnswer(const QString& targetId, const QString& sdpJson);
     void sendCallIce(const QString& targetId, const QString& candJson);
     void sendCallEnd(const QString& targetId);
+    // «Печатает…»: chat_type chat|group, is_typing как в вебе.
+    void sendTyping(const QString& chatType, const QString& chatId, bool typing);
 
 signals:
     // Пришло новое сообщение. peerId — id чата с моей точки зрения (собеседник).
@@ -40,6 +42,8 @@ signals:
     void callAnswerReceived(const QString& fromUserId, const QString& sdp);
     void callIceReceived(const QString& fromUserId, const QString& candidate);
     void callEnded(const QString& fromUserId);
+    // «Печатает…» от собеседника (peerId чата с моей стороны).
+    void typingReceived(const QString& chatId, const QString& fromUser, bool typing);
     // Правка сообщения (content уже новый) и закрепление/откреп.
     void messageEdited(const QString& messageId, const QString& content);
     void messagePinned(const QString& messageId, bool pinned);

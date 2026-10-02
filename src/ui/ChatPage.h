@@ -180,6 +180,9 @@ private:
     void startEditing(const QString& id, const QString& text);
     void cancelEditing();
     void rerenderPreservingScroll();
+    void showTyping(const QString& chatId, bool on);
+    void saveDraft();
+    void restoreDraft();
     // Создаёт ProfilePanel (один экземпляр) и вешает ВСЕ связи, включая
     // «Избранное»/настройки/канал из профиля — обе точки открытия общие.
     void ensureProfilePanel();
@@ -198,6 +201,10 @@ private:
     QList<ChatMessage> currentMessages_;   // загруженные сообщения текущего чата
     QLabel*      peerName_   = nullptr;
     QLabel*      peerStatus_ = nullptr;
+    QString      peerStatusBase_;             // обычный статус (typing его подменяет)
+    QTimer*      typingTimer_ = nullptr;      // гашение «печатает…» через 4 с
+    QString      draftKey_;                   // Prefs-ключ черновика текущего чата
+    bool         typingSent_ = false;         // троттл своего статуса (5 с)
     QLabel*      peerAvatar_ = nullptr;
     ProfilePanel* profilePanel_ = nullptr;
     SettingsDialog* settings_ = nullptr;

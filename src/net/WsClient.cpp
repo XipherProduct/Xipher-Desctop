@@ -76,6 +76,16 @@ void WsClient::sendCallIce(const QString& targetId, const QString& candJson) {
                   {QStringLiteral("candidate"), candJson}};
     sock_->sendTextMessage(QString::fromUtf8(QJsonDocument(m).toJson(QJsonDocument::Compact)));
 }
+void WsClient::sendTyping(const QString& chatType, const QString& chatId, bool typing) {
+    QJsonObject m{{QStringLiteral("type"), QStringLiteral("typing")},
+                  {QStringLiteral("token"), token_},
+                  {QStringLiteral("chat_type"), chatType},
+                  {QStringLiteral("chat_id"), chatId},
+                  {QStringLiteral("is_typing"), typing ? QStringLiteral("1")
+                                                      : QStringLiteral("0")}};
+    sock_->sendTextMessage(QString::fromUtf8(QJsonDocument(m).toJson(QJsonDocument::Compact)));
+}
+
 void WsClient::sendCallEnd(const QString& targetId) {
     QJsonObject m{{QStringLiteral("type"), QStringLiteral("call_end")},
                   {QStringLiteral("token"), token_},
@@ -132,6 +142,13 @@ void WsClient::onTextMessage(const QString& text) {
     else if (type == QStringLiteral("message_pinned") || type == QStringLiteral("message_unpinned")) {
         emit messagePinned(o.value(QStringLiteral("message_id")).toString(),
                            type == QStringLiteral("message_pinned"));
+    }
+    else if (type == QStringLiteral("typing")) {
+        const bool on = o.value(QStringLiteral("is_typing")).toString() == QStringLiteral("1")
+                     || o.value(QStringLiteral("is_typing")).toBool(false);
+        emit typingReceived(o.value(QStringLiteral("chat_id")).toString(),
+                            o.value(QStringLiteral("from_user_id")).toString(),
+                            on);
     }
     else if (type == QStringLiteral("reaction_update")) {
         // Эхо обеим сторонам: {message_id, reaction, user_id, action, message_context}.
