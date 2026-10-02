@@ -1029,6 +1029,49 @@ void ChatPage::buildUi() {
     stagedBar_->setVisible(false);
     cblOuter->addWidget(stagedBar_);
 
+    // Панель мультивыбора (MLT-01): «Выбрано: N» + переслать/копировать/
+    // удалить/отмена — вместо стейджинга, над композером.
+    selectionBar_ = new QWidget(composerBar);
+    selectionBar_->setObjectName(QStringLiteral("stagedBar"));
+    {
+        auto* sl = new QHBoxLayout(selectionBar_);
+        sl->setContentsMargins(10, 6, 10, 8);
+        sl->setSpacing(8);
+        selectionCount_ = new QLabel(QStringLiteral("Выбрано: 0"), selectionBar_);
+        selectionCount_->setStyleSheet(QStringLiteral(
+            "color:#F3F1F8;font-size:14px;font-weight:700;"));
+        sl->addWidget(selectionCount_);
+        sl->addStretch();
+        auto mk = [this, sl](const QString& title, void (ChatPage::*fn)(),
+                             const QString& qss) {
+            auto* b = new QPushButton(title, selectionBar_);
+            b->setCursor(Qt::PointingHandCursor);
+            b->setStyleSheet(qss);
+            connect(b, &QPushButton::clicked, this, fn);
+            sl->addWidget(b);
+            return b;
+        };
+        const QString act = QStringLiteral(
+            "QPushButton{background:rgba(139,92,246,0.18);border:none;border-radius:10px;"
+            "color:#F3F1F8;font-size:13px;font-weight:600;padding:7px 14px;}"
+            "QPushButton:hover{background:rgba(139,92,246,0.32);}");
+        const QString danger = QStringLiteral(
+            "QPushButton{background:rgba(239,68,68,0.16);border:none;border-radius:10px;"
+            "color:#F87171;font-size:13px;font-weight:600;padding:7px 14px;}"
+            "QPushButton:hover{background:rgba(239,68,68,0.30);}");
+        mk(QStringLiteral("↪ Переслать"), &ChatPage::forwardSelected, act);
+        mk(QStringLiteral("⧉ Копировать"), &ChatPage::copySelected, act);
+        mk(QStringLiteral("🗑 Удалить"), &ChatPage::deleteSelected, danger);
+        auto* cancel = mk(QStringLiteral("Отмена"), &ChatPage::exitSelectionMode,
+                          QStringLiteral(
+            "QPushButton{background:transparent;border:1px solid rgba(255,255,255,0.14);"
+            "border-radius:10px;color:#ACA6BD;font-size:13px;padding:6px 12px;}"
+            "QPushButton:hover{color:#F3F1F8;}"));
+        cancel->setToolTip(QStringLiteral("Esc"));
+    }
+    selectionBar_->setVisible(false);
+    cblOuter->addWidget(selectionBar_);
+
     composerStack_ = new QStackedWidget(composerBar);
     cblOuter->addWidget(composerStack_);
 
@@ -1847,6 +1890,7 @@ bool ChatPage::consumeEscape() {
     if (quickSwitcher_ && quickSwitcher_->isVisible()) { quickSwitcher_->closeAnimated(); return true; }
     if (superSearch_ && superSearch_->isVisible())     { superSearch_->hide(); return true; }
     if (appMenu_ && appMenu_->isVisible())             { closeAppMenu(); return true; }
+    if (selectionMode_)                                { exitSelectionMode(); return true; }
     if (emojiPicker_ && emojiPicker_->isVisible())     { emojiPicker_->hide(); return true; }
     if (thirdColTarget_ > 0)                           { closeThirdColumn(); return true; }
     // Поиск в сайдбаре: Esc чистит запрос и возвращает фокус в переписку.
@@ -1911,6 +1955,13 @@ void ChatPage::debugAction(const QString& name, int arg) {
         archiveOpen_ = !archiveOpen_;
         rebuildChatList();
     }
+    else if (name == QLatin1String("selectMsg") && arg >= 0 && arg < currentMessages_.size()) {
+        const QString mid = currentMessages_[arg].id;
+        if (selectionMode_) toggleSelected(mid);
+        else enterSelectionMode(mid);
+    }
+    else if (name == QLatin1String("deleteSelectedConfirmed")) deleteSelectedConfirmed();
+    else if (name == QLatin1String("exitSelection")) exitSelectionMode();
     else if (name == QLatin1String("archiveChat") && arg >= 0 && arg < chats_.size()) {
         const QString key = chatKeyFor(chats_[arg]);
         if (archivedChats_.contains(key)) archivedChats_.remove(key);
@@ -2477,6 +2528,7 @@ void ChatPage::openChat(const Chat& chat) {
     cancelEditing();
     clearStagedFiles();   // вложения принадлежат чату, куда их бросили (MLT-06)
     highlightQuery_.clear();   // подсветка поиска не переезжает в чужой чат (SRC-04)
+    exitSelectionMode();   // выделение не переносится между чатами (MLT-01)
     if (emojiPicker_) emojiPicker_->hide();   // панель не висит над чужим чатом
     // История переходов (KEY-03): обычный переход пишет предыдущий чат в стек,
     // Alt+←/→ ходит по нему и не пишет (это делает сама navigateChatHistory).
@@ -2624,6 +2676,27 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
     if (obj == overlayScrim_ && e->type() == QEvent::MouseButtonPress) {
         closeThirdColumn();
         return true;
+    }
+    // Мультивыбор (MLT-01): клик по области сообщений toggle'ит баббл под
+    // курсором; Ctrl+клик в обычном режиме начинает выделение.
+    if (msgScroll_ && obj == msgScroll_->viewport()
+        && (e->type() == QEvent::MouseButtonRelease || e->type() == QEvent::MouseButtonPress)) {
+        auto* me = static_cast<QMouseEvent*>(e);
+        const bool ctrl = me->modifiers() & Qt::ControlModifier;
+        if (selectionMode_ || ctrl) {
+            if (e->type() == QEvent::MouseButtonPress) return true;   // глотаем_press
+            QWidget* w = msgScroll_->childAt(me->position().toPoint());
+            while (w && w != msgContainer_) {
+                const QString mid = w->property("msgId").toString();
+                if (!mid.isEmpty()) {
+                    if (!selectionMode_) enterSelectionMode();
+                    toggleSelected(mid);
+                    return true;
+                }
+                w = w->parentWidget();
+            }
+            return true;   // мимо баббла — ничего (выделение не сбрасываем)
+        }
     }
     if (greeting_ && obj == msgScroll_->viewport() && e->type() == QEvent::Resize) {
         if (greeting_->isVisible()) greeting_->setGeometry(msgScroll_->viewport()->rect());
@@ -3646,6 +3719,7 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
         menu.addAction(wa);
         menu.addSeparator();
     }
+    QAction* select = menu.addAction(QStringLiteral("☑  Выбрать"));   // MLT-01
     QAction* reply = menu.addAction(QStringLiteral("Ответить"));
     // Пересылка (MSG-02): любой тип — текст и медиа (по file_path, без перезалива).
     QAction* forward = menu.addAction(QStringLiteral("Переслать"));
@@ -3667,6 +3741,7 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     }
     QAction* ch = menu.exec(pos);
     if (!ch) return;
+    if (ch == select)        enterSelectionMode(id);
     if (ch == reply)         setReplyTo(id, author, text);
     else if (edit && ch == edit) startEditing(id, text);
     else if (ch == copy)     QApplication::clipboard()->setText(text);
@@ -4605,6 +4680,145 @@ void ChatPage::dropEvent(QDropEvent* e) {
     e->acceptProposedAction();
     setDropOverlayActive(false);
     stageFiles(e->mimeData()->urls());
+}
+
+// ── Мультивыбор сообщений (MLT-01/02) ────────────────────────────────────────
+
+QFrame* ChatPage::bubbleForId(const QString& id) const {
+    const auto bubbles = msgContainer_->findChildren<QFrame*>();
+    for (QFrame* b : bubbles)
+        if (b->property("msgId").toString() == id) return b;
+    return nullptr;
+}
+
+void ChatPage::applySelectionVisual(QFrame* b, bool on) {
+    if (!b) return;
+    if (on) {
+        b->setStyleSheet(b->styleSheet()
+            + QStringLiteral("QFrame{border:2px solid #8B5CF6;}"));
+    } else {
+        const bool out = b->objectName() == QStringLiteral("bubbleOut");
+        b->setStyleSheet(out ? bubbleOutQss() : bubbleInQss());
+    }
+}
+
+void ChatPage::enterSelectionMode(const QString& firstId) {
+    if (selectionMode_ && !firstId.isEmpty()) {
+        toggleSelected(firstId);
+        return;
+    }
+    selectionMode_ = true;
+    selectedIds_.clear();
+    renderSelectionBar();
+    if (!firstId.isEmpty()) toggleSelected(firstId);
+}
+
+void ChatPage::exitSelectionMode() {
+    for (const QString& id : selectedIds_)
+        applySelectionVisual(bubbleForId(id), false);
+    selectionMode_ = false;
+    selectedIds_.clear();
+    renderSelectionBar();
+}
+
+void ChatPage::toggleSelected(const QString& id) {
+    if (id.isEmpty()) return;
+    if (selectedIds_.contains(id)) {
+        selectedIds_.remove(id);
+        applySelectionVisual(bubbleForId(id), false);
+    } else {
+        selectedIds_.insert(id);
+        applySelectionVisual(bubbleForId(id), true);
+    }
+    renderSelectionBar();
+}
+
+void ChatPage::renderSelectionBar() {
+    if (!selectionBar_) return;
+    selectionBar_->setVisible(selectionMode_);
+    if (selectionCount_)
+        selectionCount_->setText(QStringLiteral("Выбрано: %1").arg(selectedIds_.size()));
+}
+
+// MLT-02: массовое удаление — подтверждение, цикл по выделенным.
+void ChatPage::deleteSelected() {
+    if (selectedIds_.isEmpty()) return;
+    const int n = selectedIds_.size();
+    if (QMessageBox::question(this, QStringLiteral("Удаление"),
+            n == 1 ? QStringLiteral("Удалить выбранное сообщение?")
+                   : QStringLiteral("Удалить выбранных сообщений: %1?").arg(n))
+        != QMessageBox::Yes) return;
+    deleteSelectedConfirmed();
+}
+
+void ChatPage::deleteSelectedConfirmed() {
+    const QList<QString> ids = selectedIds_.values();
+    exitSelectionMode();
+    for (const QString& id : ids) {
+        api_->deleteMessage(id, currentKind_, currentPeerId_);
+        // Локально: выкинуть из данных и с экрана (сервер молчит об эхе здесь).
+        for (int i = currentMessages_.size() - 1; i >= 0; --i)
+            if (currentMessages_[i].id == id) { currentMessages_.removeAt(i); break; }
+        shownIds_.remove(id);
+        if (QFrame* b = bubbleForId(id)) b->deleteLater();
+    }
+    cacheCurrent();
+}
+
+// MLT-02: массовая пересылка — один пикер и галка на всю пачку.
+void ChatPage::forwardSelected() {
+    if (selectedIds_.isEmpty()) return;
+    QList<ChatMessage> msgs;
+    for (const ChatMessage& m : currentMessages_)
+        if (selectedIds_.contains(m.id)) msgs.append(m);
+    exitSelectionMode();
+    auto* picker = new ChatPickerDialog(chats_, QStringLiteral("Переслать в…"), window());
+    auto* hideBox = new QCheckBox(QStringLiteral("Не указывать автора"), picker->card());
+    hideBox->setCursor(Qt::PointingHandCursor);
+    hideBox->setStyleSheet(QStringLiteral(
+        "QCheckBox{color:#ACA6BD;font-size:13px;padding:6px 14px 10px 14px;}"));
+    picker->cardLayout()->addWidget(hideBox);
+    connect(picker, &ChatPickerDialog::picked, this, [this, msgs, hideBox](const Chat& c) {
+        const bool hide = hideBox->isChecked();
+        for (const ChatMessage& m : msgs) {
+            const QString author = !m.senderName.isEmpty() ? m.senderName
+                                   : m.sent ? Session::instance().username
+                                            : currentPeerName_;
+            QString body = m.content;
+            if (body.isEmpty() && !m.fileName.isEmpty()) body = m.fileName;
+            if (body.isEmpty() && !m.filePath.isEmpty()) body = QStringLiteral("[медиа]");
+            const QString content = hide ? body
+                : QStringLiteral("Переслано от %1:\n%2").arg(author, body);
+            const QString tempId = QStringLiteral("fw_%1").arg(++tempCounter_);
+            if (!m.filePath.isEmpty()) {
+                const QString type = m.messageType == QStringLiteral("image")
+                                   ? QStringLiteral("image") : m.messageType;
+                if (c.kind == ChatKind::Group)
+                    api_->sendGroupFile(c.id, m.filePath, m.fileName, m.fileSize, content, tempId, type);
+                else if (c.kind == ChatKind::Channel)
+                    api_->sendChannelFile(c.id, m.filePath, m.fileName, m.fileSize, content, tempId, type);
+                else
+                    api_->sendFile(c.id, m.filePath, m.fileName, m.fileSize, content, tempId, type);
+            } else {
+                if (c.kind == ChatKind::Group)        api_->sendGroupMessage(c.id, content, tempId);
+                else if (c.kind == ChatKind::Channel) api_->sendChannelMessage(c.id, content, tempId);
+                else                                  api_->sendMessage(c.id, content, tempId);
+            }
+        }
+        openChat(c);
+    });
+    picker->showAnimated();
+}
+
+// MLT-02: копирование выделенных текстов в буфер.
+void ChatPage::copySelected() {
+    if (selectedIds_.isEmpty()) return;
+    QStringList parts;
+    for (const ChatMessage& m : currentMessages_)
+        if (selectedIds_.contains(m.id) && !m.content.isEmpty())
+            parts << m.content;
+    if (parts.isEmpty()) return;
+    QApplication::clipboard()->setText(parts.join(QLatin1Char('\n')));
 }
 
 void ChatPage::sendPhotoBytesTo(const QString& receiverId, const QByteArray& bytes,

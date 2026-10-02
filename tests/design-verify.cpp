@@ -20,6 +20,7 @@
 #include "ui/ChatPickerDialog.h"
 #include "ui/SuperSearchDialog.h"
 #include <QCheckBox>
+#include <QClipboard>
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
 #include "net/Session.h"
@@ -1249,6 +1250,80 @@ int main(int argc, char** argv) {
                 marked = true;
         }
         check(marked, QStringLiteral("вхождения запроса подсвечены в бабблах (SRC-04)"));
+    }
+
+    // ── Мультивыбор сообщений (MLT-01/02).
+    {
+        printf("\nМультивыбор (MLT-01/02)\n");
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        // Вход: «Выбрать» на сообщении → панель + рамка + счётчик.
+        page.debugAction(QStringLiteral("selectMsg"), 63);
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        auto* selBar = page.findChild<QWidget*>(QStringLiteral("stagedBar"));
+        // selectionBar тоже objectName stagedBar — берём второй по видимости:
+        QWidget* panel = nullptr;
+        for (auto* w : page.findChildren<QWidget*>(QStringLiteral("stagedBar")))
+            if (w->isVisible()) panel = w;
+        check(panel != nullptr, QStringLiteral("панель выделения показалась"));
+        bool counter = false, frame = false;
+        if (panel)
+            for (QLabel* l : panel->findChildren<QLabel*>())
+                if (l->text() == QStringLiteral("Выбрано: 1")) counter = true;
+        for (QFrame* b : page.findChildren<QFrame*>())
+            if (b->property("msgId").toString() == QStringLiteral("m63")
+                && b->styleSheet().contains(QStringLiteral("border:2px solid #8B5CF6")))
+                frame = true;
+        check(counter, QStringLiteral("счётчик «Выбрано: 1»"));
+        check(frame, QStringLiteral("рамка выделения на баббле"));
+        bool hasButtons = false;
+        if (panel) {
+            for (QPushButton* b : panel->findChildren<QPushButton*>())
+                if (b->text().contains(QStringLiteral("Переслать"))
+                    && b->text().contains(QStringLiteral("Удалить"))) hasButtons = true;
+            int acts = 0;
+            for (QPushButton* b : panel->findChildren<QPushButton*>())
+                if (b->text().contains(QStringLiteral("Переслать"))
+                    || b->text().contains(QStringLiteral("Копировать"))
+                    || b->text().contains(QStringLiteral("Удалить"))) ++acts;
+            hasButtons = acts == 3;
+        }
+        check(hasButtons, QStringLiteral("кнопки: переслать/удалить/копировать"));
+        // Добор до 5 выделенных (63 + ещё 4).
+        for (int i = 59; i < 63; ++i) page.debugAction(QStringLiteral("selectMsg"), i);
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        bool five = false;
+        for (auto* w : page.findChildren<QWidget*>(QStringLiteral("stagedBar")))
+            for (QLabel* l : w->findChildren<QLabel*>())
+                if (l->text() == QStringLiteral("Выбрано: 5")) five = true;
+        check(five, QStringLiteral("5 выделенных — счётчик обновился"));
+        // Копирование: буфер содержит тексты.
+        for (QPushButton* b : panel->findChildren<QPushButton*>())
+            if (b->text().contains(QStringLiteral("Копировать"))) b->click();
+        check(QApplication::clipboard()->text().count(QLatin1Char('\n')) >= 3,
+              QStringLiteral("копирование собрало тексты выделенных"));
+        // Удаление (без диалога): сообщения уходят из данных, панель закрыта
+        // (бабблы снимаются deleteLater — в живом event loop; offscreen их
+        // не исполняет, поэтому сверяем модель данных).
+        const int msgsBefore = page.debugMessageCount();
+        page.debugAction(QStringLiteral("deleteSelectedConfirmed"));
+        for (int i = 0; i < 6; ++i) QCoreApplication::processEvents();
+        const int msgsAfter = page.debugMessageCount();
+        bool panelGone = true;
+        for (auto* w : page.findChildren<QWidget*>(QStringLiteral("stagedBar")))
+            if (w->isVisible()) panelGone = false;
+        check(msgsAfter == msgsBefore - 5 && panelGone,
+              QStringLiteral("удаление убрало 5 сообщений и закрыло панель"));
+        // Esc выходит из режима.
+        page.debugAction(QStringLiteral("selectMsg"), 10);
+        page.debugAction(QStringLiteral("exitSelection"));
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        panelGone = true;
+        for (auto* w : page.findChildren<QWidget*>(QStringLiteral("stagedBar")))
+            if (w->isVisible()) panelGone = false;
+        check(panelGone, QStringLiteral("Esc/отмена закрывает режим выделения"));
+        QApplication::clipboard()->clear();
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

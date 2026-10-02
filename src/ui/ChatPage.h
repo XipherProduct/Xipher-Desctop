@@ -75,6 +75,7 @@ public:
     void debugAction(const QString& name, int arg = 0);
     QString debugCurrentChatId() const { return currentPeerId_; }
     int debugChatIndex(const QString& id) const { return indexOfChat(id); }
+    int debugMessageCount() const { return currentMessages_.size(); }   // MLT-02 тест
     // Прыжок из поиска с подсветкой (SRC-04; публично для design-verify).
     void onSearchResultPickedForTest(const QString& chatId, const QString& messageId,
                                      const QString& keywords) {
@@ -434,6 +435,23 @@ private:
     // Подсветка поискового запроса в бабблах (SRC-04): живёт с последнего
     // прыжка из поиска до смены чата.
     QString highlightQuery_;
+
+    // Мультивыбор сообщений (MLT-01/02): рамка на баббле, панель действий
+    // над композером, Esc выходит. Выделяются только материализованные.
+    bool         selectionMode_ = false;
+    QSet<QString> selectedIds_;
+    QWidget*     selectionBar_  = nullptr;
+    QLabel*      selectionCount_ = nullptr;
+    void enterSelectionMode(const QString& firstId = QString());
+    void exitSelectionMode();
+    void toggleSelected(const QString& id);
+    void renderSelectionBar();
+    QFrame* bubbleForId(const QString& id) const;
+    void applySelectionVisual(QFrame* b, bool on);
+    void deleteSelected();     // MLT-02
+    void deleteSelectedConfirmed();   // без диалога (тесты)
+    void forwardSelected();    // MLT-02
+    void copySelected();       // MLT-02
 
     // Клавиатурная навигация (KEY-02/03): порядок видимого списка чатов
     // (обновляется в rebuildChatList) и стеки истории переходов.
