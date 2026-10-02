@@ -78,7 +78,8 @@ public:
     // Тестовый шов (offscreen-верификация дизайна, tests/design-verify.cpp):
     // подсадить чаты/папки/историю без сети и открыть чат.
     void injectForDesignTest(const QList<Chat>& chats, const QList<Folder>& folders,
-                             const QString& openChatId, const QList<ChatMessage>& messages);
+                             const QString& openChatId, const QList<ChatMessage>& messages,
+                             const QStringList& pinnedKeys = QStringList());
     // Закреп: панель над списком (публично — тест и WS-обработчик).
     void setPinnedMessage(const QString& id, const QString& snippet);
     void clearPinnedMessage();
@@ -138,6 +139,8 @@ private:
     void createTopicDialog();
     int  indexOfChat(const QString& id) const;
     void openChat(const Chat& chat);
+    // Пины чатов (LST-04): оптимистично + подтверждение сервера; лимит 3/10.
+    void setChatPinned(const Chat& c, bool pinned);
     void addBubble(const ChatMessage& msg, bool prepend = false, bool animate = true);
     void showMessageMenu(QWidget* bubble, const QPoint& pos);
     void forwardMessage(const QString& text);
@@ -288,6 +291,9 @@ private:
     QList<Chat> personalChats_;    // /api/chats
     QList<Chat> groupChats_;       // /api/get-groups
     QList<Chat> channelChats_;     // /api/get-channels
+    // Закреплённые чаты (LST-04): ключи «type:id» из /api/get-chat-pins,
+    // показываются секцией сверху списка.
+    QSet<QString> pinnedChats_;
     ChatKind    currentKind_ = ChatKind::User;   // тип открытого чата
     bool        currentForum_ = false;           // открытая группа в режиме форума
     bool        currentCanManage_ = false;       // я создатель/админ открытой группы/канала

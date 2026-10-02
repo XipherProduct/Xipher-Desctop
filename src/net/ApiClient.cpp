@@ -1161,6 +1161,39 @@ void ApiClient::deleteChat(const QString& chatId) {
     });
 }
 
+// ── Пины чатов (LST-04; контракт как в вебе: chat.js postChatPinUpdate) ──────
+
+void ApiClient::getChatPins() {
+    postJson(QStringLiteral("/api/get-chat-pins"),
+             {{QStringLiteral("token"), Session::instance().token}},
+             [this](const QJsonObject& o, bool ok, const QString&) {
+        if (!ok || !o.value(QStringLiteral("success")).toBool(false)) return;
+        QSet<QString> keys;
+        for (const QJsonValue& v : o.value(QStringLiteral("pins")).toArray()) {
+            const QJsonObject pin = v.toObject();
+            const QString key = pin.value(QStringLiteral("chat_type")).toString()
+                + QLatin1Char(':') + pin.value(QStringLiteral("chat_id")).toString();
+            if (!key.isEmpty() && key != QLatin1String(":")) keys.insert(key);
+        }
+        emit chatPinsLoaded(keys);
+    });
+}
+
+void ApiClient::setChatPinned(const QString& chatId, const QString& chatType, bool pinned) {
+    postJson(pinned ? QStringLiteral("/api/pin-chat") : QStringLiteral("/api/unpin-chat"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("chat_id"), chatId},
+              {QStringLiteral("chat_type"), chatType}},
+             [this, chatId, chatType, pinned](const QJsonObject& o, bool ok, const QString& netErr) {
+        const bool success = ok && o.value(QStringLiteral("success")).toBool(false);
+        const QString error = success ? QString()
+            : o.value(QStringLiteral("message")).toString(netErr.isEmpty()
+                ? QStringLiteral("Сеть недоступна") : netErr);
+        emit chatPinDone(chatType + QLatin1Char(':') + chatId, pinned, success, error);
+    });
+}
+
+
 void ApiClient::sendFriendRequest(const QString& username) {
     QJsonObject body{{QStringLiteral("token"), Session::instance().token},
                      {QStringLiteral("username"), username}};

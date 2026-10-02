@@ -3,6 +3,7 @@
 #include <QString>
 #include <QList>
 #include <QHash>
+#include <QSet>
 #include <QJsonObject>
 #include <QDateTime>
 #include <QJsonArray>
@@ -213,6 +214,12 @@ public:
     // id последнего отправленного /api/profile/view (для отброса устаревших).
     qint64 profileViewReply() const { return profileViewReqId_; }
 
+    // Пины чатов (LST-04): /api/get-chat-pins, /api/pin-chat, /api/unpin-chat.
+    // chatType — "chat"|"saved"|"group"|"channel" (как chatKeyFor); лимит
+    // пинов проверяет сервер (3 бесплатно / 10 с премиумом).
+    void getChatPins();
+    void setChatPinned(const QString& chatId, const QString& chatType, bool pinned);
+
 signals:
     void loginFinished(const AuthResult& result);
     void registerFinished(const AuthResult& result);
@@ -294,6 +301,11 @@ signals:
     void friendRequestSent(const QString& username, bool ok, const QString& message);
     void friendRequestsLoaded(const QList<FriendRequest>& requests);
     void friendActionDone(const QString& requestId, bool accepted, bool ok);
+
+    // Пины чатов: ключи вида "type:id"; результат оптимистичного пина/анпина
+    // (error = «Pinned chats limit reached» и т.п. от сервера).
+    void chatPinsLoaded(const QSet<QString>& pinnedKeys);
+    void chatPinDone(const QString& key, bool pinned, bool ok, const QString& error);
 
     // Боты и подарки.
     void botCallbackDone(bool ok, const QJsonObject& response);

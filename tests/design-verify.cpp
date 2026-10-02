@@ -26,6 +26,7 @@
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPixmap>
 #include <QPushButton>
 #include <algorithm>
@@ -825,6 +826,32 @@ int main(int argc, char** argv) {
         CallSounds::instance().startRingtone();   // не должно падать без устройства
         CallSounds::instance().stopRingtone();
         check(true, QStringLiteral("рингтон стартует/стопится без аудиоустройства"));
+    }
+
+    // ── Пины чатов (LST-04): секция закреплённых сверху + индикатор 📌.
+    {
+        printf("\nПины чатов (LST-04)\n");
+        QList<Chat> pinChats;
+        Chat a; a.id = QStringLiteral("u_pin_a"); a.displayName = QStringLiteral("Альберт");
+        a.lastMessage = QStringLiteral("первый"); a.time = QStringLiteral("12:00");
+        Chat b; b.id = QStringLiteral("u_pin_b"); b.displayName = QStringLiteral("Борис");
+        b.lastMessage = QStringLiteral("второй"); b.time = QStringLiteral("11:00");
+        pinChats << a << b;
+        page.injectForDesignTest(pinChats, QList<Folder>(),
+                                 QStringLiteral("u_pin_a"), QList<ChatMessage>(),
+                                 QStringList() << QStringLiteral("chat:u_pin_b"));
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        auto* list = page.findChild<QListWidget*>(QStringLiteral("chatList"));
+        check(list != nullptr && list->count() == 2, QStringLiteral("оба чата в списке"));
+        bool pinnedFirst = false, pinIcon = false;
+        if (list && list->count() == 2) {
+            const QString firstId = list->item(0)->data(Qt::UserRole).toString();
+            pinnedFirst = (firstId == QStringLiteral("u_pin_b"));
+            for (QLabel* l : list->itemWidget(list->item(0))->findChildren<QLabel*>())
+                if (l->text() == QStringLiteral("📌")) pinIcon = true;
+        }
+        check(pinnedFirst, QStringLiteral("закреплённый чат — первым сверху"));
+        check(pinIcon, QStringLiteral("индикатор 📌 в строке закрепа"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

@@ -1155,6 +1155,10 @@ void ChatPage::buildUi() {
         const Chat c = chats_[idx];
         QMenu menu(this);
         QAction* open = menu.addAction(QStringLiteral("Открыть"));
+        // Пин чата (LST-04): закреплённые держатся секцией сверху списка.
+        const bool pinned = pinnedChats_.contains(chatKeyFor(c));
+        QAction* pin = menu.addAction(pinned ? QStringLiteral("📌 Открепить сверху")
+                                             : QStringLiteral("📌 Закрепить сверху"));
         // Без звука: локальный мьют (как в вебе, ключ xipher_muted_chats).
         const bool muted = Prefs::getStr(QStringLiteral("xipher_muted_chats"))
                                .contains(QStringLiteral("chat:") + c.id
@@ -1172,6 +1176,7 @@ void ChatPage::buildUi() {
         else if (!c.isSaved)                  del = menu.addAction(QStringLiteral("Удалить чат"));
         QAction* ch = menu.exec(chatList_->mapToGlobal(p));
         if (ch == open) openChat(c);
+        else if (ch == pin) setChatPinned(c, !pinned);
         else if (ch == mute) {
             // Локальная пара add/remove, как в старом кольце-реализации.
             QString cur = Prefs::getStr(QStringLiteral("xipher_muted_chats"));
@@ -1223,6 +1228,24 @@ void ChatPage::buildUi() {
         if (idx >= 0) { chats_[idx].displayName = name; rebuildChatList(); }
         if (cid == currentPeerId_) { currentPeerName_ = name; peerName_->setText(name); }
     });
+    // Пины чатов (LST-04): сервер — источник правды; оптимистичный пин/анпин
+    // откатывается при ошибке (как setChatPinned в вебе).
+    connect(api_, &ApiClient::chatPinsLoaded, this, [this](const QSet<QString>& keys) {
+        pinnedChats_ = keys;
+        rebuildChatList();
+    });
+    connect(api_, &ApiClient::chatPinDone, this,
+            [this](const QString& key, bool pinned, bool ok, const QString& error) {
+        if (ok) return;
+        if (pinned) pinnedChats_.remove(key);
+        else        pinnedChats_.insert(key);
+        rebuildChatList();
+        QString msg = error;
+        if (msg == QLatin1String("Pinned chats limit reached"))
+            msg = QStringLiteral("Лимит закреплений исчерпан (с Xipher Pulse — 10).");
+        if (msg.isEmpty()) msg = QStringLiteral("Не удалось обновить закрепление");
+        QMessageBox::warning(this, QStringLiteral("Закрепления"), msg);
+    });
 
     // Тема из настроек («Оформление»): перегенерировать QSS и инлайн-фоны.
     applyTheme();
@@ -1233,6 +1256,7 @@ void ChatPage::load() {
     api_->getGroups();
     api_->getChannels();
     api_->getChatFolders();
+    api_->getChatPins();   // закреплённые чаты — секция сверху списка (LST-04)
     loadStoriesUi();
     if (!Session::instance().token.isEmpty())
         ws_->start(Session::instance().token);
@@ -1665,7 +1689,7 @@ void ChatPage::createTopicDialog() {
 // Строка контакта (аватар + имя + подзаголовок + опц. время/бейдж).
 static QWidget* buildContactRow(const QString& url, const QString& avatarText,
                                 const QString& title, const QString& subtitle,
-                                const QString& time, int unread) {
+                                const QString& time, int unread, bool pinned = false) {
     auto* row = new QWidget();
     row->setStyleSheet(QStringLiteral("background:transparent;"));
     auto* rl = new QHBoxLayout(row);
@@ -1686,6 +1710,12 @@ static QWidget* buildContactRow(const QString& url, const QString& avatarText,
     name->setText(elide(title, name->font(), 200));
     topRow->addWidget(name);
     topRow->addStretch();
+    if (pinned) {
+        // Индикатор закрепления (как .chat-pin-indicator веба): 📌 у времени.
+        auto* pinIco = new QLabel(QStringLiteral("📌"), row);
+        pinIco->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+        topRow->addWidget(pinIco);
+    }
     if (!time.isEmpty()) {
         auto* t = new QLabel(time, row);
         t->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
@@ -1727,7 +1757,16 @@ void ChatPage::rebuildChatList() {
     const bool folderActive = !folderKeys.isEmpty() || activeFolderId_ != QStringLiteral("all");
 
     QSet<QString> shownChatIds;
-    for (const Chat& c : chats_) {
+    // Пины — секцией сверху (LST-04, как sortChatsForDisplay веба):
+    // закреплённые идут первыми, внутри секции — порядок сервера (~свежесть).
+    QList<const Chat*> ordered;
+    ordered.reserve(chats_.size());
+    for (const Chat& c : chats_)
+        if (pinnedChats_.contains(chatKeyFor(c))) ordered.append(&c);
+    for (const Chat& c : chats_)
+        if (!pinnedChats_.contains(chatKeyFor(c))) ordered.append(&c);
+    for (const Chat* cp : ordered) {
+        const Chat& c = *cp;
         if (folderActive && !folderKeys.contains(chatKeyFor(c))) continue;
         if (!filter.isEmpty() &&
             !c.displayName.toLower().contains(filter) &&
@@ -1739,7 +1778,8 @@ void ChatPage::rebuildChatList() {
                                   : (c.avatarText.isEmpty() ? c.displayName : c.avatarText);
         const QString time = c.time == QStringLiteral("Нет сообщений") ? QString() : c.time;
         auto* row = buildContactRow(c.isSaved ? QString() : c.avatarUrl,
-                                    avatarText, c.displayName, chatPreview(c.lastMessage), time, c.unread);
+                                    avatarText, c.displayName, chatPreview(c.lastMessage), time,
+                                    c.unread, pinnedChats_.contains(chatKeyFor(c)));
 
         auto* item = new QListWidgetItem(chatList_);
         item->setSizeHint(QSize(0, 72));
@@ -1910,6 +1950,32 @@ void ChatPage::openChat(const Chat& chat) {
         chats_[idx].unread = 0;
         rebuildChatList();
     }
+}
+
+// ── Пины чатов (LST-04) ───────────────────────────────────────────────────────
+
+void ChatPage::setChatPinned(const Chat& c, bool pinned) {
+    const QString key = chatKeyFor(c);
+    const bool was = pinnedChats_.contains(key);
+    if (pinned == was) return;
+    if (pinned && !was) {
+        // Лимит как в вебе: 3 бесплатно, 10 с Xipher Pulse (сервер тоже проверяет).
+        const int limit = Session::instance().isPremium ? 10 : 3;
+        if (pinnedChats_.size() >= limit) {
+            QMessageBox::information(this, QStringLiteral("Закрепления"),
+                QStringLiteral("Лимит закреплений: %1 (с Xipher Pulse — 10).").arg(limit));
+            return;
+        }
+    }
+    // Оптимистично: секция обновляется сразу, сервер подтверждает молча.
+    if (pinned) pinnedChats_.insert(key);
+    else        pinnedChats_.remove(key);
+    rebuildChatList();
+    const QString type = c.isSaved ? QStringLiteral("saved")
+                       : c.kind == ChatKind::Group   ? QStringLiteral("group")
+                       : c.kind == ChatKind::Channel ? QStringLiteral("channel")
+                                                     : QStringLiteral("chat");
+    api_->setChatPinned(c.id, type, pinned);
 }
 
 void ChatPage::clearMessages() {
@@ -3555,9 +3621,11 @@ void ChatPage::openChatWith(const QString& userId, const QString& displayName, c
 }
 
 void ChatPage::injectForDesignTest(const QList<Chat>& chats, const QList<Folder>& folders,
-                                   const QString& openChatId, const QList<ChatMessage>& messages) {
+                                   const QString& openChatId, const QList<ChatMessage>& messages,
+                                   const QStringList& pinnedKeys) {
     personalChats_ = chats;
     folders_ = folders;
+    pinnedChats_ = QSet<QString>(pinnedKeys.begin(), pinnedKeys.end());
     if (folders.isEmpty()) activeFolderId_ = QStringLiteral("all");
     mergeAllChats();
     const int idx = indexOfChat(openChatId);
