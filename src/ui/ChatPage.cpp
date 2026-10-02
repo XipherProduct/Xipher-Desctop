@@ -44,6 +44,7 @@
 #include <QTextDocument>
 #include <QtMath>
 #include <QMenu>
+#include <QCheckBox>
 #include <QWidgetAction>
 #include <QAction>
 #include <QApplication>
@@ -3632,7 +3633,8 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
         menu.addSeparator();
     }
     QAction* reply = menu.addAction(QStringLiteral("Ответить"));
-    QAction* forward = plain ? menu.addAction(QStringLiteral("Переслать")) : nullptr;
+    // Пересылка (MSG-02): любой тип — текст и медиа (по file_path, без перезалива).
+    QAction* forward = menu.addAction(QStringLiteral("Переслать"));
     QAction* fav = nullptr;
     if (plain && !isSavedChat)   // «В избранное» — как пересылка в «Избранные» (1 клик)
         fav = menu.addAction(QStringLiteral("⭐  В избранное"));
@@ -3655,7 +3657,10 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     else if (edit && ch == edit) startEditing(id, text);
     else if (ch == copy)     QApplication::clipboard()->setText(text);
     else if (ch == del)      api_->deleteMessage(id, currentKind_, currentPeerId_);
-    else if (ch == forward)  forwardMessage(text);
+    else if (ch == forward) {
+        if (ChatMessage* mm = findMessage(id)) forwardMessageFull(*mm);
+        else forwardMessage(text);
+    }
     else if (fav && ch == fav) saveToSaved(text);
     else if (pin && ch == pin) api_->pinMessage(id, currentKind_, currentPeerId_, true);
 }
@@ -3678,6 +3683,50 @@ void ChatPage::forwardMessage(const QString& text) {
         else if (c.kind == ChatKind::Channel) api_->sendChannelMessage(c.id, text, tempId);
         else                                  api_->sendMessage(c.id, text, tempId);
         openChat(c);   // переходим в чат назначения
+    });
+    picker->showAnimated();
+}
+
+// Полная пересылка (MSG-02): текст + аттачи одним сообщением; аттач идёт по
+// file_path (байты уже на сервере — без перезалива). Галка «без имени автора»
+// убирает префикс «Переслано от …» (как hide-sender в вебе).
+void ChatPage::forwardMessageFull(const ChatMessage& msg) {
+    auto* picker = new ChatPickerDialog(chats_, QStringLiteral("Переслать в…"), window());
+    auto* hideBox = new QCheckBox(QStringLiteral("Не указывать автора"), picker->card());
+    hideBox->setCursor(Qt::PointingHandCursor);
+    hideBox->setStyleSheet(QStringLiteral(
+        "QCheckBox{color:#ACA6BD;font-size:13px;padding:6px 14px 10px 14px;}"
+        "QCheckBox::indicator{width:16px;height:16px;border-radius:4px;"
+        "border:1px solid rgba(255,255,255,0.25);background:#131218;}"
+        "QCheckBox::indicator:checked{background:#8B5CF6;border-color:#8B5CF6;}"));
+    picker->cardLayout()->addWidget(hideBox);
+    connect(picker, &ChatPickerDialog::picked, this, [this, msg, hideBox](const Chat& c) {
+        const bool hide = hideBox->isChecked();
+        const QString author = !msg.senderName.isEmpty() ? msg.senderName
+                               : msg.sent ? Session::instance().username
+                                          : currentPeerName_;
+        // Сервер требует непустой content: у чистого медиа подписью станет имя файла.
+        QString body = msg.content;
+        if (body.isEmpty() && !msg.fileName.isEmpty()) body = msg.fileName;
+        if (body.isEmpty() && !msg.filePath.isEmpty()) body = QStringLiteral("[медиа]");
+        const QString content = hide ? body
+            : QStringLiteral("Переслано от %1:\n%2").arg(author, body);
+        const QString tempId = QStringLiteral("fw_%1").arg(++tempCounter_);
+        if (!msg.filePath.isEmpty()) {
+            const QString type = msg.messageType == QStringLiteral("image")
+                               ? QStringLiteral("image") : msg.messageType;
+            if (c.kind == ChatKind::Group)
+                api_->sendGroupFile(c.id, msg.filePath, msg.fileName, msg.fileSize, content, tempId, type);
+            else if (c.kind == ChatKind::Channel)
+                api_->sendChannelFile(c.id, msg.filePath, msg.fileName, msg.fileSize, content, tempId, type);
+            else
+                api_->sendFile(c.id, msg.filePath, msg.fileName, msg.fileSize, content, tempId, type);
+        } else {
+            if (c.kind == ChatKind::Group)        api_->sendGroupMessage(c.id, content, tempId);
+            else if (c.kind == ChatKind::Channel) api_->sendChannelMessage(c.id, content, tempId);
+            else                                  api_->sendMessage(c.id, content, tempId);
+        }
+        openChat(c);   // переходим в чат назначения (эхо придёт WS/ack)
     });
     picker->showAnimated();
 }
@@ -3833,6 +3882,14 @@ void ChatPage::showMediaMenu(QWidget* src, const QString& filePath,
         return;
     }
     if (chosen == fwdAct) {
+        // Есть сообщение с этим filePath → полный форвард (MSG-02: аттач по
+        // file_path + галка «без автора»); чистые temp-файлы — старый путь байтами.
+        for (const ChatMessage& m : currentMessages_) {
+            if (m.filePath == filePath && !m.filePath.isEmpty()) {
+                forwardMessageFull(m);
+                return;
+            }
+        }
         // Пересылка = повторная отправка того же медиа выбранным чатам.
         auto* picker = new ChatPickerDialog(chats_, QStringLiteral("Переслать в…"), window());
         connect(picker, &ChatPickerDialog::picked, this,

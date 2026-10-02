@@ -17,6 +17,8 @@
 #include "ui/CallSounds.h"
 #include "ui/ImageViewer.h"
 #include "ui/QuickSwitcher.h"
+#include "ui/ChatPickerDialog.h"
+#include <QCheckBox>
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
 #include "net/Session.h"
@@ -1142,6 +1144,53 @@ int main(int argc, char** argv) {
                 if (list2->item(i)->data(Qt::UserRole).toString()
                         == QStringLiteral("__archive__")) archiveHeader = true;
         check(!archiveHeader, QStringLiteral("возврат из архива убирает секцию"));
+    }
+
+    // ── Пересылка с аттачами и галкой «без автора» (MSG-02).
+    {
+        printf("\nПересылка (MSG-02)\n");
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        // Сообщение-фото в истории: полный форвард открывает пикер с галкой.
+        ChatMessage photo;
+        photo.id = QStringLiteral("mphoto");
+        photo.sent = false;
+        photo.content = QString();
+        photo.messageType = QStringLiteral("image");
+        photo.filePath = QStringLiteral("/files/photo_fwd.png");
+        photo.fileName = QStringLiteral("photo_fwd.png");
+        photo.fileSize = 12345;
+        photo.time = QStringLiteral("12:59");
+        photo.createdAt = QStringLiteral("2026-10-01T12:59:00");
+        photo.senderName = QStringLiteral("Алиса");
+        // Подсадим через открытие чата заново с расширенной историей.
+        QList<ChatMessage> withPhoto = msgs;
+        withPhoto.append(photo);
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), withPhoto);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        page.forwardMessageFull(photo);
+        for (int i = 0; i < 8; ++i) QCoreApplication::processEvents();
+        auto* fwdPicker = page.findChild<ChatPickerDialog*>();
+        check(fwdPicker != nullptr && fwdPicker->isVisible(),
+              QStringLiteral("диалог пересылки открылся"));
+        auto* hideBox = fwdPicker ? fwdPicker->findChild<QCheckBox*>() : nullptr;
+        check(hideBox != nullptr, QStringLiteral("галка «не указывать автора» есть"));
+        check(hideBox && !hideBox->isChecked(),
+              QStringLiteral("по умолчанию автор указывается"));
+        // Esc-каскад закрывает и его (модалка ловит Esc сама).
+        if (fwdPicker) {
+            QPointer<ChatPickerDialog> fwdGuard(fwdPicker);
+            QKeyEvent escF(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+            QApplication::sendEvent(fwdPicker, &escF);
+            const QDeadlineTimer fw(1200);
+            while (!fwdGuard.isNull() && !fw.hasExpired()) {
+                QCoreApplication::processEvents();
+                QThread::msleep(10);
+            }
+            check(fwdGuard.isNull(), QStringLiteral("Esc закрывает диалог пересылки"));
+        }
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

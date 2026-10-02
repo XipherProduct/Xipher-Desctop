@@ -64,6 +64,14 @@ public:
     void sendFile(const QString& receiverId, const QString& filePath, const QString& fileName,
                   long long fileSize, const QString& caption, const QString& tempId,
                   const QString& messageType = QStringLiteral("file"));
+    // Пересылка медиа в группу/канал (MSG-02): file_path уже на сервере —
+    // байты не перезаливаются, только новая строка сообщения.
+    void sendGroupFile(const QString& groupId, const QString& filePath, const QString& fileName,
+                       long long fileSize, const QString& caption, const QString& tempId,
+                       const QString& messageType = QStringLiteral("file"));
+    void sendChannelFile(const QString& channelId, const QString& filePath, const QString& fileName,
+                         long long fileSize, const QString& caption, const QString& tempId,
+                         const QString& messageType = QStringLiteral("file"));
     void fetchFile(const QString& filePath);   // GET /files/... с токеном (стриминг)
     void cancelFetch(const QString& filePath); // прервать активную загрузку
     void fetchFileParallel(const QString& filePath, qint64 total, int chunks = 6); // чанки параллельно

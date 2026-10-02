@@ -1343,6 +1343,49 @@ void ApiClient::sendFile(const QString& receiverId, const QString& filePath, con
     });
 }
 
+// ── Пересылка медиа в группу/канал (MSG-02): file_path уже на сервере,
+// байты не перезаливаются — только новая строка сообщения. Эхо состояния
+// приходит WS-событием группы/канала (group_message / channel_new_message).
+void ApiClient::sendGroupFile(const QString& groupId, const QString& filePath, const QString& fileName,
+                              long long fileSize, const QString& caption, const QString& tempId,
+                              const QString& messageType) {
+    postJson(QStringLiteral("/api/send-group-message"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("group_id"), groupId},
+              {QStringLiteral("content"), caption},
+              {QStringLiteral("message_type"), messageType},
+              {QStringLiteral("file_path"), filePath},
+              {QStringLiteral("file_name"), fileName},
+              {QStringLiteral("file_size"), static_cast<double>(fileSize)},
+              {QStringLiteral("temp_id"), tempId}},
+             [this](const QJsonObject& o, bool ok, const QString& netErr) {
+        if (!ok && o.isEmpty()) { emit chatError(QStringLiteral("send"), netErr); return; }
+        if (!o.value(QStringLiteral("success")).toBool(false))
+            emit chatError(QStringLiteral("send"),
+                o.value(QStringLiteral("message")).toString(QStringLiteral("Не удалось переслать")));
+    });
+}
+
+void ApiClient::sendChannelFile(const QString& channelId, const QString& filePath, const QString& fileName,
+                                long long fileSize, const QString& caption, const QString& tempId,
+                                const QString& messageType) {
+    postJson(QStringLiteral("/api/send-channel-message"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("channel_id"), channelId},
+              {QStringLiteral("content"), caption},
+              {QStringLiteral("message_type"), messageType},
+              {QStringLiteral("file_path"), filePath},
+              {QStringLiteral("file_name"), fileName},
+              {QStringLiteral("file_size"), static_cast<double>(fileSize)},
+              {QStringLiteral("temp_id"), tempId}},
+             [this](const QJsonObject& o, bool ok, const QString& netErr) {
+        if (!ok && o.isEmpty()) { emit chatError(QStringLiteral("send"), netErr); return; }
+        if (!o.value(QStringLiteral("success")).toBool(false))
+            emit chatError(QStringLiteral("send"),
+                o.value(QStringLiteral("message")).toString(QStringLiteral("Не удалось переслать")));
+    });
+}
+
 void ApiClient::fetchFile(const QString& filePath) {
     if (fetchReplies_.contains(filePath)) return;   // уже скачивается
     if (parallelReplies_.contains(filePath)) return;

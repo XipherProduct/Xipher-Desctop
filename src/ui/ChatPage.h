@@ -68,6 +68,8 @@ public:
     // Esc-каскад (KEY-01): закрыть верхний оверлей; true = что-то было открыто.
     // Порядок: модалки → шторка меню → эмодзи → третья колонка → поиск в сайдбаре.
     bool consumeEscape();
+    // Полная пересылка с аттачами (MSG-02; публично для design-verify).
+    void forwardMessageFull(const ChatMessage& msg);
 
     // Тестовые швы навигации (design-verify): закрытые действия по имени.
     void debugAction(const QString& name, int arg = 0);
