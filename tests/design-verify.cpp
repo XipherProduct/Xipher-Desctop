@@ -58,6 +58,12 @@ static bool pixelNear(const QImage& img, int x, int y, quint32 rgb, int tol = 4)
     return qAbs(c.red() - e.red()) <= tol && qAbs(c.green() - e.green()) <= tol
         && qAbs(c.blue() - e.blue()) <= tol;
 }
+static bool pixelNear2(const QColor& c, quint32 rgb, int tol = 14) {
+    const QColor want = QColor::fromRgb(rgb);
+    return qAbs(c.red() - want.red()) <= tol
+        && qAbs(c.green() - want.green()) <= tol
+        && qAbs(c.blue() - want.blue()) <= tol;
+}
 static QString px(const QImage& img, int x, int y) {
     return img.pixelColor(x, y).name();
 }
@@ -131,6 +137,12 @@ int main(int argc, char** argv) {
         ed.content = "отредактированное сообщение";
         ed.time = "10:03"; ed.createdAt = "2026-09-21T10:03:00";
         msgs.insert(2, ed);
+        // Код-блок ```…```: тёмная плашка с моно-шрифтом.
+        ChatMessage cd;
+        cd.id = "code1"; cd.sent = false;
+        cd.content = "```cpp\nint main() { return 0; } // OK\n```";
+        cd.time = "10:04"; cd.createdAt = "2026-09-21T10:04:00";
+        msgs.insert(8, cd);   // ниже точки сэмпла входящего баббла
     }
 
     page.injectForDesignTest(chats, QList<Folder>{work}, QStringLiteral("u_alice"), msgs);
@@ -159,6 +171,21 @@ int main(int argc, char** argv) {
         for (QLabel* l : page.findChildren<QLabel*>())
             if (l->text().contains(QStringLiteral("изм."))) editedMark = true;
         check(editedMark, QStringLiteral("правка: метка «· изм.» у времени"));
+        // Код-блок: тег table с фоном присутствует в отрисованном баббле.
+        bool codeBlock = false;
+        {
+            const QImage shot = page.grab().toImage();
+            // ищем очень тёмную широкую плашку (#0B0A0E) в зоне сообщений
+            for (int y = 100; y < shot.height() - 60; ++y) {
+                int dark = 0;
+                for (int x = 300; x < qMin(900, shot.width()); x += 4) {
+                    const QColor c = shot.pixelColor(x, y);
+                    if (c.red() <= 15 && c.green() <= 12 && c.blue() <= 18) ++dark;
+                }
+                if (dark > 40) { codeBlock = true; break; }
+            }
+        }
+        check(codeBlock, QStringLiteral("код-блок: тёмная моно-плашка отрисована"));
         // Закреп: панель появляется и прячется.
         page.setPinnedMessage(QStringLiteral("ed1"), QStringLiteral("отредактированное сообщение"));
         for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
@@ -282,10 +309,15 @@ int main(int argc, char** argv) {
                     }
     check(!inB.isEmpty() && !outB.isEmpty(), QStringLiteral("бабблы обоих типов отрисованы"));
     if (!inB.isEmpty()) {
-        const auto* b = inB.last();
-        const QPoint c = b->mapTo(&page, QPoint(b->width() - 40, b->height() / 2));
-        check(pixelNear(img, c.x(), c.y(), 0x1A1822),
-              QStringLiteral("входящий баббл #1A1822 (bubble-in): ") + px(img, c.x(), c.y()));
+        // Граб самого баббла: виртуализация списка не влияет на сэмпл.
+        bool okBg = false; QColor got;
+        for (auto* b : inB) {
+            const QImage bi = b->grab().toImage();
+            const QColor c = bi.pixelColor(qMin(30, bi.width() - 1), qMax(1, bi.height() / 2));
+            got = c;
+            if (pixelNear2(c, 0x1A1822)) { okBg = true; break; }
+        }
+        check(okBg, QStringLiteral("входящий баббл #1A1822 (bubble-in): ") + got.name());
     }
     if (!outB.isEmpty()) {
         const auto* b = outB.last();

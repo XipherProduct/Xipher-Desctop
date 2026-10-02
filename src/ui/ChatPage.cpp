@@ -239,8 +239,86 @@ static QString escapeHtmlMin_(const QString& s) {
     return r;
 }
 
+// Подсветка кода: без внешних зависимостей — строки/числа/комментарии/
+// ключевые слова цветами темы. Работает по уже-экранированному тексту.
+static QString highlightCode(QString code) {
+    static const QStringList keywords = {
+        QStringLiteral("int"), QStringLiteral("float"), QStringLiteral("double"),
+        QStringLiteral("char"), QStringLiteral("bool"), QStringLiteral("void"),
+        QStringLiteral("const"), QStringLiteral("static"), QStringLiteral("class"),
+        QStringLiteral("struct"), QStringLiteral("return"), QStringLiteral("if"),
+        QStringLiteral("else"), QStringLiteral("for"), QStringLiteral("while"),
+        QStringLiteral("switch"), QStringLiteral("case"), QStringLiteral("break"),
+        QStringLiteral("new"), QStringLiteral("delete"), QStringLiteral("true"),
+        QStringLiteral("false"), QStringLiteral("null"), QStringLiteral("nullptr"),
+        QStringLiteral("public"), QStringLiteral("private"), QStringLiteral("var"),
+        QStringLiteral("let"), QStringLiteral("function"), QStringLiteral("def"),
+        QStringLiteral("import"), QStringLiteral("from"), QStringLiteral("async"),
+        QStringLiteral("await"), QStringLiteral("template"), QStringLiteral("typename"),
+        QStringLiteral("namespace"), QStringLiteral("using"), QStringLiteral("auto"),
+    };
+    // Комментарии (// и #) целиком до конца строки.
+    static const QRegularExpression commentRe(
+        QStringLiteral("(//[^\n]*|#[^\n]*)"));
+    code.replace(commentRe, QStringLiteral(
+        "<span style=\"color:#6C6785;\"></span>"));
+    // Строки в кавычках.
+    static const QRegularExpression strRe(QStringLiteral(
+        "(\"[^\"\n]*\"|'[^'\n]*')"));
+    code.replace(strRe, QStringLiteral(
+        "<span style=\"color:#A5D6A7;\"></span>"));
+    // Числа.
+    static const QRegularExpression numRe(QStringLiteral("\b(\d+\.?\d*)\b"));
+    code.replace(numRe, QStringLiteral(
+        "<span style=\"color:#F5C451;\"></span>"));
+    // Ключевые слова.
+    for (const QString& kw : keywords) {
+        static const QRegularExpression kwRe(
+            QStringLiteral("\b(%1)\b").arg(kw));
+        code.replace(kwRe, QStringLiteral(
+            "<span style=\"color:#C792EA;\"></span>"));
+    }
+    return code;
+}
+
 QString formatMessageHtml(const QString& raw) {
     QString s = escapeHtmlMin_(raw);
+
+    // Многострочные код-блоки ```…``` — раньше остальных форматов:
+    // содержимое вынимается в токены и возвращается стилизованным <pre>.
+    QMap<QString, QString> codeBlocks;
+    int codeIdx = 0;
+    {
+        int pos = 0;
+        while (true) {
+            const int open = s.indexOf(QStringLiteral("```"), pos);
+            if (open < 0) break;
+            const int close = s.indexOf(QStringLiteral("```"), open + 3);
+            const int end = close < 0 ? s.size() : close;
+            QString body = s.mid(open + 3, end - open - 3);
+            // возможная подпись языка на первой строке
+            QString lang;
+            const int nl = body.indexOf(QLatin1Char('\n'));
+            if (nl > 0) {
+                const QString first = body.left(nl).trimmed();
+                if (!first.isEmpty() && !first.contains(QLatin1Char(' '))
+                    && first.size() <= 12) {
+                    lang = first;
+                    body = body.mid(nl + 1);
+                }
+            }
+            const QString token = QStringLiteral("\x01C%1\x01").arg(codeIdx++);
+            const QString pre = QStringLiteral(
+                "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\">"
+                "<tr><td style=\"background:#0B0A0E;border:1px solid #221F2C;"
+                "border-radius:6px;font-family:'JetBrains Mono','Consolas',monospace;"
+                "font-size:13px;white-space:pre-wrap;padding:8px 10px;\">%1</td></tr></table>")
+                .arg(highlightCode(body));
+            codeBlocks.insert(token, pre);
+            s.replace(open, end - open + (close < 0 ? 0 : 3), token);
+            pos = open + token.size();
+        }
+    }
 
     // Ссылки — раньше остальных, прячем в токены, чтобы разметка их не трогала.
     static const QRegularExpression urlRe(QStringLiteral("(https?://[^\\s<]+)"));
@@ -284,9 +362,11 @@ QString formatMessageHtml(const QString& raw) {
          QStringLiteral("<span style=\"font-family:'JetBrains Mono','Consolas',monospace;background:rgba(255,255,255,0.07);border-radius:4px;\">"),
          QStringLiteral("</span>"));
 
-    // Вернуть ссылки уже тегами.
+    // Вернуть ссылки и код-блоки уже тегами.
     for (auto it2 = links.cbegin(); it2 != links.cend(); ++it2)
         s.replace(it2.key(), QStringLiteral("<a href=\"%1\">%1</a>").arg(it2.value()));
+    for (auto it3 = codeBlocks.cbegin(); it3 != codeBlocks.cend(); ++it3)
+        s.replace(it3.key(), it3.value());
     return s;
 }
 
