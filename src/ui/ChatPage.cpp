@@ -774,6 +774,10 @@ ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
     // покажется, только если чат действительно пуст, без мелькания до ответа.
     connect(api_, &ApiClient::chatError, this, [this](const QString& ctx, const QString&) {
         loadingChat_ = false;
+        // Офлайн-обрыв догрузки старых (before_id): без сброса fetchingOlder_
+        // навсегда «висел» — следующий ответ истории уходил в ветку слияния
+        // старых сообщений и ломал вид.
+        fetchingOlder_ = false;
         // Офлайн: если из кэша уже что-то показано — НЕ затираем, помечаем статус.
         if (bubbleCount_ > 0 && !currentPeerId_.isEmpty())
             peerStatus_->setText(QStringLiteral("офлайн · показана сохранённая переписка"));
@@ -1092,12 +1096,19 @@ void ChatPage::buildUi() {
     connect(msgSb, &QAbstractSlider::valueChanged, this, [this, msgSb](int v) {
         if (msgSb->maximum() - v > 24) stickBottom_ = false;   // пользователь ушёл от низа
         else if (!stickBottom_)        stickBottom_ = true;    // вернулся к низу — следим снова
+        // Ручная прокрутка отменяет летящую анимацию (иначе анимация
+        // перетягивает значение обратно — «дёрганый» скролл).
+        if (!programmaticScroll_ && scrollAnim_
+            && scrollAnim_->state() == QAbstractAnimation::Running)
+            scrollAnim_->stop();
         // Догрузка старых сообщений при прокрутке к верху (Telegram-style).
         // Порог 400px: батч строится чуть ЗАРАНЕЕ, чтобы верх не «упирался»
         // в пустоту (та самая пауза 3–4 секунды перед прогрузкой).
         // Служебные прокрутки (якорь-компенсация, «к низу») не триггерят —
         // иначе цепочка prepend'ов утащит всю историю за один скролл.
-        if (!programmaticScroll_ && v < 400) prependOlderMessages();
+        // !stickBottom_: на начальной сборке value==0 при коротком контенте —
+        // это не «пользователь у верха», преждевременный prepend не нужен.
+        if (!programmaticScroll_ && !stickBottom_ && v < 400) prependOlderMessages();
     });
 
     // Приветствие пустого чата — оверлей поверх области сообщений.
@@ -1118,6 +1129,10 @@ void ChatPage::buildUi() {
     scrollAnim_->setEasingCurve(QEasingCurve::OutCubic);
     connect(scrollAnim_, &QVariantAnimation::valueChanged, this, [this](const QVariant& v) {
         msgScroll_->verticalScrollBar()->setValue(v.toInt());
+    });
+    connect(scrollAnim_, &QAbstractAnimation::finished, this, [this]() {
+        programmaticScroll_ = false;   // smoothScrollTo держит флаг до конца анимации
+        updateScrollDownButton();
     });
     msgScroll_->viewport()->installEventFilter(this);
     connect(greeting_, &EmptyChatGreeting::greetingClicked, this, [this](const QString& e) {
@@ -2175,21 +2190,16 @@ void ChatPage::updateScrollDownButton() {
 void ChatPage::smoothScrollTo(int target) {
     if (!msgScroll_) return;
     auto* sb = msgScroll_->verticalScrollBar();
+    // Одна переиспользуемая анимация (создана в buildUi с коннектами).
+    // Прежняя схема «стартуем старый объект, коннект finished вешаем на новый»
+    // оставляла programmaticScroll_ = true НАВСЕГДА — и догрузка истории при
+    // прокрутке к верху (порог v < 400) молча умирала после первого плавного
+    // скролла. Сброс теперь гарантирован finished() самой анимации.
     if (scrollAnim_->state() == QAbstractAnimation::Running) scrollAnim_->stop();
     programmaticScroll_ = true;
     scrollAnim_->setStartValue(sb->value());
     scrollAnim_->setEndValue(qBound(sb->minimum(), target, sb->maximum()));
-    scrollAnim_->start(QAbstractAnimation::DeleteWhenStopped);
-    scrollAnim_ = new QVariantAnimation(this);
-    scrollAnim_->setDuration(320);
-    scrollAnim_->setEasingCurve(QEasingCurve::OutCubic);
-    connect(scrollAnim_, &QVariantAnimation::valueChanged, this, [this](const QVariant& v) {
-        msgScroll_->verticalScrollBar()->setValue(v.toInt());
-    });
-    connect(scrollAnim_, &QAbstractAnimation::finished, this, [this]() {
-        programmaticScroll_ = false;
-        updateScrollDownButton();
-    });
+    scrollAnim_->start();
 }
 
 void ChatPage::clampBubbleWidths() {
@@ -3386,11 +3396,17 @@ void ChatPage::prependOlderBatch(int floorFrom, int batch) {
     const int oldMax = sb->maximum();
     const int oldVal = sb->value();
 
+    // Идём от НОВЫХ к СТАРЫМ, каждый виджет — insertWidget(1): очередной
+    // (более старый) встаёт НАД предыдущим → в раскладке батч остаётся в
+    // хронологическом порядке (старые сверху). Сепаратор дня вставляется
+    // ПОСЛЕ баббла тем же insertWidget(1) — оказывается между этим бабблом
+    // и более новым сообщением снизу.
     const int from = qMax(floorFrom, renderedFrom_ - batch);
     QString lastDay = currentMessages_.value(renderedFrom_).createdAt.left(10);
-    for (int i = from; i < renderedFrom_; ++i) {
+    for (int i = renderedFrom_ - 1; i >= from; --i) {
         const ChatMessage& m = currentMessages_[i];
         if (!m.id.isEmpty()) shownIds_.insert(m.id);
+        addBubble(m, /*prepend=*/true);
         if (!m.createdAt.isEmpty()) {
             const QString day = m.createdAt.left(10);
             if (day != lastDay) {
@@ -3399,8 +3415,6 @@ void ChatPage::prependOlderBatch(int floorFrom, int batch) {
                 lastDay = day;
             }
         }
-        addBubble(m, /*prepend=*/true);
-        if (!m.createdAt.isEmpty()) lastDay = m.createdAt.left(10);
     }
     renderedFrom_ = from;
 
@@ -3896,13 +3910,16 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
 void ChatPage::scrollToBottom() {
     stickBottom_ = true;
     auto* sb = msgScroll_->verticalScrollBar();
-    programmaticScroll_ = true;
     // Далеко от низа — плавно, как в Telegram; рядом — мгновенно.
-    if (sb->maximum() - sb->value() > 700 && sb->maximum() > 0)
+    // Плавной веткой programmaticScroll_ владеет анимация (до finished),
+    // мгновенную защищаем на месте: setValue с v < 400 триггерит prepend.
+    if (sb->maximum() - sb->value() > 700 && sb->maximum() > 0) {
         smoothScrollTo(sb->maximum());
-    else
+    } else {
+        programmaticScroll_ = true;
         sb->setValue(sb->maximum());
-    programmaticScroll_ = false;
+        programmaticScroll_ = false;
+    }
 }
 
 

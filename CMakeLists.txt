@@ -253,6 +253,15 @@ if(NOT WIN32)
         OUTPUT_NAME "bench-live"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+    # Репродуктор бага прокрутки истории: порядок/дыры/якорь при листании вверх.
+    qt_add_executable(scroll-repro ${SOURCES} ${HEADERS} tests/scroll-repro.cpp)
+    target_include_directories(scroll-repro PRIVATE src)
+    target_link_libraries(scroll-repro PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+    set_target_properties(scroll-repro PROPERTIES
+        OUTPUT_NAME "scroll-repro"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
     # Живой рендер медиавьюера (MDV-01): скрины зума/пана на тестовой картинке.
     qt_add_executable(viewer-grab ${SOURCES} ${HEADERS} tests/viewer-grab.cpp)
     target_include_directories(viewer-grab PRIVATE src)
@@ -275,16 +284,22 @@ if(NOT WIN32)
 
     # Звонковая сборка у инструментов та же, что у приложения.
     if(RNNOISE_FOUND)
-        foreach(t Xipher design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan)
+        foreach(t Xipher design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro)
             target_include_directories(${t} PRIVATE ${RNNOISE_INCLUDE_DIRS})
             target_link_libraries(${t} PRIVATE ${RNNOISE_LIBRARIES})
         endforeach()
     endif()
 
+    find_package(ZLIB REQUIRED)
+    target_link_libraries(Xipher PRIVATE ZLIB::ZLIB)
+    foreach(tz design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro)
+        target_link_libraries(${tz} PRIVATE ZLIB::ZLIB)
+    endforeach()
+
     find_package(X11 QUIET)
     if(X11_FOUND)
         target_link_libraries(Xipher PRIVATE X11::X11)
-        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan)
+        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro)
             target_link_libraries(${t} PRIVATE X11::X11)
         endforeach()
     endif()
@@ -292,7 +307,7 @@ if(NOT WIN32)
     find_package(Qt6DBus QUIET)
     if(Qt6DBus_FOUND)
         target_link_libraries(Xipher PRIVATE Qt6::DBus)
-        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan)
+        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro)
             target_link_libraries(${t} PRIVATE Qt6::DBus)
         endforeach()
     endif()
