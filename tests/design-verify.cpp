@@ -30,6 +30,7 @@
 #include "net/Prefs.h"
 #include "net/VoiceRecorder.h"
 #include "util/Autostart.h"
+#include "util/MprisAdapter.h"
 #include "net/RnNoise.h"
 #include "ui/RichDoc.h"
 #include "ui/RichRender.h"
@@ -1809,6 +1810,33 @@ int main(int argc, char** argv) {
         page.debugAction(QStringLiteral("queuePrev"));
         check(page.debugCurrentQueueIdx() == 0,
               QStringLiteral("prev: индекс 1 → 0"));
+    }
+
+    // ── SMTC/медиа-клавиши (MDV-05): MPRIS2-адаптер.
+    {
+        printf("\nMPRIS/SMTC (MDV-05)\n");
+        // Адаптер создаётся и переживает отсутствие шины (offscreen).
+        auto* mpris = page.findChild<MprisAdapter*>();
+        check(mpris != nullptr, QStringLiteral("MPRIS-адаптер создан ChatPage"));
+        bool gotPlay = false, gotNext = false;
+        if (mpris) {
+            mpris->setMedia(QStringLiteral("трек"), QStringLiteral("Xipher"));
+            mpris->setPlaying(true);
+            check(mpris->isPlaying() && mpris->title() == QStringLiteral("трек"),
+                  QStringLiteral("состояние трека обновляется"));
+            QObject::connect(mpris, &MprisAdapter::playPauseRequested,
+                             [&gotPlay]() { gotPlay = true; });
+            QObject::connect(mpris, &MprisAdapter::nextRequested,
+                             [&gotNext]() { gotNext = true; });
+            // Дергаем слоты адаптера, как это сделал бы SMTC/гномий демон.
+            for (QObject* c : mpris->children())
+                if (auto* ad = qobject_cast<MprisPlayerAdaptor*>(c)) {
+                    ad->PlayPause();
+                    ad->Next();
+                }
+            check(gotPlay, QStringLiteral("системный Play/Pause доходит до плеера"));
+            check(gotNext, QStringLiteral("системный Next доходит до очереди"));
+        }
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

@@ -35,6 +35,7 @@ class QAudioOutput;
 class QSplitter;
 class QFrame;
 class QPropertyAnimation;
+class MprisAdapter;
 class QGraphicsOpacityEffect;
 #include "ui/Stories.h"   // StoryUserGroup (QList<> требует полный тип)
 
@@ -50,6 +51,7 @@ class QDragMoveEvent;
 class QDropEvent;
 class QMimeData;
 class QPropertyAnimation;
+class MprisAdapter;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ChatPage — основной экран мессенджера (раскладка как в Telegram/веб-чате):
@@ -448,6 +450,7 @@ private:
     void toggleShuffle();
     void updatePlayerBar();
     QWidget* audioBar_ = nullptr;
+    MprisAdapter* mpris_ = nullptr;   // SMTC/медиа-клавиши (MDV-05)
     QLabel* audioTitle_ = nullptr;
     QPushButton* audioPlayBtn_ = nullptr;
     QPushButton* audioShuffleBtn_ = nullptr;

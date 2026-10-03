@@ -15,6 +15,7 @@
 #include "ui/ImageViewer.h"
 #include "ui/ComposerEdit.h"
 #include "net/Prefs.h"
+#include "util/MprisAdapter.h"
 #include "net/ChatCache.h"
 #include "net/FileCache.h"
 #include "ui/Stories.h"
@@ -704,6 +705,16 @@ ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
     connect(player_, &QMediaPlayer::durationChanged, this, [this](qint64 dur) {
         if (activeVoice_) activeVoice_->setTotalMs(dur);
     });
+    // SMTC/медиа-клавиши (MDV-05): MPRIS2 на session bus.
+    mpris_ = new MprisAdapter(this, this);
+    connect(mpris_, &MprisAdapter::playPauseRequested, this, [this]() {
+        if (player_->playbackState() == QMediaPlayer::PlayingState) player_->pause();
+        else player_->play();
+    });
+    connect(mpris_, &MprisAdapter::nextRequested, this, [this]() { queueNext(); });
+    connect(mpris_, &MprisAdapter::previousRequested, this, [this]() { queuePrev(); });
+    connect(mpris_, &MprisAdapter::stopRequested, this, [this]() { player_->stop(); });
+
     connect(player_, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus s) {
         if (s == QMediaPlayer::EndOfMedia) {
             if (activeVoice_) {
@@ -6101,6 +6112,8 @@ void ChatPage::updatePlayerBar() {
         audioPlayBtn_->setText(player_->playbackState() == QMediaPlayer::PlayingState
                                    ? QStringLiteral("⏸") : QStringLiteral("▶"));
     if (audioShuffleBtn_) audioShuffleBtn_->setChecked(audioShuffle_);
+    if (mpris_)
+        mpris_->setPlaying(player_->playbackState() == QMediaPlayer::PlayingState);
 }
 
 void ChatPage::onVoiceUploaded(const QString& filePath, const QString& fileName,
@@ -6120,6 +6133,12 @@ void ChatPage::playVoice(const QString& path) {
     const int qi = audioQueue_.indexOf(path);
     if (qi >= 0) { audioIdx_ = qi; updatePlayerBar(); }
     else updatePlayerBar();
+    if (mpris_) {
+        mpris_->setMedia(audioIdx_ >= 0 && audioIdx_ < audioNames_.size()
+                             ? audioNames_[audioIdx_] : QStringLiteral("Xipher"),
+                         QStringLiteral("Xipher"));
+        mpris_->setPlaying(true);
+    }
     if (path.isEmpty()) return;
     // Локальный путь (оптимистичный или уже скачанный) — играем сразу.
     if (!path.startsWith(QStringLiteral("/files"))) {

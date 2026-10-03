@@ -82,6 +82,7 @@ set(SOURCES
     src/ui/ImageViewer.cpp
     src/ui/ComposerEdit.cpp
     src/util/QrCode.cpp
+    src/util/MprisAdapter.cpp
 )
 
 set(HEADERS
@@ -274,6 +275,14 @@ if(NOT WIN32)
         foreach(t Xipher design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan)
             target_include_directories(${t} PRIVATE ${RNNOISE_INCLUDE_DIRS})
             target_link_libraries(${t} PRIVATE ${RNNOISE_LIBRARIES})
+        endforeach()
+    endif()
+
+    find_package(Qt6DBus QUIET)
+    if(Qt6DBus_FOUND)
+        target_link_libraries(Xipher PRIVATE Qt6::DBus)
+        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan)
+            target_link_libraries(${t} PRIVATE Qt6::DBus)
         endforeach()
     endif()
 
