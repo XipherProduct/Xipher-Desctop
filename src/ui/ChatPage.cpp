@@ -1614,6 +1614,19 @@ void ChatPage::buildUi() {
     connect(navFwd, &QShortcut::activated, this, [this]() { navigateChatHistory(+1); });
     auto* editLast = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Up), this);
     connect(editLast, &QShortcut::activated, this, &ChatPage::editLastOwnMessage);
+    // KEY-06: PgUp/PgDn — страница истории (когда фокус не в композере).
+    auto* pgUp = new QShortcut(QKeySequence(Qt::Key_PageUp), this);
+    pgUp->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(pgUp, &QShortcut::activated, this, [this]() {
+        auto* sb = msgScroll_->verticalScrollBar();
+        sb->setValue(sb->value() - sb->pageStep());
+    });
+    auto* pgDn = new QShortcut(QKeySequence(Qt::Key_PageDown), this);
+    pgDn->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(pgDn, &QShortcut::activated, this, [this]() {
+        auto* sb = msgScroll_->verticalScrollBar();
+        sb->setValue(sb->value() + sb->pageStep());
+    });
 
     // Отложенные (MSG-07): список чата + отмена + recurrence-сверка раз в 60с.
     connect(api_, &ApiClient::scheduledLoaded, this, &ChatPage::onScheduledLoaded);
@@ -2665,6 +2678,7 @@ void ChatPage::rebuildChatList() {
         }
     }
     chatList_->blockSignals(false);
+    updateUnreadTotalTitle();   // LST-06: «(N) Xipher»
 }
 
 void ChatPage::onChatClicked() {
@@ -3936,9 +3950,11 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
             if (base.contains(f) && !quick.contains(f)) quick << f;
         for (const QString& e : base)
             if (!quick.contains(e)) quick << e;
-        for (const QString& e : quick) {
+        for (int qi = 0; qi < quick.size(); ++qi) {
+            const QString& e = quick[qi];
             auto* b = new QPushButton(e, bar);
             b->setFlat(true);
+            if (qi < 9) b->setToolTip(QStringLiteral("%1").arg(qi + 1));   // KEY-07
             b->setCursor(Qt::PointingHandCursor);
             b->setStyleSheet(QStringLiteral(
                 "QPushButton{border:none;border-radius:8px;font-size:18px;padding:4px 6px;}"
@@ -3972,6 +3988,15 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
                 menu.close();
             });
             bl2->addWidget(b);
+        }
+        // KEY-07: цифры 1-9 выбирают эмодзи, пока стрип открыт (мнемоники меню).
+        for (int qi = 0; qi < qMin(9, quick.size()); ++qi) {
+            const QString emoji = quick[qi], mid = id;
+            auto* numAct = menu.addAction(QStringLiteral("&%1 %2").arg(qi + 1).arg(emoji));
+            numAct->setVisible(false);   // строка скрыта, мнемоника жива
+            connect(numAct, &QAction::triggered, this, [this, mid, emoji]() {
+                toggleReaction(mid, emoji);
+            });
         }
         auto* wa = new QWidgetAction(&menu);
         wa->setDefaultWidget(bar);
@@ -5166,6 +5191,86 @@ void ChatPage::copySelected() {
     QApplication::clipboard()->setText(parts.join(QLatin1Char('\n')));
 }
 
+// ── Э6-мелочь ────────────────────────────────────────────────────────────────
+
+// LST-06: тотал непрочитанных в заголовке окна «(12) Xipher».
+void ChatPage::updateUnreadTotalTitle() {
+    int total = 0;
+    for (const Chat& c : chats_)
+        if (!archivedChats_.contains(chatKeyFor(c))) total += c.unread;
+    QWidget* win = window();
+    if (win)
+        win->setWindowTitle(total > 0
+            ? QStringLiteral("(%1) Xipher").arg(total)
+            : QStringLiteral("Xipher"));
+}
+
+// MLT-05: >2000 символов → предложить отправить файлом (плашка с кнопками).
+void ChatPage::maybeOfferFileForLongText() {
+    const QString text = composer_->toPlainText();
+    if (text.size() <= 2000 || longTextBarShown_) return;
+    longTextBarShown_ = true;
+    auto* bar = new QWidget(this);
+    bar->setObjectName(QStringLiteral("replyBar"));
+    auto* bl = new QHBoxLayout(bar);
+    bl->setContentsMargins(10, 6, 10, 8);
+    auto* lbl = new QLabel(QStringLiteral("Текст %1 симв. — отправить файлом note.txt?")
+                               .arg(text.size()), bar);
+    lbl->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:13px;"));
+    bl->addWidget(lbl, 1);
+    auto* yes = new QPushButton(QStringLiteral("Файлом"), bar);
+    yes->setStyleSheet(QStringLiteral(
+        "QPushButton{background:rgba(139,92,246,0.2);border:none;border-radius:9px;"
+        "color:#F3F1F8;font-size:12px;padding:5px 10px;}"));
+    connect(yes, &QPushButton::clicked, this, [this, bar, text]() {
+        const QByteArray bytes = text.toUtf8();
+        const QString tmp = QDir::temp().filePath(
+            QStringLiteral("note_%1.txt").arg(QDateTime::currentMSecsSinceEpoch()));
+        { QFile f(tmp); if (f.open(QIODevice::WriteOnly)) f.write(bytes); }
+        sendLocalFile(tmp, false);
+        composer_->clear();
+        longTextBarShown_ = false;
+        bar->deleteLater();
+    });
+    auto* no = new QPushButton(QStringLiteral("Как текст"), bar);
+    no->setStyleSheet(yes->styleSheet());
+    connect(no, &QPushButton::clicked, this, [bar, this]() {
+        longTextBarShown_ = false;   // до следующей вставки
+        bar->deleteLater();
+    });
+    bl->addWidget(yes);
+    bl->addWidget(no);
+    // Показываем над композером как плавающий тост.
+    bar->setParent(this);
+    bar->setGeometry(sidebarWidth() + 20, height() - 140, 420, 44);
+    bar->raise();
+    bar->show();
+}
+
+// MLT-04: Ctrl+Shift+V — обернуть вставленное как ```код``` (разметка видна
+// как текст, а не исполняется) — веб-паттерн «paste as markdown».
+void ChatPage::pasteAsMarkdown() {
+    const QMimeData* md = QApplication::clipboard()->mimeData();
+    if (!md || !md->hasText()) return;
+    const QString text = md->text();
+    // Форматированный источник (html) прилетает текстом с разметкой —
+    // вставляем его в код-блок, markdown виден как есть.
+    composer_->insertPlainText(md->hasHtml() && md->html().contains(QLatin1String("<b>"))
+        ? QStringLiteral("```\n%1\n```").arg(text)
+        : text);
+}
+
+// SRC-05: список недавних запросов (10 последних, Prefs).
+void ChatPage::pushRecentSearch(const QString& q) {
+    if (q.trimmed().size() < 2) return;
+    QStringList list = Prefs::getStr(recentSearchKey())
+        .split(QLatin1Char('\x1f'), Qt::SkipEmptyParts);
+    list.removeAll(q);
+    list.prepend(q);
+    while (list.size() > 10) list.removeLast();
+    Prefs::setStr(recentSearchKey(), list.join(QLatin1Char('\x1f')));
+}
+
 // ── Опросы (MSG-06) ──────────────────────────────────────────────────────────
 
 void ChatPage::addPollBubble(QWidget* bubble, QVBoxLayout* bl, const ChatMessage& msg) {
@@ -5856,6 +5961,9 @@ void ChatPage::showChatMenu() {
     QMenu menu(this);
     QAction* rename = menu.addAction(Icons::icon(Icons::Pencil, 18, mclr),
                                      QStringLiteral("Изменить имя контакта"));
+    QAction* inPinned = nullptr;   // SRC-03: поиск по закреплённому сообщению
+    if (!pinnedMsgId_.isEmpty())
+        inPinned = menu.addAction(QStringLiteral("🔍 Найти в закреплённых"));
     QAction* secret = menu.addAction(Icons::icon(Icons::Lock, 18, mclr),
                                      QStringLiteral("Секретный чат (скоро)"));
     connect(rename, &QAction::triggered, this, &ChatPage::openRenameDialog);
@@ -5865,7 +5973,12 @@ void ChatPage::showChatMenu() {
                            "в работе. На сервере поддержка есть; нужен клиентский E2EE "
                            "(обмен ключами, шифрование сообщений)."));
     });
-    menu.exec(moreBtn_->mapToGlobal(QPoint(0, moreBtn_->height() + 4)));
+    QAction* chosen = menu.exec(moreBtn_->mapToGlobal(QPoint(0, moreBtn_->height() + 4)));
+    if (inPinned && chosen == inPinned) {
+        // SRC-03: клиентский поиск — прыжок к закреплённому сообщению с подсветкой.
+        openSuperSearch();   // открываем поиск (запрос по тексту закрепа можно уточнить)
+        jumpToMessage(pinnedMsgId_);
+    }
 }
 
 void ChatPage::openRenameDialog() {

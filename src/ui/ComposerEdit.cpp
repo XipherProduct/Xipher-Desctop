@@ -1,4 +1,5 @@
 #include "ui/ComposerEdit.h"
+#include "net/Prefs.h"
 
 #include <QKeyEvent>
 #include <QMimeData>
@@ -27,11 +28,22 @@ void ComposerEdit::adjustHeight() {
 }
 
 void ComposerEdit::keyPressEvent(QKeyEvent* e) {
-    if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter)
-        && !(e->modifiers() & Qt::ShiftModifier)
-        && !(e->modifiers() & Qt::ControlModifier)) {
-        emit sendRequested();
-        return;
+    // KEY-05: опция «Enter=перенос, Ctrl+Enter=отправка» (Prefs, по умолчанию
+    // классика Telegram: Enter отправляет, Shift+Enter переносит).
+    const bool ctrlEnterMode = Prefs::getBool(QStringLiteral("xipher_ctrl_enter_send"), false);
+    const bool isEnter = e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter;
+    if (ctrlEnterMode) {
+        if (isEnter && (e->modifiers() & Qt::ControlModifier)) {
+            emit sendRequested();
+            return;
+        }
+        // Enter без Ctrl — перенос (дефолт QPlainTextEdit).
+    } else {
+        if (isEnter && !(e->modifiers() & Qt::ShiftModifier)
+                    && !(e->modifiers() & Qt::ControlModifier)) {
+            emit sendRequested();
+            return;
+        }
     }
     QPlainTextEdit::keyPressEvent(e);
 }

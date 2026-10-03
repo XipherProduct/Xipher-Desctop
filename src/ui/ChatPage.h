@@ -81,6 +81,8 @@ public:
     int debugChatIndex(const QString& id) const { return indexOfChat(id); }
     int debugMessageCount() const { return currentMessages_.size(); }   // MLT-02 тест
     int debugCurrentQueueIdx() const { return audioIdx_; }               // VOX-03 тест
+    // SRC-05: недавние запросы (тест-доступ).
+    void pushRecentSearch(const QString& q);
     // Прыжок из поиска с подсветкой (SRC-04; публично для design-verify).
     void onSearchResultPickedForTest(const QString& chatId, const QString& messageId,
                                      const QString& keywords) {
@@ -445,6 +447,13 @@ private:
     QSet<QString> shownIds_;   // дедуп сообщений в открытом чате
     int tempCounter_ = 0;
     qreal voiceRate_ = 1.0;   // скорость голосовых (VOX-02), живёт между треками
+    // Э6-мелочь.
+    void updateUnreadTotalTitle();          // LST-06: «(N) Xipher»
+    void maybeOfferFileForLongText();       // MLT-05: >2000 симв → файл
+    bool longTextBarShown_ = false;
+    void pasteAsMarkdown();                 // MLT-04: Ctrl+Shift+V
+    QString recentSearchKey() const { return QStringLiteral("xipher_recent_searches"); }
+
     // Мини-плеер с очередью (VOX-03): все аудио чата, next/prev/shuffle.
     void buildAudioQueue();
     void playQueueAt(int idx);

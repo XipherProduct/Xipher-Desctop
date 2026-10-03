@@ -1,6 +1,7 @@
 #include "ui/SuperSearchDialog.h"
 #include "net/ApiClient.h"
 #include "net/Models.h"
+#include "net/Prefs.h"
 
 #include <QAbstractButton>
 #include <QEvent>
@@ -446,6 +447,15 @@ void SuperSearchDialog::onDebouncedSearch() {
 
 void SuperSearchDialog::doSearch(const QString& keywords, const QString& type) {
     lastKeywords_ = keywords;
+    // SRC-05: недавние запросы (Prefs, топ-10, разделитель US).
+    if (keywords.trimmed().size() >= 2) {
+        QStringList list = Prefs::getStr(QStringLiteral("xipher_recent_searches"))
+            .split(QChar(0x1f), Qt::SkipEmptyParts);
+        list.removeAll(keywords);
+        list.prepend(keywords);
+        while (list.size() > 10) list.removeLast();
+        Prefs::setStr(QStringLiteral("xipher_recent_searches"), list.join(QChar(0x1f)));
+    }
     lastType_ = type;
     clearResults();
     if (keywords.size() < 2 && type.isEmpty()) return;
