@@ -10,6 +10,8 @@
 #endif
 
 #include <QAudioSource>
+#include "net/RnNoise.h"
+#include "net/Prefs.h"
 #include <QTimer>
 #include <cmath>
 #include <QAudioSink>
@@ -327,11 +329,31 @@ void CallEngine::setDeaf(bool deaf) {
     if (spk_) spk_->setVolume(deaf ? 0.0f : 1.0f);
 }
 
+// ── Шумоподавление (CAL-04): A/B на живом звонке, состояние в Prefs ─────────
+
+void CallEngine::setNoiseSuppression(bool on) {
+    if (on && !denoiser_) {
+        denoiser_ = new RnNoise();
+        if (!denoiser_->ok()) {           // librnnoise не собралась — тихо выкл
+            delete denoiser_;
+            denoiser_ = nullptr;
+        }
+    } else if (!on && denoiser_) {
+        delete denoiser_;
+        denoiser_ = nullptr;
+    }
+    Prefs::setBool(QStringLiteral("xipher_call_noise_suppression"), on);
+}
+
 // ── Аудио ввод/вывод ──────────────────────────────────────────────────────────
 
 void CallEngine::startAudioIo() {
     if (audioStarted_) return;
     audioStarted_ = true;
+
+    // CAL-04: шумоподавление из настроек (по умолчанию вкл при наличии rnnoise).
+    if (Prefs::getBool(QStringLiteral("xipher_call_noise_suppression"), true))
+        setNoiseSuppression(true);
 
     const QAudioFormat fmt = pcmFormat();
     if (testTone_) {
@@ -351,6 +373,7 @@ void CallEngine::startAudioIo() {
 
 void CallEngine::stopAudioIo() {
     audioStarted_ = false;
+    if (denoiser_) { delete denoiser_; denoiser_ = nullptr; }   // CAL-04
     if (mic_) { mic_->stop(); mic_->deleteLater(); mic_ = nullptr; micIo_ = nullptr; }
     if (spk_) { spk_->stop(); spk_->deleteLater(); spk_ = nullptr; spkIo_ = nullptr; }
     capBuf_.clear();
@@ -377,6 +400,7 @@ void CallEngine::onEncodedFrameReady() {
         QByteArray frame = capBuf_.left(kFrameBytes);
         capBuf_.remove(0, kFrameBytes);
         if (muted_) continue;   // тишину не шлём
+        if (denoiser_) denoiser_->process(frame);   // CAL-04: гул → чистый голос
         encodeAndSend(frame.constData());
     }
 }

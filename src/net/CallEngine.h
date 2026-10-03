@@ -22,6 +22,8 @@ struct OpusDecoder;
 //  CallEngine — голосовой звонок поверх WebRTC (libdatachannel) + Opus/Qt audio.
 //  Совместим с браузерным пиром (веб-клиент): SDP offer/answer + trickle ICE.
 // ─────────────────────────────────────────────────────────────────────────────
+class RnNoise;
+
 class CallEngine : public QObject {
     Q_OBJECT
 public:
@@ -38,7 +40,10 @@ public:
     // Демо-режим: вместо микрофона в эфир идёт синтезированная мелодия
     // (C5-E5-G5 арпеджио) — контролируемый звук без акустической петли.
     void setTestTone(bool on);
-    void setDeaf(bool deaf);   // не слышать собеседника (динамик в 0)
+    void setDeaf(bool deaf);
+    // Шумоподавление микрофона (CAL-04): rnnoise в цепочке перед opus.
+    void setNoiseSuppression(bool on);
+    bool noiseSuppression() const { return denoiser_ != nullptr; }   // не слышать собеседника (динамик в 0)
 
     // Статистика RTP: сколько кадров улетело/прилетело (20 мс Opus каждый).
     // Нужно демо-звонку и диагностике «есть ли звук вообще».
@@ -77,6 +82,7 @@ private:
 
     // Audio (48 kHz mono, 20 ms кадры)
     QAudioSource* mic_ = nullptr;
+    RnNoise*      denoiser_ = nullptr;   // CAL-04 (создаётся по флагу)
     QIODevice*    micIo_ = nullptr;
     QAudioSink*   spk_ = nullptr;
     QIODevice*    spkIo_ = nullptr;

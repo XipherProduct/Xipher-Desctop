@@ -56,6 +56,7 @@ signals:
     void accept();
     void decline();
     void muteToggled(bool muted);
+    void noiseSuppressionToggled(bool on);   // CAL-04: A/B шумодава
     void deafToggled(bool deaf);
     void minimizeRequested();
     void restoreRequested();
@@ -81,6 +82,7 @@ private:
     QWidget*     outgoingBtns_;
     QWidget*     incomingBtns_;
     QWidget*     activeBtns_;
+    QPushButton* nrBtn_ = nullptr;   // шумодав (CAL-04)
     QPushButton* micBtn_;
     QPushButton* spkBtn_;
 

@@ -1,4 +1,5 @@
 #include "ui/CallOverlay.h"
+#include "net/Prefs.h"
 #include "ui/AvatarUtil.h"
 #include "ui/Icons.h"
 
@@ -226,6 +227,15 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
         setMuted(!muted_);
         emit muteToggled(muted_);
     });
+    // Шумодав (CAL-04): A/B на живом звонке — фоновый гул уходит.
+    nrBtn_ = makeToggle(QStringLiteral("Шумодав"));
+    const bool nrOn = Prefs::getBool(QStringLiteral("xipher_call_noise_suppression"), true);
+    nrBtn_->setStyleSheet(nrOn ? QLatin1String(kToggleActiveQss) : QLatin1String(kToggleQss));
+    connect(nrBtn_, &QPushButton::clicked, this, [this]() {
+        const bool on = nrBtn_->styleSheet() == QLatin1String(kToggleActiveQss);
+        nrBtn_->setStyleSheet(on ? QLatin1String(kToggleQss) : QLatin1String(kToggleActiveQss));
+        emit noiseSuppressionToggled(!on);
+    });
     spkBtn_ = makeToggle(QStringLiteral("Звук"));
     spkBtn_->setStyleSheet(QLatin1String(kToggleActiveQss));   // звук по умолчанию вкл
     connect(spkBtn_, &QPushButton::clicked, this, [this]() {
@@ -244,6 +254,7 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
     connect(end, &QPushButton::clicked, this, &CallOverlay::hangup);
     al->addStretch();
     al->addWidget(micBtn_);
+    al->addWidget(nrBtn_);
     al->addWidget(spkBtn_);
     al->addSpacing(12);
     al->addWidget(end);

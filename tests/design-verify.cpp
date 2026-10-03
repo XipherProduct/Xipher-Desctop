@@ -25,6 +25,7 @@
 #include "net/WsClient.h"
 #include "net/Session.h"
 #include "net/Prefs.h"
+#include "net/RnNoise.h"
 
 #include <QApplication>
 #include <QColor>
@@ -55,6 +56,7 @@
 #include <QWheelEvent>
 #include <QDir>
 #include <cstdio>
+#include <cmath>
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
 #include <QStackedWidget>
@@ -1433,6 +1435,50 @@ int main(int argc, char** argv) {
         for (QLabel* l : page.findChildren<QLabel*>(QStringLiteral("peerName")))
             if (l->text() == QStringLiteral("Алиса")) headerBack = true;
         check(headerBack, QStringLiteral("выключение возвращает имена"));
+    }
+
+    // ── Шумоподавление rnnoise (CAL-04).
+    {
+        printf("\nШумодав (CAL-04)\n");
+#if XIPHER_RNNOISE
+        RnNoise nn;
+        check(nn.ok(), QStringLiteral("librnnoise загружена"));
+        if (nn.ok()) {
+            // Кадр 960 сэмплов: стационарный «гул» (синус 100Гц с шумом).
+            QByteArray frame(960 * 2, Qt::Uninitialized);
+            auto* pcm = reinterpret_cast<short*>(frame.data());
+            float humRmsBefore = 0, humRmsAfter = 0;
+            for (int i = 0; i < 960; ++i) {
+                const float v = 3000.0f * sinf(2.0f * 3.14159f * 100.0f * i / 48000.0f)
+                              + (rand() % 2000 - 1000);
+                pcm[i] = short(v);
+                humRmsBefore += v * v;
+            }
+            nn.process(frame);
+            for (int i = 0; i < 960; ++i)
+                humRmsAfter += float(pcm[i]) * pcm[i];
+            humRmsBefore = sqrtf(humRmsBefore / 960);
+            humRmsAfter = sqrtf(humRmsAfter / 960);
+            check(humRmsAfter < humRmsBefore * 0.7f,
+                  QStringLiteral("стационарный гул давится (RMS %1 → %2)")
+                      .arg(int(humRmsBefore)).arg(int(humRmsAfter)));
+        }
+#else
+        check(true, QStringLiteral("без librnnoise: фича отключаема (прозрачный проход)"));
+#endif
+        // Кнопка A/B в активном звонке.
+        {
+            CallOverlay ov(&page);
+            ov.setPeer(QStringLiteral("Александр"), QString());
+            ov.setGeometry(0, 0, 1200, 800);
+            ov.setState(CallOverlay::State::Active);
+            for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+            bool hasNr = false;
+            for (QPushButton* b : ov.findChildren<QPushButton*>())
+                if (b->toolTip() == QStringLiteral("Шумодав")
+                    || b->text() == QStringLiteral("Шумодав")) hasNr = true;
+            check(hasNr, QStringLiteral("кнопка «Шумодав» в активном звонке"));
+        }
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

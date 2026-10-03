@@ -16,6 +16,19 @@ set(CMAKE_AUTOUIC OFF)
 # Qt 6 — Widgets (UI), Network (REST), WebSockets (realtime), Multimedia (голос).
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network WebSockets Multimedia MultimediaWidgets)
 
+# ── Шумоподавление rnnoise (CAL-04): системная librnnoise через pkg-config;
+# без неё клиент собирается, фича отключается (RnNoise = прозрачный проход).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(RNNOISE rnnoise)
+endif()
+if(RNNOISE_FOUND)
+    message(STATUS "Xipher: rnnoise ${RNNOISE_VERSION} — шумоподавление вкл")
+    add_compile_definitions(XIPHER_RNNOISE=1)
+else()
+    message(STATUS "Xipher: rnnoise НЕ найден — шумоподавление выключено")
+endif()
+
 set(SOURCES
     src/main.cpp
     src/app/MainWindow.cpp
@@ -30,6 +43,7 @@ set(SOURCES
     src/net/VoiceRecorder.cpp
     src/net/CallEngine.cpp
     src/net/CallController.cpp
+    src/net/RnNoise.cpp
     src/ui/CallOverlay.cpp
     src/ui/CallSounds.cpp
     src/ui/BackgroundWidget.cpp
@@ -252,6 +266,13 @@ if(NOT WIN32)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
     # Звонковая сборка у инструментов та же, что у приложения.
+    if(RNNOISE_FOUND)
+        foreach(t Xipher design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan)
+            target_include_directories(${t} PRIVATE ${RNNOISE_INCLUDE_DIRS})
+            target_link_libraries(${t} PRIVATE ${RNNOISE_LIBRARIES})
+        endforeach()
+    endif()
+
     foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live)
         target_include_directories(${t} PRIVATE ${CALL_INCLUDES})
         target_link_libraries(${t} PRIVATE ${CALL_LIBS})

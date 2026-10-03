@@ -204,6 +204,9 @@ void CallController::wireOverlay() {
         finish(QStringLiteral("rejected"));
     });
     connect(overlay_, &CallOverlay::muteToggled, this, [this](bool m) { if (engine_) engine_->setMuted(m); });
+    // CAL-04: A/B шумодава прямо в звонке.
+    connect(overlay_, &CallOverlay::noiseSuppressionToggled, this,
+            [this](bool on) { if (engine_) engine_->setNoiseSuppression(on); });
     connect(overlay_, &CallOverlay::deafToggled, this, [this](bool d) { if (engine_) engine_->setDeaf(d); });
     connect(overlay_, &CallOverlay::minimizeRequested, this, [this]() {
         if (!overlay_) return;
