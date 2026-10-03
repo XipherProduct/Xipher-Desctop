@@ -11,6 +11,7 @@
 #include "ui/RichDoc.h"
 #include "ui/RichRender.h"
 #include "ui/RichEditor.h"
+#include "ui/ImageEditor.h"
 #include "ui/ImageViewer.h"
 #include "ui/ComposerEdit.h"
 #include "net/Prefs.h"
@@ -4086,6 +4087,8 @@ void ChatPage::showMediaMenu(QWidget* src, const QString& filePath,
         ? menu.addAction(QStringLiteral("Копировать")) : nullptr;
     QAction* saveAct  = menu.addAction(QStringLiteral("Сохранить как…"));
     QAction* fwdAct   = menu.addAction(QStringLiteral("Переслать…"));
+    QAction* editAct  = (kind == QStringLiteral("image"))   // IMG-01/02
+        ? menu.addAction(QStringLiteral("🖌 Редактировать…")) : nullptr;
     QAction* allAct   = (kind == QStringLiteral("image"))
         ? menu.addAction(QStringLiteral("Все фото чата")) : nullptr;
     QAction* chosen = menu.exec(src->mapToGlobal(pos));
@@ -4118,6 +4121,37 @@ void ChatPage::showMediaMenu(QWidget* src, const QString& filePath,
         } else {
             QFile out(dest);
             if (out.open(QIODevice::WriteOnly)) out.write(bytes);
+        }
+        return;
+    }
+    if (chosen == editAct) {
+        // Редактор фото (IMG-01/02): правки векторными слоями, отправка PNG
+        // поверх исходника как новое image-сообщение.
+        if (bytes.isEmpty()) {           // ещё не в кэше — дождаться загрузки
+            auto conn = std::make_shared<QMetaObject::Connection>();
+            *conn = connect(api_, &ApiClient::fileFetched, this,
+                [this, conn, filePath](const QString& p, const QByteArray& b) {
+                    if (p != filePath || b.isEmpty()) return;
+                    QObject::disconnect(*conn);
+                    auto* ed = new ImageEditorDialog(b, window());
+                    connect(ed, &ImageEditorDialog::doneEditing, ed, [this, ed]() {
+                        const QByteArray png = ed->resultPng();
+                        if (png.isEmpty()) return;
+                        sendPhotoBytes(png, QStringLiteral("edited.png"));
+                    });
+                    ed->setAttribute(Qt::WA_DeleteOnClose);
+                    ed->show();
+                });
+            api_->fetchFile(filePath);
+        } else {
+            auto* ed = new ImageEditorDialog(bytes, window());
+            connect(ed, &ImageEditorDialog::doneEditing, ed, [this, ed]() {
+                const QByteArray png = ed->resultPng();
+                if (png.isEmpty()) return;
+                sendPhotoBytes(png, QStringLiteral("edited.png"));
+            });
+            ed->setAttribute(Qt::WA_DeleteOnClose);
+            ed->show();
         }
         return;
     }

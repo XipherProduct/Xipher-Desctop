@@ -21,7 +21,9 @@
 #include "ui/ChatPickerDialog.h"
 #include "ui/SuperSearchDialog.h"
 #include <QCheckBox>
+#include <QToolButton>
 #include <QClipboard>
+#include <QBuffer>
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
 #include "net/Session.h"
@@ -34,6 +36,7 @@
 #include "ui/RichEditor.h"
 #include "ui/VoiceMessageWidget.h"
 #include "ui/VideoMessageWidget.h"
+#include "ui/ImageEditor.h"
 
 // Шов для эмуляции сигнала скорости (VOX-02).
 static void emitHelperSpeed(VoiceMessageWidget* w, qreal r) {
@@ -1718,6 +1721,43 @@ int main(int argc, char** argv) {
         const qint32 rate = qint32((quint8(wav[24])) | (quint8(wav[25]) << 8)
                                  | (quint8(wav[26]) << 16) | (quint8(wav[27]) << 24));
         check(rate == 48000, QStringLiteral("sample rate 48000 в заголовке"));
+    }
+
+    // ── Редактор фото (IMG-01/02).
+    {
+        printf("\nРедактор фото (IMG-01/02)\n");
+        QByteArray src;
+        { QPixmap pm(500, 320); pm.fill(QColor(30, 27, 40));
+          QPainter p(&pm); p.setPen(Qt::white);
+          p.drawText(pm.rect(), Qt::AlignCenter, QStringLiteral("исходник"));
+          QBuffer b(&src); pm.save(&b, "PNG"); }
+        ImageEditorDialog ed(src, &page);
+        int tools = 0;
+        for (QToolButton* b : ed.findChildren<QToolButton*>()) ++tools;
+        check(tools >= 13, QStringLiteral("тулбар: 7 инструментов + 7 цветов"));
+        // Все инструменты кладут штрихи; превью меняется (пиксель-дельта).
+        const QImage before = ed.renderPreview();
+        ed.addStrokeForTest(0, QPoint(20, 20), QPoint(200, 40));    // кисть
+        ed.addStrokeForTest(3, QPoint(50, 50), QPoint(420, 60));    // стрелка
+        ed.addStrokeForTest(4, QPoint(80, 100), QPoint(300, 260));  // прямоуг.
+        ed.addStrokeForTest(5, QPoint(120, 120), QPoint(360, 300)); // эллипс
+        ed.addStrokeForTest(6, QPoint(40, 280), QPoint(200, 300),
+                            QStringLiteral("привет"));               // текст (IMG-02)
+        check(ed.strokeCount() == 5, QStringLiteral("пять слоёв правок"));
+        const QImage after = ed.renderPreview();
+        check(before != after, QStringLiteral("превью отличается от исходника"));
+        // Текст реально нарисован: в полосе текста есть светлые пиксели.
+        bool textDrawn = false;
+        for (int x = 40; x < 280 && !textDrawn; x += 3)
+            for (int y = 270; y < 318; y += 2)
+                if (qGray(after.pixel(x, y)) > 90) { textDrawn = true; break; }
+        check(textDrawn, QStringLiteral("текст «привет» отрисован (IMG-02)"));
+        // Живой скрин редактора (visual proof).
+        ed.resize(920, 700);
+        QPixmap shot = ed.grab();
+        shot.save(QCoreApplication::applicationDirPath()
+                  + QStringLiteral("/image-editor.png"));
+        check(!shot.isNull(), QStringLiteral("скрин редактора сохранён"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).
