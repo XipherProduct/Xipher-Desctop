@@ -48,6 +48,7 @@ set(SOURCES
     src/ui/RichRender.cpp
     src/ui/RichEditor.cpp
     src/ui/ImageEditor.cpp
+    src/ui/ChatWindow.cpp
     src/ui/CallOverlay.cpp
     src/ui/CallSounds.cpp
     src/ui/BackgroundWidget.cpp

@@ -38,6 +38,7 @@
 #include "ui/VoiceMessageWidget.h"
 #include "ui/VideoMessageWidget.h"
 #include "ui/ImageEditor.h"
+#include "ui/ChatWindow.h"
 
 // Шов для эмуляции сигнала скорости (VOX-02).
 static void emitHelperSpeed(VoiceMessageWidget* w, qreal r) {
@@ -1837,6 +1838,42 @@ int main(int argc, char** argv) {
             check(gotPlay, QStringLiteral("системный Play/Pause доходит до плеера"));
             check(gotNext, QStringLiteral("системный Next доходит до очереди"));
         }
+    }
+
+    // ── Отдельные окна чатов (WIN-04).
+    {
+        printf("\nОтдельные окна чатов (WIN-04)\n");
+        ChatWindow::clearAll();
+        page.debugAction(QStringLiteral("detachChat"), -1);   // нет такого чата — no-op
+        check(ChatWindow::saveList().isEmpty(), QStringLiteral("пустой список окон"));
+        // Открываем окно Алисы через шов (кнопка ⤢ дергает тот же метод).
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        page.debugAction(QStringLiteral("detachChat"),
+                         page.debugChatIndex(QStringLiteral("u_alice")));
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        check(ChatWindow::saveList().contains(QStringLiteral("u_alice")),
+              QStringLiteral("окно чата открыто и записано (persist)"));
+        bool winFound = false;
+        for (QWidget* w : QApplication::topLevelWidgets())
+            if (w->windowTitle().contains(QStringLiteral("Алиса — Xipher"))) winFound = true;
+        check(winFound, QStringLiteral("окно «Алиса — Xipher» существует"));
+        // Композер и кнопка отправки в окне.
+        bool hasComposer = false, hasSend = false;
+        for (QWidget* w : QApplication::topLevelWidgets()) {
+            if (!w->windowTitle().contains(QStringLiteral("Алиса — Xipher"))) continue;
+            hasComposer = w->findChild<QPlainTextEdit*>() != nullptr;
+            for (QPushButton* b : w->findChildren<QPushButton*>())
+                if (b->objectName() == QStringLiteral("cwSend")) hasSend = true;
+        }
+        check(hasComposer && hasSend, QStringLiteral("композер и отправка в окне"));
+        // Закрытие убирает из persist-списка (память окна очищает WA_DeleteOnClose).
+        page.debugAction(QStringLiteral("closeDetached"),
+                         page.debugChatIndex(QStringLiteral("u_alice")));
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        check(!ChatWindow::saveList().contains(QStringLiteral("u_alice")),
+              QStringLiteral("закрытое окно вычёркнуто из списка"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

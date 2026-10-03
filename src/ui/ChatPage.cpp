@@ -12,6 +12,7 @@
 #include "ui/RichRender.h"
 #include "ui/RichEditor.h"
 #include "ui/ImageEditor.h"
+#include "ui/ChatWindow.h"
 #include "ui/ImageViewer.h"
 #include "ui/ComposerEdit.h"
 #include "net/Prefs.h"
@@ -1488,8 +1489,11 @@ void ChatPage::buildUi() {
         if (c.kind == ChatKind::Group)        del = menu.addAction(QStringLiteral("Выйти из группы"));
         else if (c.kind == ChatKind::Channel) del = menu.addAction(QStringLiteral("Отписаться"));
         else if (!c.isSaved)                  del = menu.addAction(QStringLiteral("Удалить чат"));
+        QAction* detach = menu.addAction(QStringLiteral("⤢ Открыть в окне"));   // WIN-04
+        Q_UNUSED(detach);
         QAction* ch = menu.exec(chatList_->mapToGlobal(p));
         if (ch == open) openChat(c);
+        else if (ch == detach) detachChatToWindow(c.id);
         else if (ch == pin) setChatPinned(c, !pinned);
         else if (ch == mute) {
             // Локальная пара add/remove, как в старом кольце-реализации.
@@ -1623,6 +1627,25 @@ void ChatPage::buildUi() {
 
     // Тема из настроек («Оформление»): перегенерировать QSS и инлайн-фоны.
     applyTheme();
+}
+
+// ── Отдельные окна чатов (WIN-04) ────────────────────────────────────────────
+
+void ChatPage::detachChatToWindow(const QString& peerId) {
+    if (detachedWindows_.contains(peerId)) {
+        if (QWidget* w = detachedWindows_.value(peerId)) {
+            w->show(); w->raise(); w->activateWindow();
+        }
+        return;
+    }
+    const int idx = indexOfChat(peerId);
+    const QString name = idx >= 0 ? chats_[idx].displayName : peerId;
+    auto* win = new ChatWindow(api_, ws_, peerId, name, QString(), window());
+    detachedWindows_.insert(peerId, win);
+    connect(win, &ChatWindow::closed, this, [this](const QString& pid) {
+        detachedWindows_.remove(pid);
+    });
+    win->show();
 }
 
 // ── Quick Switcher (DSC-01) ──────────────────────────────────────────────────
@@ -1840,6 +1863,11 @@ int ChatPage::sidebarWidth() const {
 }
 
 void ChatPage::load() {
+    // WIN-04: окна прошлой сессии возвращаются после релогина.
+    for (const QString& pid : ChatWindow::saveList()) {
+        if (!pid.isEmpty() && pid != Session::instance().userId)
+            detachChatToWindow(pid);
+    }
     api_->getChats();
     api_->getGroups();
     api_->getChannels();
@@ -2105,6 +2133,15 @@ void ChatPage::debugAction(const QString& name, int arg) {
     else if (name == QLatin1String("playQueueAt")) playQueueAt(arg);
     else if (name == QLatin1String("queueNext")) queueNext();
     else if (name == QLatin1String("queuePrev")) queuePrev();
+    else if (name == QLatin1String("detachChat")) {
+        if (arg >= 0 && arg < chats_.size()) detachChatToWindow(chats_[arg].id);
+    }
+    else if (name == QLatin1String("closeDetached")) {
+        if (arg >= 0 && arg < chats_.size()) {
+            ChatWindow* w = detachedWindows_.value(chats_[arg].id);
+            if (w) w->close();
+        }
+    }
     else if (name == QLatin1String("archiveChat") && arg >= 0 && arg < chats_.size()) {
         const QString key = chatKeyFor(chats_[arg]);
         if (archivedChats_.contains(key)) archivedChats_.remove(key);
