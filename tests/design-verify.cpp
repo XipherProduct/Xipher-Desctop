@@ -26,6 +26,9 @@
 #include "net/Session.h"
 #include "net/Prefs.h"
 #include "net/RnNoise.h"
+#include "ui/RichDoc.h"
+#include "ui/RichRender.h"
+#include "ui/RichEditor.h"
 
 #include <QApplication>
 #include <QColor>
@@ -1479,6 +1482,98 @@ int main(int argc, char** argv) {
                     || b->text() == QStringLiteral("Шумодав")) hasNr = true;
             check(hasNr, QStringLiteral("кнопка «Шумодав» в активном звонке"));
         }
+    }
+
+    // ── Rich Editor (RTE-01..03): модель, рендер, редактор.
+    {
+        printf("\nRich Editor (RTE-01..03)\n");
+        // RTE-01: round-trip создать→сериализовать→разобрать = тот же документ.
+        RichDoc doc;
+        RichBlock h2; h2.type = RichBlock::Type::H2; h2.text = QStringLiteral("План");
+        RichBlock para; para.text = QStringLiteral("Обычный абзац с **жирным**");
+        RichBlock q; q.type = RichBlock::Type::Quote; q.text = QStringLiteral("мысль");
+        RichBlock ul; ul.type = RichBlock::Type::List;
+        ul.items = {QStringLiteral("первый"), QStringLiteral("второй")};
+        RichBlock code; code.type = RichBlock::Type::Code; code.text = QStringLiteral("int x = 1;");
+        RichBlock hr; hr.type = RichBlock::Type::Divider;
+        RichBlock chk; chk.type = RichBlock::Type::Checkbox;
+        chk.text = QStringLiteral("сделать"); chk.checked = false;
+        doc.blocks = {h2, para, q, ul, code, hr, chk};
+        const QString payload = doc.toMessage();
+        check(RichDoc::isRich(payload), QStringLiteral("payload размечен как рич"));
+        bool ok = false;
+        const RichDoc back = RichDoc::fromMessage(payload, &ok);
+        check(ok && back.blocks.size() == doc.blocks.size(),
+              QStringLiteral("round-trip: 7 блоков вернулись"));
+        bool same = ok && back.blocks.size() == doc.blocks.size();
+        for (int i = 0; same && i < doc.blocks.size(); ++i) {
+            same = back.blocks[i].type == doc.blocks[i].type
+                && back.blocks[i].text == doc.blocks[i].text
+                && back.blocks[i].items == doc.blocks[i].items
+                && back.blocks[i].checked == doc.blocks[i].checked;
+        }
+        check(same, QStringLiteral("round-trip: содержимое идентично"));
+        check(doc.toPlainMarkdown().contains(QStringLiteral("## План"))
+              && doc.toPlainMarkdown().contains(QStringLiteral("- первый")),
+              QStringLiteral("md-fallback для plain-клиентов"));
+
+        // RTE-03: 20 блоков одним QPainter ≤16 мс.
+        RichDoc big = doc;
+        for (int i = big.blocks.size(); i < 20; ++i) {
+            RichBlock p; p.text = QStringLiteral("абзац номер %1 с текстом").arg(i);
+            big.blocks.append(p);
+        }
+        RichMessageWidget rw(big);
+        rw.resize(420, rw.heightForWidth(420));
+        QPixmap shot(rw.size());
+        rw.render(&shot);   // прогрев
+        QElapsedTimer pt; pt.start();
+        rw.render(&shot);
+        const qint64 ms = pt.nsecsElapsed() / 1000000;
+        // Живой скрин рич-рендера (visual proof, PNG рядом с бинарем).
+        shot.save(QCoreApplication::applicationDirPath()
+                  + QStringLiteral("/rich-render.png"));
+        check(rw.blockCount() == 20, QStringLiteral("20 блоков в документе"));
+        check(ms <= 16, QStringLiteral("рендер 20 блоков ≤16 мс: %1 мс").arg((int)ms));
+        // Чекбокс кликабелен: нажатие переключает состояние.
+        bool toggled = false;
+        QObject::connect(&rw, &RichMessageWidget::checkboxToggled,
+                         [&toggled](int, bool) { toggled = true; });
+        // Чекбокс — квадрат 18px слева (x≈0..18): проходим кликами по колонке.
+        for (int y = 0; y < rw.height(); y += 8) {
+            QMouseEvent m(QEvent::MouseButtonPress, QPointF(10, y),
+                          QPointF(10, y), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(&rw, &m);
+            if (toggled) break;
+        }
+        check(toggled, QStringLiteral("чекбокс кликабелен (сигнал)"));
+
+        // RTE-02: редактор — тулбар/блоки/slash-меню существует.
+        RichEditorDialog ed(&page);
+        check(ed.blockCount() == 1, QStringLiteral("старт: один блок-абзац"));
+        ed.insertBlockForTest(RichBlock::Type::H1);
+        ed.insertBlockForTest(RichBlock::Type::List);
+        ed.insertBlockForTest(RichBlock::Type::Checkbox);
+        check(ed.blockCount() == 4, QStringLiteral("блоки добавляются тулбаром"));
+        for (QPlainTextEdit* e : ed.findChildren<QPlainTextEdit*>())
+            e->setPlainText(QStringLiteral("текст блока"));
+        const RichDoc collected = ed.collectDoc();
+        check(collected.blocks.size() >= 3, QStringLiteral("документ собирается"));
+        bool hasToolbar = false;
+        for (QPushButton* b : ed.findChildren<QPushButton*>())
+            if (b->text() == QStringLiteral("H1") || b->text() == QStringLiteral("B"))
+                hasToolbar = true;
+        check(hasToolbar, QStringLiteral("тулбар H1/B в редакторе"));
+        // «/» в пустом блоке открывает меню вставки (без exec в тест-режиме).
+        qputenv("DV_TEST", "1");
+        const int slashBefore = ed.debugSlashCount();
+        if (auto* first = ed.findChild<QPlainTextEdit*>()) {
+            first->setPlainText(QStringLiteral("/"));
+            for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        }
+        const bool slashWorked = ed.debugSlashCount() > slashBefore;
+        qunsetenv("DV_TEST");
+        check(slashWorked, QStringLiteral("«/» открывает меню блоков"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

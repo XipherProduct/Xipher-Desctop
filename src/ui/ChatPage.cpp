@@ -8,6 +8,9 @@
 #include "ui/PeerInfoPanel.h"
 #include "ui/ChatPickerDialog.h"
 #include "ui/QuickSwitcher.h"
+#include "ui/RichDoc.h"
+#include "ui/RichRender.h"
+#include "ui/RichEditor.h"
 #include "ui/ImageViewer.h"
 #include "ui/ComposerEdit.h"
 #include "net/Prefs.h"
@@ -3460,6 +3463,21 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         }
         if (!out) el->addStretch();
         bl->addWidget(erow);
+    } else if (RichDoc::isRich(msg.content)) {
+        // Рич-сообщение (RTE-03): блочный QPainter-рендер вместо текста.
+        bool richOk = false;
+        const RichDoc doc = RichDoc::fromMessage(msg.content, &richOk);
+        if (richOk) {
+            auto* rw = new RichMessageWidget(doc, bubble);
+            rw->setFixedWidth(qMin(440, qMax(200, bubble->width())));
+            connect(rw, &RichMessageWidget::checkboxToggled, this, [](int, bool) {});
+            bl->addWidget(rw);
+        } else {
+            auto* text = new MessageTextLabel(formatMessageHtml(msg.content, highlightQuery_), bubble);
+            text->setStyleSheet(QString("color:%1;font-size:15px;")
+                                    .arg(out ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
+            bl->addWidget(text);
+        }
     } else if (msg.content.startsWith(kPollMarker)) {
         // Опрос (MSG-06): карточка с вопросом/вариантами/полосами процентов;
         // данные подтягиваются get-poll по message_id (обновит pollLoaded).
@@ -4574,6 +4592,7 @@ void ChatPage::onAttachClicked() {
     QAction* checklist = menu.addAction(Icons::icon(Icons::Checklist, 18, mclr),
                                         QStringLiteral("Чек-лист"));
     QAction* poll = menu.addAction(QStringLiteral("📊 Опрос"));   // MSG-06
+    QAction* rich = menu.addAction(QStringLiteral("✨ Формат")); // RTE-02
     QAction* later = menu.addAction(QStringLiteral("🕒 Отправить позже"));   // MSG-07
     menu.addSeparator();
     QMenu* geo = menu.addMenu(QStringLiteral("Геопозиция"));
@@ -4586,6 +4605,16 @@ void ChatPage::onAttachClicked() {
     connect(fileAct, &QAction::triggered, this, &ChatPage::pickAndSendFile);
     connect(checklist, &QAction::triggered, this, &ChatPage::openChecklistDialog);
     connect(poll, &QAction::triggered, this, &ChatPage::openPollDialog);
+    connect(rich, &QAction::triggered, this, [this]() {
+        auto* d = new RichEditorDialog(window());
+        connect(d, &RichEditorDialog::sendRequested, this, [this](const QString& msg) {
+            const QString tempId = QStringLiteral("tmp_%1").arg(++tempCounter_);
+            if (currentKind_ == ChatKind::Group)        api_->sendGroupMessage(currentPeerId_, msg, tempId);
+            else if (currentKind_ == ChatKind::Channel) api_->sendChannelMessage(currentPeerId_, msg, tempId);
+            else                                        api_->sendMessage(currentPeerId_, msg, tempId);
+        });
+        d->showAnimated();
+    });
     connect(later, &QAction::triggered, this, [this]() { openScheduleDialog(); });
     connect(geoSend, &QAction::triggered, this, &ChatPage::sendLocation);
     QPoint pos = attachBtn_->mapToGlobal(QPoint(0, 0));

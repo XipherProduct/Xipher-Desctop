@@ -44,6 +44,9 @@ set(SOURCES
     src/net/CallEngine.cpp
     src/net/CallController.cpp
     src/net/RnNoise.cpp
+    src/ui/RichDoc.cpp
+    src/ui/RichRender.cpp
+    src/ui/RichEditor.cpp
     src/ui/CallOverlay.cpp
     src/ui/CallSounds.cpp
     src/ui/BackgroundWidget.cpp
