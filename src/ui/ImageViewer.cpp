@@ -7,6 +7,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTimer>
+#include <QPushButton>
 #include <QWheelEvent>
 #include <QDrag>
 #include <QMimeData>
@@ -17,6 +18,23 @@ ImageViewer::ImageViewer(QWidget* parent, const QStringList& paths, int index,
     setAttribute(Qt::WA_DeleteOnClose);
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::OpenHandCursor);   // картину можно тащить
+    // WIN-05: кнопка «⧉ в окно» — вьюер выносится в отдельное окно
+    // (поверх всех), клик по фону больше не закрывает.
+    winBtn_ = new QPushButton(QStringLiteral("⧉"), this);
+    winBtn_->setToolTip(QStringLiteral("В отдельное окно, поверх всех"));
+    winBtn_->setCursor(Qt::PointingHandCursor);
+    winBtn_->setStyleSheet(QStringLiteral(
+        "QPushButton{background:rgba(255,255,255,0.14);border:none;border-radius:16px;"
+        "color:#fff;font-size:15px;min-width:32px;min-height:32px;}"
+        "QPushButton:hover{background:rgba(255,255,255,0.28);}"));
+    connect(winBtn_, &QPushButton::clicked, this, [this]() {
+        setWindowFlag(Qt::Window, true);
+        setWindowFlag(Qt::WindowStaysOnTopHint, true);
+        setWindowTitle(QStringLiteral("Xipher — просмотр"));
+        resize(parentWidget() ? parentWidget()->size() * 9 / 10 : QSize(900, 700));
+        detached_ = true;
+        showNormal();
+    });
     if (parent) {
         setGeometry(parent->rect());
         parent->installEventFilter(this);
@@ -123,6 +141,12 @@ void ImageViewer::clampPan() {
 }
 
 void ImageViewer::wheelEvent(QWheelEvent* e) {
+    // MDV-02: горизонтальное колесо/тачпад-свайп — листание галереи.
+    if (qAbs(e->angleDelta().x()) > qAbs(e->angleDelta().y())) {
+        e->accept();
+        if (e->angleDelta().x() < 0) next(); else prev();
+        return;
+    }
     if (pm_.isNull()) { QWidget::wheelEvent(e); return; }
     e->accept();
     const qreal step = e->angleDelta().y() > 0 ? 1.25 : (1.0 / 1.25);
@@ -212,7 +236,7 @@ void ImageViewer::mouseReleaseEvent(QMouseEvent* e) {
         if (e->position().x() < width() / 3.0) { prev(); return; }
         if (e->position().x() > width() * 2 / 3.0) { next(); return; }
     }
-    if (e->button() == Qt::LeftButton) close();
+    if (e->button() == Qt::LeftButton && !detached_) close();
 }
 
 bool ImageViewer::eventFilter(QObject* obj, QEvent* e) {
@@ -230,6 +254,7 @@ bool ImageViewer::eventFilter(QObject* obj, QEvent* e) {
 void ImageViewer::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.fillRect(rect(), QColor(0, 0, 0, 225));
+    if (winBtn_) winBtn_->move(width() - 96, 12);
     if (!pm_.isNull()) {
         p.setRenderHint(QPainter::SmoothPixmapTransform);
         p.translate((width() - pm_.width() * zoom_) / 2.0 + panX_,

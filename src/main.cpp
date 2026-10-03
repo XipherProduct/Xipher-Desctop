@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QSettings>
 #include <QFont>
 #include <QPalette>
 #include <QIcon>
@@ -41,8 +42,19 @@ static void rotateLog() {
     QFile::rename(path, prev);
 }
 
+// PRF-01: аппаратный рендер — до создания QApplication (Prefs недоступен
+// до org, читаем QSettings напрямую).
+static bool hwRenderPref()
+{
+    QSettings s(QStringLiteral("Xipher"), QStringLiteral("Desktop"));
+    return s.value(QStringLiteral("xipher_hw_render"), false).toBool();
+}
+
 int main(int argc, char** argv) {
+    // PRF-01: софтверный фолббек до создания QApplication (галка в настройках).
+    QCoreApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, !hwRenderPref());
     QApplication app(argc, argv);
+
     qInstallMessageHandler(logToFile);
     rotateLog();
     qInfo().noquote() << "старт:" << QCoreApplication::applicationVersion()

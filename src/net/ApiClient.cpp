@@ -1977,3 +1977,45 @@ void ApiClient::giftSend(const QString& giftId, const QString& toUserId,
             obj.value(QStringLiteral("error")).toString(QStringLiteral("Не удалось отправить подарок"))));
     });
 }
+
+// ── MSG-05/MSG-08: allowlist реакций канала и silent-отправка ────────────────
+
+void ApiClient::getChannelAllowedReactions(const QString& channelId) {
+    postJson(QStringLiteral("/api/get-channel-allowed-reactions"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("channel_id"), channelId}},
+             [this, channelId](const QJsonObject& o, bool ok, const QString&) {
+        if (!ok || !o.value(QStringLiteral("success")).toBool(false)) return;
+        QStringList allowed;
+        for (const QJsonValue& v : o.value(QStringLiteral("reactions")).toArray())
+            allowed.append(v.toString());
+        emit channelAllowedReactions(channelId, allowed);
+    });
+}
+
+void ApiClient::sendChannelMessageSilent(const QString& channelId, const QString& content,
+                                         const QString& tempId, bool silent) {
+    postJson(QStringLiteral("/api/send-channel-message"),
+             {{QStringLiteral("token"), Session::instance().token},
+              {QStringLiteral("channel_id"), channelId},
+              {QStringLiteral("content"), content},
+              {QStringLiteral("temp_id"), tempId},
+              {QStringLiteral("is_silent"), silent}},
+             [this, channelId, content, tempId](const QJsonObject& obj, bool ok, const QString& netErr) {
+        if (!ok && obj.isEmpty()) { emit chatError(QStringLiteral("send"), netErr); return; }
+        if (!obj.value(QStringLiteral("success")).toBool(false)) {
+            emit chatError(QStringLiteral("send"),
+                obj.value(QStringLiteral("message")).toString(QStringLiteral("Не удалось отправить")));
+            return;
+        }
+        ChatMessage m;
+        m.id = obj.value(QStringLiteral("message_id")).toString();
+        m.senderId = Session::instance().userId;
+        m.content = content;
+        m.time = obj.value(QStringLiteral("time")).toString();
+        m.createdAt = obj.value(QStringLiteral("created_at")).toString();
+        m.status = QStringLiteral("sent");
+        m.sent = true;
+        emit messageSent(m, channelId, tempId);
+    });
+}

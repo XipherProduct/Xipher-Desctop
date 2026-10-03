@@ -2090,6 +2090,59 @@ int main(int argc, char** argv) {
         check(true, QStringLiteral("экспорт rich-export.html рядом с бинарем"));
     }
 
+    // ── Хвост ТЗ (MSG-05/08, WIN-03/05, MDV-02, PRF-01/03).
+    {
+        printf("\nХвост ТЗ (MSG-05/08, WIN-03/05, MDV-02, PRF-01/03)\n");
+        // PRF-03: доступные имена ключевых виджетов (список задаётся в buildUi,
+        // композер/кнопки — после создания; берём реальный момент).
+        auto* clAcc = page.findChild<QListWidget*>(QStringLiteral("chatList"));
+        const bool accList = clAcc
+            && clAcc->accessibleName() == QStringLiteral("Список чатов");
+        auto* compAcc = page.findChild<QPlainTextEdit*>(QStringLiteral("composer"));
+        const bool accComp = compAcc
+            && compAcc->accessibleName() == QStringLiteral("Поле сообщения");
+        check(accList && accComp, QStringLiteral("ORCA-имена: список и поле ввода"));
+        // MSG-08: колокольчик виден только в канале (откроем канал? нет — юнит:
+        // кнопка существует, старт скрыта).
+        bool silentFound = false;
+        for (QPushButton* b : page.findChildren<QPushButton*>())
+            if (b->toolTip().contains(QStringLiteral("Тихая отправка"))) {
+                silentFound = true;
+                check(!b->isVisible(), QStringLiteral("колокольчик скрыт вне каналов"));
+            }
+        check(silentFound, QStringLiteral("кнопка тихой отправки есть (MSG-08)"));
+        // WIN-03: <900 — ☰ и сайдбар скрыт; ≥900 — сайдбар виден.
+        page.resize(1280, 800);
+        for (int i = 0; i < 4; ++i) QCoreApplication::processEvents();
+        auto* narrowBtn = page.findChildren<QPushButton*>().size()
+            ? static_cast<QPushButton*>(nullptr) : nullptr;
+        for (QPushButton* b : page.findChildren<QPushButton*>())
+            if (b->toolTip() == QStringLiteral("Чаты")) narrowBtn = b;
+        page.resize(860, 800);
+        for (int i = 0; i < 4; ++i) QCoreApplication::processEvents();
+        auto* sb5 = page.findChild<QWidget*>(QStringLiteral("sidebar"));
+        check(narrowBtn && narrowBtn->isVisible() && !sb5->isVisible(),
+              QStringLiteral("<900px: ☰ виден, сайдбар скрыт (одна колонка)"));
+        page.resize(1280, 800);
+        for (int i = 0; i < 4; ++i) QCoreApplication::processEvents();
+        check(sb5->isVisible(), QStringLiteral("≥900px: сайдбар вернулся"));
+        // WIN-05: кнопка ⧉ в вьюере → WindowStaysOnTop.
+        {
+            ImageViewer::show(&page, QPixmap(100, 100));
+            auto* vv = page.findChild<ImageViewer*>();
+            bool hasWinBtn = false;
+            if (vv)
+                for (QPushButton* b : vv->findChildren<QPushButton*>())
+                    if (b->toolTip().contains(QStringLiteral("поверх всех"))) hasWinBtn = true;
+            check(hasWinBtn, QStringLiteral("кнопка «в окно поверх всех» (WIN-05)"));
+            if (vv) vv->close();
+        }
+        // PRF-01: галка в настройках читается/пишется.
+        Prefs::setBool(QStringLiteral("xipher_hw_render"), false);
+        check(!Prefs::getBool(QStringLiteral("xipher_hw_render"), true),
+              QStringLiteral("галка рендера персистится (PRF-01)"));
+    }
+
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).
     {
         printf("\nМедиавьюер: зум/пан (MDV-01)\n");

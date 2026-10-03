@@ -244,6 +244,12 @@ public:
                          const QString& replyTo = QString());
     void getScheduledMessages(const QString& chatType, const QString& chatId);
     void cancelScheduledMessage(const QString& messageId);
+    // MSG-05: allowlist реакций канала (пусто = всё разрешено; сервер v2
+    // не энфорсит — клиент фильтрует стрип, если список непуст).
+    void getChannelAllowedReactions(const QString& channelId);
+    // MSG-08: silent-отправка в канал (is_silent гасит push у получателей).
+    void sendChannelMessageSilent(const QString& channelId, const QString& content,
+                                  const QString& tempId, bool silent);
 
 signals:
     void loginFinished(const AuthResult& result);
@@ -342,6 +348,7 @@ signals:
     void scheduledCreated(bool ok, const QString& id, const QDateTime& sendAt,
                           const QString& error);
     void scheduledCancelled(const QString& id, bool ok);
+    void channelAllowedReactions(const QString& channelId, const QStringList& allowed);
 
     // Боты и подарки.
     void botCallbackDone(bool ok, const QJsonObject& response);

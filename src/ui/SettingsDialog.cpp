@@ -718,6 +718,13 @@ QWidget* SettingsDialog::buildNotificationsPage() {
             Prefs::setBool(QStringLiteral("xipher_close_to_tray"), on);
         });
         rowLabeled(QStringLiteral("Закрывать окно в трей"), swTray, b9);
+        auto* swGl = new ToggleSwitch();   // PRF-01
+        swGl->setChecked(Prefs::getBool(QStringLiteral("xipher_hw_render"), false));
+        QObject::connect(swGl, &QAbstractButton::toggled, [](bool on) {
+            Prefs::setBool(QStringLiteral("xipher_hw_render"), on);
+        });
+        rowLabeled(QStringLiteral("Аппаратное ускорение интерфейса (OpenGL, после перезапуска)"),
+                   swGl, b9);
         auto* swAuto = new ToggleSwitch();
         swAuto->setChecked(Autostart::isOn());
         QObject::connect(swAuto, &QAbstractButton::toggled, [](bool on) {

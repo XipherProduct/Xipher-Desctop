@@ -939,6 +939,7 @@ void ChatPage::buildUi() {
     chatList_ = new QListWidget(chatsBody);
     chatList_->setObjectName(QStringLiteral("chatList"));
     chatList_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    chatList_->setAccessibleName(QStringLiteral("Список чатов"));
 
     cbl2->addWidget(folderRail_);
     cbl2->addWidget(chatList_, 1);
@@ -1323,6 +1324,14 @@ void ChatPage::buildUi() {
     emojiBtn_->setIcon(Icons::icon(Icons::Smile, 20, iconClr));
     emojiBtn_->setIconSize(QSize(20, 20));
 
+    silentBtn_ = new QPushButton(normal);   // MSG-08
+    silentBtn_->setObjectName(QStringLiteral("composerIcon"));
+    silentBtn_->setCursor(Qt::PointingHandCursor);
+    silentBtn_->setToolTip(QStringLiteral("Тихая отправка (без звука у получателей)"));
+    silentBtn_->setIcon(Icons::icon(Icons::Bell, 20, iconClr));
+    silentBtn_->setIconSize(QSize(20, 20));
+    silentBtn_->setCheckable(true);
+    silentBtn_->setVisible(false);   // только в каналах (is_silent поддержан сервером там)
     micBtn_ = new QPushButton(normal);
     micBtn_->setObjectName(QStringLiteral("micBtn"));
     micBtn_->setCursor(Qt::PointingHandCursor);
@@ -1336,6 +1345,7 @@ void ChatPage::buildUi() {
     sendBtn_->setVisible(false);   // как в вебе: ➤ появляется при вводе текста, 🎤 уходит
 
     cbl->addWidget(attachBtn_);
+    cbl->addWidget(silentBtn_);
     cbl->addWidget(timerBtn_);
     cbl->addWidget(composer_, 1);
     cbl->addWidget(emojiBtn_);
@@ -1732,16 +1742,42 @@ void ChatPage::buildUi() {
         auto* sb = msgScroll_->verticalScrollBar();
         sb->setValue(sb->value() + sb->pageStep());
     });
+    // WIN-03: узкое окно (<900) — сайдбар прячется, кнопка ☰ выдвигает его
+    // оверлеем поверх чата (одноколоночный режим, как в мобильном ТГ).
+    narrowToggleBtn_ = new QPushButton(QStringLiteral("☰"), convHeader);
+    narrowToggleBtn_->setObjectName(QStringLiteral("hdrBtn"));
+    narrowToggleBtn_->setCursor(Qt::PointingHandCursor);
+    narrowToggleBtn_->setToolTip(QStringLiteral("Чаты"));
+    narrowToggleBtn_->setVisible(false);
+    connect(narrowToggleBtn_, &QPushButton::clicked, this, [this]() {
+        const bool show = !sidebar_->isVisible();
+        if (show) {
+            sidebar_->raise();
+            sidebar_->show();
+            if (!splitter_->children().contains(sidebar_)) { /* остаётся в layout */ }
+        } else {
+            sidebar_->hide();
+        }
+    });
 
     // Отложенные (MSG-07): список чата + отмена + recurrence-сверка раз в 60с.
     connect(api_, &ApiClient::scheduledLoaded, this, &ChatPage::onScheduledLoaded);
     connect(api_, &ApiClient::scheduledCreated, this, &ChatPage::onScheduledCreated);
     connect(api_, &ApiClient::scheduledCancelled, this,
             [this](const QString&, bool) { refreshScheduled(); });
+    connect(api_, &ApiClient::channelAllowedReactions, this,
+            [this](const QString& cid, const QStringList& allowed) {
+        if (cid == currentPeerId_) channelAllowedReactions_ = allowed;
+    });
     scheduledCheckTimer_ = new QTimer(this);
     scheduledCheckTimer_->setInterval(60000);
     connect(scheduledCheckTimer_, &QTimer::timeout, this, &ChatPage::checkRecurring);
     scheduledCheckTimer_->start();
+
+    // PRF-03: экранные дикторы (ORCA/NVDA) — после создания всех виджетов.
+    composer_->setAccessibleName(QStringLiteral("Поле сообщения"));
+    sendBtn_->setAccessibleName(QStringLiteral("Отправить"));
+    search_->setAccessibleName(QStringLiteral("Поиск по чатам"));
 
     // Тема из настроек («Оформление»): перегенерировать QSS и инлайн-фоны.
     applyTheme();
@@ -2112,6 +2148,13 @@ void ChatPage::resizeEvent(QResizeEvent* e) {
     }
     // Третья колонка (WIN-01): <1000px — оверлей, иначе — в сплиттере.
     updateThirdColumnMode();
+    // WIN-03: одноколоночный режим <900 — сайдбар в выдвижной оверлей.
+    if (narrowToggleBtn_) {
+        const bool narrow = width() < 900;
+        narrowToggleBtn_->setVisible(narrow);
+        if (narrow && sidebar_->isVisible()) sidebar_->hide();
+        if (!narrow && !sidebar_->isVisible()) sidebar_->show();
+    }
     clampBubbleWidths();
     // Повтор после layout-прохода: контейнер сообщений меняет ширину с отставанием.
     QTimer::singleShot(0, this, &ChatPage::clampBubbleWidths);
@@ -2879,6 +2922,8 @@ void ChatPage::openChat(const Chat& chat) {
     else status = chat.isSaved ? QStringLiteral("Заметки для себя")
                                : (chat.online ? QStringLiteral("в сети") : QStringLiteral("не в сети"));
     peerStatus_->setText(status);
+    if (silentBtn_)
+        silentBtn_->setVisible(chat.kind == ChatKind::Channel);
     setThirdColumnInfo();   // третья колонка: инфо нового чата (если открыта)
     currentForum_ = false;
     currentTopicId_.clear();
@@ -2914,6 +2959,9 @@ void ChatPage::openChat(const Chat& chat) {
         rebuildChatList();
     }
     refreshScheduled();   // отложенные этого чата — секция над композером (MSG-07)
+    // MSG-05: allowlist реакций — грузим в каналах, стрип фильтруется.
+    channelAllowedReactions_.clear();
+    if (chat.kind == ChatKind::Channel) api_->getChannelAllowedReactions(chat.id);
 }
 
 // ── Пины чатов (LST-04) ───────────────────────────────────────────────────────
@@ -3752,6 +3800,10 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         bl->addWidget(text);
     }
 
+    // PRF-03: диктор читает «Сообщение от X: текст, время».
+    bubble->setAccessibleName(QStringLiteral("Сообщение от %1: %2, %3")
+        .arg(msg.sent ? QStringLiteral("вы") : msg.senderName,
+             msg.content.left(80), msg.time));
     // Реакции: чипы [эмодзи ×N] под содержимым; своя — фиолетовая.
     addReactionChips(bubble, bl, msg);
 
@@ -4082,6 +4134,12 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
             if (base.contains(f) && !quick.contains(f)) quick << f;
         for (const QString& e : base)
             if (!quick.contains(e)) quick << e;
+        // MSG-05: allowlist канала — стрип только из разрешённых (если задан).
+        if (!channelAllowedReactions_.isEmpty())
+            quick.erase(std::remove_if(quick.begin(), quick.end(),
+                        [this](const QString& e) {
+                            return !channelAllowedReactions_.contains(e);
+                        }), quick.end());
         for (int qi = 0; qi < quick.size(); ++qi) {
             const QString& e = quick[qi];
             auto* b = new QPushButton(e, bar);
@@ -4317,7 +4375,9 @@ void ChatPage::onSendClicked() {
 
         if (!currentTopicId_.isEmpty())             api_->sendTopicMessage(currentTopicId_, text, tempId, replyTo);
         else if (currentKind_ == ChatKind::Group)   api_->sendGroupMessage(currentPeerId_, text, tempId, replyTo);
-        else if (currentKind_ == ChatKind::Channel) api_->sendChannelMessage(currentPeerId_, text, tempId, replyTo);
+        else if (currentKind_ == ChatKind::Channel) api_->sendChannelMessageSilent(
+            currentPeerId_, text, tempId,
+            silentBtn_ && silentBtn_->isChecked());   // MSG-08: is_silent
         else                                        api_->sendMessage(currentPeerId_, text, tempId, disappearTtl_, replyTo);
         if (currentTopicId_.isEmpty())
             bumpChat(currentPeerId_, text, m.time, /*incrementUnread*/ false);

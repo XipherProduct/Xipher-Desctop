@@ -457,6 +457,9 @@ private:
     void updateUnreadTotalTitle();          // LST-06: «(N) Xipher»
     void maybeOfferFileForLongText();       // MLT-05: >2000 симв → файл
     bool longTextBarShown_ = false;
+    QStringList channelAllowedReactions_;   // MSG-05
+    QPushButton* silentBtn_ = nullptr;      // MSG-08
+    QPushButton* narrowToggleBtn_ = nullptr;   // WIN-03
     void pasteAsMarkdown();                 // MLT-04: Ctrl+Shift+V
     QString recentSearchKey() const { return QStringLiteral("xipher_recent_searches"); }
 

@@ -4,6 +4,8 @@
 #include <QStringList>
 #include <functional>
 
+class QPushButton;
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  ImageViewer — просмотр фото на весь экран (оверлей внутри окна): затемнённый
 //  фон, картинка по центру, закрытие по клику/Esc. Режим галереи: список путей
@@ -31,6 +33,8 @@ public:
     qreal zoomPercent() const { return zoom_ * 100.0; }
     bool isFitMode() const { return fitMode_; }
     QPoint panOffset() const { return QPoint(qRound(panX_), qRound(panY_)); }
+    QPushButton* winBtn_ = nullptr;   // WIN-05: вынос в отдельное окно
+    bool detached_ = false;
     // MDV-03: temp-файл кадра для драг-аута (QMimeData с file:// URL).
     QString ensureDragFile();
 
