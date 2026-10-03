@@ -52,6 +52,7 @@
 #include <QMenu>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
 #include <QSlider>
 #include <QRandomGenerator>
 #include <QDateTimeEdit>
@@ -520,6 +521,65 @@ QLabel* makeAvatar(const QString& url, const QString& text, int size) {
 }
 
 } // namespace
+
+// IVW-01: локальный Instant View — .md как статья (RTE-05 конвертер),
+// .txt — просто текст, прочее — системное открытие.
+void ChatPage::openAttachmentRich(const QString& path) {
+    const QString low = path.toLower();
+    auto openSystem = [path]() {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    };
+    if (!low.endsWith(QStringLiteral(".md")) && !low.endsWith(QStringLiteral(".markdown"))
+        && !low.endsWith(QStringLiteral(".txt"))) {
+        openSystem();
+        return;
+    }
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) { openSystem(); return; }
+    const QString text = QString::fromUtf8(f.readAll());
+    f.close();
+    const RichDoc doc = low.endsWith(QStringLiteral(".txt"))
+        ? [text]() { RichDoc d; RichBlock p; p.text = text; d.blocks.append(p); return d; }()
+        : RichDoc::fromMarkdown(text);
+    // Диалог-статья: скролл + рич-рендер + «Открыть в системе».
+    QDialog dlg(window());
+    dlg.setWindowTitle(QFileInfo(path).fileName());
+    dlg.resize(720, 760);
+    dlg.setStyleSheet(QStringLiteral(
+        "QDialog{background:#131218;} QLabel{color:#726C82;font-size:12px;}"
+        "QPushButton{background:transparent;border:1px solid rgba(255,255,255,0.14);"
+        "border-radius:9px;color:#ACA6BD;font-size:12px;padding:6px 12px;}"));
+    auto* v = new QVBoxLayout(&dlg);
+    v->setContentsMargins(0, 0, 0, 8);
+    v->setSpacing(6);
+    auto* sa = new QScrollArea(&dlg);
+    sa->setWidgetResizable(true);
+    sa->setFrameShape(QFrame::NoFrame);
+    auto* host = new QWidget();
+    auto* hl = new QVBoxLayout(host);
+    hl->setContentsMargins(16, 14, 16, 14);
+    auto* rw = new RichMessageWidget(doc, host);
+    rw->setFixedWidth(660);
+    hl->addWidget(rw);
+    hl->addStretch();
+    sa->setWidget(host);
+    v->addWidget(sa, 1);
+    auto* row = new QWidget(&dlg);
+    auto* rl = new QHBoxLayout(row);
+    rl->setContentsMargins(12, 0, 12, 0);
+    auto* cap = new QLabel(QStringLiteral("Xipher · статья"), row);
+    rl->addWidget(cap);
+    rl->addStretch();
+    auto* sysBtn = new QPushButton(QStringLiteral("Открыть в системе"), row);
+    connect(sysBtn, &QPushButton::clicked, &dlg, [path, &dlg]() {
+        dlg.accept();
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    });
+    rl->addWidget(sysBtn);
+    v->addWidget(row);
+    dlg.exec();
+}
+
 
 
 // Цвета бабблов зависят от активной темы («Оформление» в настройках).
@@ -3645,7 +3705,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
                     DownloadCenter::instance().cancel(fpath);
                     break;
                 case TransferRing::State::Done:
-                    QDesktopServices::openUrl(QUrl::fromLocalFile(savePath));
+                    openAttachmentRich(savePath);
                     break;
             }
         });

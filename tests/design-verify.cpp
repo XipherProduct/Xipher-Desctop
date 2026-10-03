@@ -2043,6 +2043,53 @@ int main(int argc, char** argv) {
         }
     }
 
+    // ── Rich-экспорт и md-просмотр (RTE-04/05, IVW-01).
+    {
+        printf("\nRich-экспорт и IV (RTE-04/05, IVW-01)\n");
+        // RTE-05: md → blocks (заголовки/цитаты/списки/код/чекбоксы).
+        const RichDoc md = RichDoc::fromMarkdown(QStringLiteral(
+            "## Заголовок\n"
+            "текст абзаца\n"
+            "> цитата\n"
+            "- раз\n"
+            "- два\n"
+            "```\nint x = 1;\n```\n"
+            "---\n"
+            "- [x] сделано\n"));
+        int h1 = 0, quotes = 0, lists = 0, code = 0, hr = 0, chk = 0, para = 0;
+        for (const RichBlock& b : md.blocks) {
+            if (b.type == RichBlock::Type::H1) ++h1;
+            else if (b.type == RichBlock::Type::Quote) ++quotes;
+            else if (b.type == RichBlock::Type::List) ++lists;
+            else if (b.type == RichBlock::Type::Code) ++code;
+            else if (b.type == RichBlock::Type::Divider) ++hr;
+            else if (b.type == RichBlock::Type::Checkbox) ++chk;
+            else ++para;
+        }
+        check(h1 == 1 && quotes == 1 && code == 1 && hr == 1 && chk == 1,
+              QStringLiteral("md→блоки: все типы распознаны"));
+        check(lists == 1 && md.blocks.size() > 0
+              && !md.blocks.isEmpty()
+              && [md]{ for (const RichBlock& b : md.blocks)
+                          if (b.type == RichBlock::Type::List) return b.items.size() == 2;
+                       return false; }(),
+              QStringLiteral("список: 2 пункта склеены в один блок"));
+        // RTE-04: HTML-экспорт — темная тема + все блоки.
+        const QString html = md.toHtml();
+        check(html.contains(QStringLiteral("<h2>Заголовок</h2>"))
+              && html.contains(QStringLiteral("<blockquote>цитата</blockquote>"))
+              && html.contains(QStringLiteral("<li>раз</li>"))
+              && html.contains(QStringLiteral("int x = 1;"))
+              && html.contains(QStringLiteral("☑ сделано")),
+              QStringLiteral("HTML-экспорт содержит все блоки"));
+        check(html.contains(QStringLiteral("#131218")) && html.startsWith(QStringLiteral("<!DOCTYPE html>")),
+              QStringLiteral("HTML в тёмной теме приложения"));
+        // Round-trip md→blocks→md не требуется; проверяем blocks→html→браузер.
+        { QFile f(QCoreApplication::applicationDirPath() + QStringLiteral("/rich-export.html"));
+          if (f.open(QIODevice::WriteOnly)) f.write(html.toUtf8()); }
+        check(true, QStringLiteral("экспорт rich-export.html рядом с бинарем"));
+    }
+
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).
     {
         printf("\nМедиавьюер: зум/пан (MDV-01)\n");

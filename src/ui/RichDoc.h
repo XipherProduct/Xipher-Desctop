@@ -41,4 +41,8 @@ public:
 
     // Fallback для plain-клиентов/копирования: markdown-представление.
     QString toPlainMarkdown() const;
+    // RTE-04: HTML-представление (открывается в браузере «похоже»).
+    QString toHtml() const;
+    // RTE-05: markdown → блоки (заголовки/цитаты/списки/код/чекбоксы).
+    static RichDoc fromMarkdown(const QString& md);
 };

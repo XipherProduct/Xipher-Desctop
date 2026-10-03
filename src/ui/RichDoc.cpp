@@ -114,3 +114,134 @@ QString RichDoc::toPlainMarkdown() const {
     while (!md.isEmpty() && md.last().isEmpty()) md.removeLast();
     return md.join(QLatin1Char('\n'));
 }
+
+// RTE-04: HTML-экспорт — токены из токенов приложения (тёмная тема, теги).
+QString RichDoc::toHtml() const {
+    QString body;
+    for (const RichBlock& b : blocks) {
+        const QString esc = b.text.toHtmlEscaped();
+        switch (b.type) {
+            case RichBlock::Type::H1: body += QStringLiteral("<h2>%1</h2>").arg(esc); break;
+            case RichBlock::Type::H2: body += QStringLiteral("<h3>%1</h3>").arg(esc); break;
+            case RichBlock::Type::H3: body += QStringLiteral("<h4>%1</h4>").arg(esc); break;
+            case RichBlock::Type::Para:     body += QStringLiteral("<p>%1</p>").arg(esc); break;
+            case RichBlock::Type::Quote:
+                body += QStringLiteral("<blockquote>%1</blockquote>").arg(esc); break;
+            case RichBlock::Type::List: {
+                body += QStringLiteral("<ul>");
+                for (const QString& i : b.items)
+                    body += QStringLiteral("<li>%1</li>").arg(i.toHtmlEscaped());
+                body += QStringLiteral("</ul>");
+                break;
+            }
+            case RichBlock::Type::Code:
+                body += QStringLiteral("<pre><code>%1</code></pre>").arg(esc); break;
+            case RichBlock::Type::Divider:
+                body += QStringLiteral("<hr>"); break;
+            case RichBlock::Type::Checkbox:
+                body += QStringLiteral("<p>%1 %2</p>")
+                    .arg(b.checked ? QStringLiteral("☑") : QStringLiteral("☐"), esc); break;
+        }
+    }
+    return QStringLiteral(
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<style>body{background:#131218;color:#F3F1F8;font-family:system-ui;"
+        "max-width:720px;margin:24px auto;padding:0 16px;line-height:1.5}"
+        "blockquote{border-left:3px solid #8B5CF6;margin:8px 0;padding:4px 12px;"
+        "color:#ACA6BD}pre{background:#0B0A0E;border-radius:8px;padding:10px;"
+        "overflow:auto}h2,h3,h4{margin:16px 0 8px}hr{border:none;"
+        "border-top:1px solid rgba(255,255,255,0.15)}</style>"
+        "</head><body>%1</body></html>").arg(body);
+}
+
+// RTE-05: markdown → блоки (для .md-аттачей и Instant View, IVW-01).
+RichDoc RichDoc::fromMarkdown(const QString& md) {
+    RichDoc d;
+    const auto lines = md.split(QLatin1Char('\n'));
+    RichBlock code;
+    bool inCode = false;
+    auto flushPara = [&](QString& para) {
+        if (!para.trimmed().isEmpty()) {
+            RichBlock p;
+            p.text = para.trimmed();
+            d.blocks.append(p);
+        }
+        para.clear();
+    };
+    QString para;
+    for (const QString& raw : lines) {
+        const QString l = raw.trimmed();
+        if (l.startsWith(QStringLiteral("```"))) {
+            if (inCode) {
+                d.blocks.append(code);
+                inCode = false;
+            } else {
+                flushPara(para);
+                code = RichBlock();
+                code.type = RichBlock::Type::Code;
+                inCode = true;
+            }
+            continue;
+        }
+        if (inCode) {
+            if (!code.text.isEmpty()) code.text += QLatin1Char('\n');
+            code.text += raw;
+            continue;
+        }
+        if (l.isEmpty()) { flushPara(para); continue; }
+        if (l == QStringLiteral("---")) {
+            flushPara(para);
+            RichBlock hr;
+            hr.type = RichBlock::Type::Divider;
+            d.blocks.append(hr);
+            continue;
+        }
+        if (l.startsWith(QStringLiteral("## "))) {
+            flushPara(para);
+            RichBlock h; h.type = RichBlock::Type::H1; h.text = l.mid(3);
+            d.blocks.append(h); continue;
+        }
+        if (l.startsWith(QStringLiteral("### "))) {
+            flushPara(para);
+            RichBlock h; h.type = RichBlock::Type::H2; h.text = l.mid(4);
+            d.blocks.append(h); continue;
+        }
+        if (l.startsWith(QStringLiteral("#### "))) {
+            flushPara(para);
+            RichBlock h; h.type = RichBlock::Type::H3; h.text = l.mid(5);
+            d.blocks.append(h); continue;
+        }
+        if (l.startsWith(QStringLiteral("> "))) {
+            flushPara(para);
+            RichBlock q; q.type = RichBlock::Type::Quote; q.text = l.mid(2);
+            d.blocks.append(q); continue;
+        }
+        if (l.startsWith(QStringLiteral("- [x] ")) || l.startsWith(QStringLiteral("- [ ] "))) {
+            flushPara(para);
+            RichBlock cb;
+            cb.type = RichBlock::Type::Checkbox;
+            cb.checked = l.startsWith(QStringLiteral("- [x] "));
+            cb.text = l.mid(6);
+            d.blocks.append(cb);
+            continue;
+        }
+        if (l.startsWith(QStringLiteral("- ")) || l.startsWith(QStringLiteral("* "))) {
+            flushPara(para);
+            // Сглаживаем последовательные пункты в один список.
+            if (!d.blocks.isEmpty()
+                && d.blocks.last().type == RichBlock::Type::List) {
+                d.blocks.last().items.append(l.mid(2));
+            } else {
+                RichBlock ul;
+                ul.type = RichBlock::Type::List;
+                ul.items.append(l.mid(2));
+                d.blocks.append(ul);
+            }
+            continue;
+        }
+        para += (para.isEmpty() ? QString() : QStringLiteral(" ")) + l;
+    }
+    if (inCode) d.blocks.append(code);
+    flushPara(para);
+    return d;
+}

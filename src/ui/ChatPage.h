@@ -232,6 +232,7 @@ private:
     void tryJumpToPending();
     void tryJumpToDate();   // SRC-02
     void jumpToNextUnread();   // LST-05
+    void openAttachmentRich(const QString& path);   // IVW-01
     bool listPullActive_ = false;
     QPoint listPullStart_;   // прыжок к сообщению из поиска, когда виджет достроен
     // Боты: inline-кнопки в бабблах, reply-клавиатура над композером, MiniApps.
