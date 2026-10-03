@@ -26,6 +26,7 @@
 #include "net/WsClient.h"
 #include "net/Session.h"
 #include "net/Prefs.h"
+#include "net/VoiceRecorder.h"
 #include "util/Autostart.h"
 #include "net/RnNoise.h"
 #include "ui/RichDoc.h"
@@ -1695,6 +1696,28 @@ int main(int argc, char** argv) {
             vmw.stepFrame(-1);
             check(true, QStringLiteral("шаг кадра без плеера не падает"));
         }
+    }
+
+    // ── Обрезка голосовых (VOX-01).
+    {
+        printf("\nОбрезка голосовых (VOX-01)\n");
+        // 10 с PCM (96 байт/мс) → срез [2000..7000] = 5 с WAV.
+        QByteArray pcm(96 * 10 * 1000, 0);
+        for (int i = 0; i < pcm.size(); i += 2) {
+            const short v = short(1000 * sin(i / 50.0));
+            pcm[i] = char(v & 0xFF); pcm[i + 1] = char((v >> 8) & 0xFF);
+        }
+        const QByteArray wav = VoiceRecorder::pcmToWav(pcm, 2000, 7000);
+        check(wav.size() == 44 + 96 * 5000, QStringLiteral("WAV = 5 с данных (44+480000 байт)"));
+        check(wav.startsWith("RIFF") && wav.mid(8, 4) == "WAVE",
+              QStringLiteral("корректный RIFF/WAVE-заголовок"));
+        // Пустой диапазон — пустой результат (не падаем).
+        check(VoiceRecorder::pcmToWav(pcm, 7000, 2000).isEmpty(),
+              QStringLiteral("инвертированный диапазон → пусто"));
+        // WAV играет в QMediaPlayer-совместимом формате: sample rate 48000 в байтах 24..27.
+        const qint32 rate = qint32((quint8(wav[24])) | (quint8(wav[25]) << 8)
+                                 | (quint8(wav[26]) << 16) | (quint8(wav[27]) << 24));
+        check(rate == 48000, QStringLiteral("sample rate 48000 в заголовке"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

@@ -160,7 +160,8 @@ private slots:
     void onMicClicked();
     void cancelRecording();
     void stopAndSendVoice();
-    void onVoiceRecorded(const QString& filePath, const QString& mimeType);
+    void onVoiceRecorded(const QString& filePath, const QString& mimeType,
+                         const QByteArray& pcmDup, int pcmDurationMs);
     void onVoiceUploaded(const QString& filePath, const QString& fileName, long long fileSize, const QString& tempId);
     void onFileFetched(const QString& filePath, const QByteArray& bytes);
 
@@ -438,6 +439,9 @@ private:
     QSet<QString> shownIds_;   // дедуп сообщений в открытом чате
     int tempCounter_ = 0;
     qreal voiceRate_ = 1.0;   // скорость голосовых (VOX-02), живёт между треками
+    // Обрезка голосовых (VOX-01): трим-диапазон перед отправкой.
+    void openVoiceTrimDialog(const QString& m4aPath, const QByteArray& pcm, int durMs);
+    void sendVoiceFile(const QString& path, const QString& mimeType, int secs);
 
     // Подсветка поискового запроса в бабблах (SRC-04): живёт с последнего
     // прыжка из поиска до смены чата.

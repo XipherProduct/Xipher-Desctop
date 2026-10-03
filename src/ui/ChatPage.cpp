@@ -49,6 +49,7 @@
 #include <QMenu>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QSlider>
 #include <QDateTimeEdit>
 #include <QWidgetAction>
 #include <QAction>
@@ -127,6 +128,8 @@ QString streamerSafeName(const QString& name, int idx, bool own) {
 QString elide(const QString& s, const QFont& f, int px) {
     return QFontMetrics(f).elidedText(s.isEmpty() ? QString() : s, Qt::ElideRight, px);
 }
+
+constexpr int kPcmBytesPerMs = 96;   // 48кГц/моно/16 бит (VOX-01)
 
 // Подпись голосового с длительностью (хранится в content, т.к. сервер не отдаёт duration).
 QString voiceLabel(int secs) {
@@ -5811,12 +5814,25 @@ void ChatPage::onVoicePlayPause(VoiceMessageWidget* w, const QString& path) {
     playVoice(path);
 }
 
-void ChatPage::onVoiceRecorded(const QString& filePath, const QString& mimeType) {
-    QFile f(filePath);
+void ChatPage::onVoiceRecorded(const QString& filePath, const QString& mimeType,
+                               const QByteArray& pcmDup, int pcmDurationMs) {
+    // VOX-01: есть PCM-дубликат → сначала трим-диапазон, отправка из диалога.
+    if (pcmDup.size() > kPcmBytesPerMs * 1000) {   // длиннее секунды — есть что резать
+        openVoiceTrimDialog(filePath, pcmDup, pcmDurationMs);
+        return;
+    }
+    sendVoiceFile(filePath, mimeType, pcmDurationMs / 1000);
+}
+
+// Отправка голосового файла как есть (короткие записи / без дубликата).
+void ChatPage::sendVoiceFile(const QString& path, const QString& mimeType, int secs) {
+    QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) return;
     const QByteArray bytes = f.readAll();
     f.close();
     if (bytes.isEmpty()) return;
+    const QString filePath = path;
+    if (secs > 0) pendingVoiceSecs_ = secs;
 
     const QString tempId = QStringLiteral("tmpv_%1").arg(++tempCounter_);
     pendingVoiceTempId_ = tempId;
@@ -5839,6 +5855,89 @@ void ChatPage::onVoiceRecorded(const QString& filePath, const QString& mimeType)
     }
 
     api_->uploadVoice(bytes, mimeType, tempId);
+}
+
+// ── Обрезка голосового (VOX-01): превью с диапазоном на полосе ───────────────
+
+void ChatPage::openVoiceTrimDialog(const QString& m4aPath, const QByteArray& pcm, int durMs) {
+    auto* ov = new ModalOverlay(window(), 460);
+    ov->card()->setStyleSheet(QStringLiteral(R"QSS(
+#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
+QLabel{color:#F3F1F8;}
+#vtTitle{font-size:16px;font-weight:800;}
+#vtTime{color:#ACA6BD;font-size:13px;}
+QSlider::groove:horizontal{height:6px;border-radius:3px;background:#221F2C;}
+QSlider::sub-page:horizontal{background:#8B5CF6;border-radius:3px;}
+QSlider::handle:horizontal{background:#F3F1F8;width:14px;margin:-6px 0;border-radius:7px;}
+#vtSend{background:#8B5CF6;border:none;border-radius:10px;color:#fff;
+  font-size:14px;font-weight:600;min-height:36px;padding:0 16px;}
+#vtSend:hover{background:#9B72F8;}
+#vtGhost{background:transparent;border:1px solid rgba(255,255,255,0.14);border-radius:10px;
+  color:#ACA6BD;font-size:13px;min-height:34px;padding:0 12px;}
+)QSS"));
+    auto* lay = ov->cardLayout();
+    lay->setContentsMargins(18, 16, 18, 16);
+    lay->setSpacing(10);
+    auto* title = new QLabel(QStringLiteral("🎤 Проверьте запись"), ov->card());
+    title->setObjectName(QStringLiteral("vtTitle"));
+    lay->addWidget(title);
+    auto* timeLbl = new QLabel(QStringLiteral("Длительность: %1 с")
+                     .arg(durMs / 1000), ov->card());
+    timeLbl->setObjectName(QStringLiteral("vtTime"));
+    lay->addWidget(timeLbl);
+
+    // Диапазон: два слайдера (от/до) на одной полосе, границы ≥0.5 с.
+    auto* from = new QSlider(Qt::Horizontal, ov->card());
+    auto* to = new QSlider(Qt::Horizontal, ov->card());
+    from->setRange(0, durMs);
+    to->setRange(0, durMs);
+    to->setValue(durMs);
+    lay->addWidget(new QLabel(QStringLiteral("Начало"), ov->card()));
+    lay->addWidget(from);
+    lay->addWidget(new QLabel(QStringLiteral("Конец"), ov->card()));
+    lay->addWidget(to);
+    auto* rangeLbl = new QLabel(ov->card());
+    rangeLbl->setObjectName(QStringLiteral("vtTime"));
+    auto updRange = [from, to, rangeLbl, durMs]() {
+        if (to->value() - from->value() < 500)
+            to->setValue(qMin(durMs, from->value() + 500));
+        rangeLbl->setText(QStringLiteral("Отправим: %1–%2 с (итого %3 с)")
+            .arg(from->value() / 1000).arg(to->value() / 1000)
+            .arg((to->value() - from->value()) / 1000));
+    };
+    connect(from, &QSlider::valueChanged, ov, updRange);
+    connect(to, &QSlider::valueChanged, ov, updRange);
+    updRange();
+    lay->addWidget(rangeLbl);
+
+    auto* row = new QWidget(ov->card());
+    auto* rl = new QHBoxLayout(row);
+    rl->setContentsMargins(0, 0, 0, 0);
+    rl->setSpacing(8);
+    auto* allBtn = new QPushButton(QStringLiteral("Без обрезки"), row);
+    allBtn->setObjectName(QStringLiteral("vtGhost"));
+    auto* send = new QPushButton(QStringLiteral("Отправить"), row);
+    send->setObjectName(QStringLiteral("vtSend"));
+    rl->addStretch();
+    rl->addWidget(allBtn);
+    rl->addWidget(send);
+    lay->addWidget(row);
+
+    connect(allBtn, &QPushButton::clicked, ov, [this, m4aPath, ov]() {
+        ov->closeAnimated();
+        sendVoiceFile(m4aPath, QStringLiteral("audio/mp4"), 0);
+    });
+    connect(send, &QPushButton::clicked, ov, [this, pcm, from, to, ov]() {
+        // Срез PCM → WAV (48кГц/моно) — точная обрезка без перекодирования.
+        const QByteArray wav = VoiceRecorder::pcmToWav(pcm, from->value(), to->value());
+        ov->closeAnimated();
+        if (wav.isEmpty()) return;
+        const QString tmp = QDir::temp().filePath(QStringLiteral("xipher_trim_%1.wav")
+            .arg(QDateTime::currentMSecsSinceEpoch()));
+        { QFile f(tmp); if (!f.open(QIODevice::WriteOnly)) return; f.write(wav); }
+        sendVoiceFile(tmp, QStringLiteral("audio/wav"), (to->value() - from->value()) / 1000);
+    });
+    ov->showAnimated();
 }
 
 void ChatPage::onVoiceUploaded(const QString& filePath, const QString& fileName,
