@@ -12,6 +12,7 @@
 #include "ui/ChatPage.h"
 #include "app/MainWindow.h"
 #include "ui/ProfilePanel.h"
+#include "ui/GiftArt.h"
 #include "ui/CallOverlay.h"
 #include "ui/EmojiPicker.h"
 #include "ui/AnimatedEmojiLabel.h"
@@ -667,11 +668,13 @@ int main(int argc, char** argv) {
         // Глухой адрес: ответы только те, что тест подаёт вручную (реальный
         // сервер на «Invalid token» перетирал бы мок из другого потока сети).
         api.setBaseUrl(QStringLiteral("http://127.0.0.1:9"));
-        ProfilePanel prof(&api, &page);
-        prof.openFor(QStringLiteral("u_alice"));
+        // ModalOverlay — heap-жизненный цикл (closeAnimated → deleteLater):
+        // стек-объект ронял ASAN bad-free на отложенном delete.
+        QPointer<ProfilePanel> prof(new ProfilePanel(&api, &page));
+        prof->openFor(QStringLiteral("u_alice"));
         // Скелетон проверяем СРАЗУ: сетевой запрос в тестовой среде падает
         // мгновенно и успевает подменить его экраном ошибки.
-        check(prof.findChild<ProfileSkeleton*>() != nullptr,
+        check(prof->findChild<ProfileSkeleton*>() != nullptr,
               QStringLiteral("пока данных нет — скелетон с шиммером"));
 
         QJsonObject u{
@@ -711,27 +714,27 @@ int main(int argc, char** argv) {
                     QJsonObject{{QStringLiteral("name"), QStringLiteral("Звезда")},
                                 {QStringLiteral("icon"), QStringLiteral("⭐")}}}}}},
         };
-        prof.applyProfileView(1, payload, true, QString());
+        prof->applyProfileView(1, payload, true, QString());
         for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
-        const QImage pimg = prof.grab().toImage();
+        const QImage pimg = prof->grab().toImage();
         pimg.save(QStringLiteral("/tmp/design-profile.png"));
 
         // Баннер — фиолетовый градиент бренда с затуханием вниз.
         // Сэмпл в координатах КАРТОЧКИ (оверлей центрирует её внутри себя).
         {
-            QWidget* card = prof.card();
-            const QPoint top = card->mapTo(&prof, QPoint(card->width() / 2, 24));
+            QWidget* card = prof->card();
+            const QPoint top = card->mapTo(prof.data(), QPoint(card->width() / 2, 24));
             const QColor topCol = pimg.pixelColor(top.x(), top.y());
             check(topCol.blue() > 150 && topCol.red() > topCol.green()
                       && topCol.blue() > topCol.red(),
                   QStringLiteral("баннер — градиент бренда: ") + topCol.name());
-            const QPoint bot = card->mapTo(&prof, QPoint(card->width() / 2, 180));
+            const QPoint bot = card->mapTo(prof.data(), QPoint(card->width() / 2, 180));
             const QColor botCol = pimg.pixelColor(bot.x(), bot.y());
             check(botCol.red() < 60 && botCol.blue() < 60,
                   QStringLiteral("баннер затухает в фон панели: ") + botCol.name());
             // Верхние углы скруглены: в самом углу карточки фиолетового быть
             // не должно (баннер клипится под радиус 24, как overflow:hidden).
-            const QPoint corner = card->mapTo(&prof, QPoint(3, 3));
+            const QPoint corner = card->mapTo(prof.data(), QPoint(3, 3));
             const QColor cornerCol = pimg.pixelColor(corner.x(), corner.y());
             check(!(cornerCol.blue() > 120 && cornerCol.blue() > cornerCol.red() + 30),
                   QStringLiteral("верхний угол скруглён (без фиолетового): ")
@@ -739,30 +742,30 @@ int main(int argc, char** argv) {
         }
         // Статус — как в вебе: нижний регистр.
         bool onlineSmall = false;
-        for (QLabel* l : prof.findChildren<QLabel*>())
+        for (QLabel* l : prof->findChildren<QLabel*>())
             if (l->text() == QStringLiteral("в сети")) onlineSmall = true;
         check(onlineSmall, QStringLiteral("статус «в сети» нижним регистром"));
         // 4 плитки действий с иконкой и подписью (не круги).
         int acts = 0;
-        for (QPushButton* b : prof.findChildren<QPushButton*>())
+        for (QPushButton* b : prof->findChildren<QPushButton*>())
             if (b->objectName() == QStringLiteral("profAct")) ++acts;
         check(acts == 4, QStringLiteral("четыре плитки действий: %1").arg(acts));
         int rows = 0;
-        for (QWidget* w : prof.findChildren<QWidget*>())
+        for (QWidget* w : prof->findChildren<QWidget*>())
             if (w->objectName() == QStringLiteral("profRow")
                 || w->objectName() == QStringLiteral("profChanRow")) ++rows;
         check(rows >= 4, QStringLiteral("строки сведений в секции: %1").arg(rows));
-        check(prof.findChild<QPushButton*>(QStringLiteral("profLinkBtn")) != nullptr,
+        check(prof->findChild<QPushButton*>(QStringLiteral("profLinkBtn")) != nullptr,
               QStringLiteral("кнопка «Показать QR-код профиля»"));
         bool giftsTitle = false, marksTitle = false;
-        for (QLabel* l : prof.findChildren<QLabel*>()) {
+        for (QLabel* l : prof->findChildren<QLabel*>()) {
             if (l->text() == QStringLiteral("Подарки")) giftsTitle = true;
             if (l->text() == QStringLiteral("Знаки")) marksTitle = true;
         }
         check(giftsTitle, QStringLiteral("секция «Подарки» с счётчиком"));
         check(marksTitle, QStringLiteral("секция «Знаки»"));
         bool joined = false, bday = false, channel = false;
-        for (QLabel* l : prof.findChildren<QLabel*>()) {
+        for (QLabel* l : prof->findChildren<QLabel*>()) {
             if (l->text() == QStringLiteral("В Xipher с")) joined = true;
             if (l->text() == QStringLiteral("День рождения")) bday = true;
             if (l->text() == QStringLiteral("IT НОВОСТИ")) channel = true;
@@ -770,7 +773,7 @@ int main(int argc, char** argv) {
         check(joined, QStringLiteral("строка «В Xipher с»"));
         check(bday, QStringLiteral("строка «День рождения»"));
         check(channel, QStringLiteral("карточка персонального канала"));
-        prof.closeAnimated();
+        prof->closeAnimated();
         for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
     }
 
@@ -2243,6 +2246,95 @@ int main(int argc, char** argv) {
             check(viewer->panOffset() != panBefore,
                   QStringLiteral("пан средней кнопкой двигает картинку"));
             viewer->close();
+        }
+    }
+
+    // ── Подарки: векторный арт GiftArt (1:1 с gift-art.js веба) ─────────────
+    {
+        printf("\nПодарки (GiftArt, порт gift-art.js)\n");
+        check(GiftArt::known(QStringLiteral("crown")), QStringLiteral("crown есть в каталоге"));
+        check(!GiftArt::known(QStringLiteral("no-such-gift")), QStringLiteral("неизвестный слаг не «известен»"));
+        check(GiftArt::svg(QStringLiteral("crown")).contains("<svg"),
+              QStringLiteral("svg(): разметка с <svg>"));
+        check(GiftArt::svg(QStringLiteral("no-such-gift")).contains("<svg"),
+              QStringLiteral("svg(): неизвестный → нейтральная коробка"));
+        const QPixmap crown = GiftArt::pixmap(QStringLiteral("crown"), 52);
+        check(!crown.isNull() && crown.width() == 104,
+              QStringLiteral("pixmap 52px → 104 физ.пикс (2×)"));
+        check(GiftArt::name(QStringLiteral("crown")) == QString::fromUtf8("Корона"),
+              QStringLiteral("локальное имя: crown → Корона"));
+        check(GiftArt::name(QStringLiteral("no-such-gift")).isEmpty(),
+              QStringLiteral("имя неизвестного — пусто"));
+        check(GiftArt::rarityFor(QStringLiteral("crown"), QString()) == QStringLiteral("legendary")
+              && GiftArt::rarityFor(QStringLiteral("rose"), QStringLiteral("limited")) == QStringLiteral("epic")
+              && GiftArt::rarityFor(QStringLiteral("rose"), QString()) == QStringLiteral("common"),
+              QStringLiteral("редкость: база + подъём limited→epic"));
+        check(GiftArt::rarityLabel(QStringLiteral("legendary")) == QString::fromUtf8("Легендарный"),
+              QStringLiteral("подпись редкости по-русски"));
+        // Номер экземпляра — стабильный FNV-1a (сверено с number() веба).
+        check(GiftArt::number(QStringLiteral("7f2b1c4e-9a10-4d11-8e2a-3c5d6b7e8f90")) == 77320,
+              QStringLiteral("номер экземпляра стабильный (FNV-1a, как в вебе)"));
+        check(GiftArt::number(QString()) == 0, QStringLiteral("без instance_id номера нет"));
+
+        // Карточка в профиле: арт пикселями, а не слаг текстом.
+        {
+            QPointer<ProfilePanel> prof(new ProfilePanel(&api, &page));
+            prof->openFor(QStringLiteral("u_bob"));
+            QJsonObject u{
+                {QStringLiteral("id"), QStringLiteral("u_bob")},
+                {QStringLiteral("username"), QStringLiteral("bob")},
+                {QStringLiteral("display_name"), QStringLiteral("Боб")}};
+            const QJsonObject payload{
+                {QStringLiteral("success"), true},
+                {QStringLiteral("profile"), u},
+                {QStringLiteral("relation"), QJsonObject{{QStringLiteral("is_self"), false}}},
+                {QStringLiteral("gifts"), QJsonObject{
+                    {QStringLiteral("total"), 1},
+                    {QStringLiteral("pinned"), QJsonArray{
+                        QJsonObject{{QStringLiteral("name"), QStringLiteral("Crown")},
+                                    {QStringLiteral("visual_key"), QStringLiteral("crown")},
+                                    {QStringLiteral("icon"), QStringLiteral("crown")},
+                                    {QStringLiteral("message"), QStringLiteral("с Днём рождения!")}}}}}}};
+            prof->applyProfileView(7, payload, true, QString());
+            for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+            bool artPixmap = false, nameOk = false;
+            for (QLabel* l : prof->findChildren<QLabel*>()) {
+                if (!l->pixmap().isNull() && l->pixmap().width() == 52) artPixmap = true;
+                if (l->text() == QStringLiteral("Crown")) nameOk = true;
+            }
+            check(artPixmap, QStringLiteral("профиль: подарок — SVG-арт (GiftArt), не слаг текстом"));
+            check(nameOk, QStringLiteral("профиль: имя подарка из ответа сервера"));
+            prof->deleteLater();
+            for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+        }
+
+        // Баббл-подарок в чате: [[XIPHER_STAR_GIFT]] → карточка с артом,
+        // а не сырой JSON.
+        {
+            ChatMessage gm;
+            gm.id = QStringLiteral("gift1");
+            gm.sent = false;
+            gm.createdAt = QStringLiteral("2026-10-01T18:14:33");
+            gm.time = QStringLiteral("18:14");
+            gm.content = QStringLiteral(
+                "[[XIPHER_STAR_GIFT]]{\"gift_id\":\"crown\",\"gift_name\":\"Crown\","
+                "\"price\":100,\"from\":\"mama\",\"to\":\"me\","
+                "\"instance_id\":\"7f2b1c4e-9a10-4d11-8e2a-3c5d6b7e8f90\"}");
+            QList<ChatMessage> one = msgs;
+            one.append(gm);
+            page.injectForDesignTest(chats, QList<Folder>{work}, QStringLiteral("u_alice"), one);
+            for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+            bool title = false, artPx = false, sub = false, noRaw = true;
+            for (QLabel* l : page.findChildren<QLabel*>()) {
+                if (l->text() == QString::fromUtf8("Вам подарок!")) title = true;
+                if (l->text().contains(QStringLiteral("#77320"))) sub = true;
+                if (l->text().contains(QStringLiteral("[[XIPHER_STAR_GIFT]]"))) noRaw = false;
+                if (!l->pixmap().isNull() && l->pixmap().width() == 46) artPx = true;
+            }
+            check(title, QStringLiteral("чат: звёздный подарок — заголовок «Вам подарок!»"));
+            check(artPx, QStringLiteral("чат: подарок — SVG-арт в баббле (GiftArt)"));
+            check(sub, QStringLiteral("чат: имя + номер экземпляра #77320"));
+            check(noRaw, QStringLiteral("чат: сырой [[XIPHER_STAR_GIFT]] не показывается"));
         }
     }
 

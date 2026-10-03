@@ -45,6 +45,8 @@ set(SOURCES
     src/net/CallController.cpp
     src/net/RnNoise.cpp
     src/ui/RichDoc.cpp
+    src/ui/GiftArt.cpp
+    src/ui/GiftArtData.cpp
     src/ui/RichRender.cpp
     src/ui/RichEditor.cpp
     src/ui/ImageEditor.cpp
@@ -103,6 +105,7 @@ set(HEADERS
     src/net/CallEngine.h
     src/net/CallController.h
     src/ui/CallOverlay.h
+    src/ui/GiftArt.h
     src/ui/Theme.h
     src/ui/BackgroundWidget.h
     src/ui/LoginPage.h
@@ -253,6 +256,15 @@ if(NOT WIN32)
         OUTPUT_NAME "bench-live"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+    # Визуальное доказательство каталога подарков (GiftArt): лист 4×4.
+    qt_add_executable(gift-grab tests/gift-grab.cpp src/ui/GiftArt.cpp src/ui/GiftArtData.cpp)
+    target_include_directories(gift-grab PRIVATE src)
+    target_link_libraries(gift-grab PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+    set_target_properties(gift-grab PROPERTIES
+        OUTPUT_NAME "gift-grab"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
     # Репродуктор бага прокрутки истории: порядок/дыры/якорь при листании вверх.
     qt_add_executable(scroll-repro ${SOURCES} ${HEADERS} tests/scroll-repro.cpp)
     target_include_directories(scroll-repro PRIVATE src)
@@ -302,6 +314,18 @@ if(NOT WIN32)
         foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro)
             target_link_libraries(${t} PRIVATE X11::X11)
         endforeach()
+    endif()
+
+    find_package(Qt6Svg QUIET)
+    if(Qt6Svg_FOUND)
+        message(STATUS "Xipher: Qt6Svg — векторные подарки (GiftArt)")
+        add_compile_definitions(QT_SVG_LIB=1)
+        target_link_libraries(Xipher PRIVATE Qt6::Svg)
+        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro gift-grab)
+            target_link_libraries(${t} PRIVATE Qt6::Svg)
+        endforeach()
+    else()
+        message(STATUS "Xipher: Qt6Svg НЕ найден — GiftArt через image-плагин/кисть")
     endif()
 
     find_package(Qt6DBus QUIET)

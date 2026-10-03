@@ -1,4 +1,5 @@
 #include "ui/ChatPage.h"
+#include "ui/GiftArt.h"
 #include <QMessageBox>
 #include "ui/NewChatDialog.h"
 #include "ui/SettingsDialog.h"
@@ -217,6 +218,7 @@ QStringList emojiOnlyClusters(const QString& content) {
 }
 
 const QString kCallEventPrefix = QStringLiteral("[[XIPHER_CALL_EVENT]]");
+const QString kStarGiftPrefix = QStringLiteral("[[XIPHER_STAR_GIFT]]");
 
 // Подпись лога звонка (как в вебе): отклонён / без ответа / пропущенный.
 QString callEventLabel(const QString& content, bool outgoing) {
@@ -3566,6 +3568,73 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         crow->installEventFilter(new SuperSearchClickFilter([this, peer, nm]() {
             emit callRequested(peer, nm, QString());
         }, crow));
+    } else if (msg.content.startsWith(kStarGiftPrefix)) {
+        // Подарок (star gift, 1:1 с buildStarGiftElement веба): векторный арт
+        // из каталога GiftArt, «Вам подарок!»/«Подарок отправлен!», имя · #N,
+        // от @/для @ и цена в звёздах. Сырой JSON в баббле был багом.
+        QJsonDocument plDoc;
+        {
+            const QString raw = msg.content.mid(kStarGiftPrefix.length()).trimmed();
+            plDoc = QJsonDocument::fromJson(raw.toUtf8());
+        }
+        if (!plDoc.isObject()) {
+            auto* text = new MessageTextLabel(msg.content, bubble);
+            text->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:14px;"));
+            bl->addWidget(text);
+        } else {
+            const QJsonObject pl = plDoc.object();
+            const QString giftId = pl.value(QStringLiteral("gift_id")).toString();
+            auto* grow = new QWidget(bubble);
+            grow->setStyleSheet(QStringLiteral("background:transparent;"));
+            auto* gl = new QHBoxLayout(grow);
+            gl->setContentsMargins(0, 4, 0, 4);
+            gl->setSpacing(12);
+            auto* icon = new QLabel(grow);
+            icon->setPixmap(GiftArt::pixmap(giftId, 46));
+            gl->addWidget(icon);
+            auto* gc = new QVBoxLayout();
+            gc->setSpacing(2);
+            auto* title = new QLabel(out ? QString::fromUtf8("Подарок отправлен!")
+                                         : QString::fromUtf8("Вам подарок!"), grow);
+            title->setStyleSheet(QStringLiteral(
+                "color:#F3F1F8;font-size:14px;font-weight:600;background:transparent;"));
+            gc->addWidget(title);
+            // Имя + номер экземпляра: копия — коллекционный предмет со своим #N.
+            const int num = GiftArt::number(pl.value(QStringLiteral("instance_id")).toString());
+            auto* sub = new QLabel(QStringLiteral("%1%2").arg(
+                pl.value(QStringLiteral("gift_name")).toString(
+                    GiftArt::name(giftId).isEmpty()
+                        ? QString::fromUtf8("Подарок") : GiftArt::name(giftId)),
+                num > 0 ? QStringLiteral(" · #%1").arg(num) : QString()), grow);
+            sub->setStyleSheet(QStringLiteral(
+                "color:#ACA6BD;font-size:13px;background:transparent;"));
+            gc->addWidget(sub);
+            // от @… / для @… · цена (как message-gift-meta веба).
+            QStringList meta;
+            const bool hideSender = pl.value(QStringLiteral("hide_sender")).toBool(false);
+            const QString from = pl.value(QStringLiteral("from")).toString();
+            const QString to = pl.value(QStringLiteral("to")).toString();
+            if (!out && !hideSender && !from.isEmpty())
+                meta << QStringLiteral("от @") + from;
+            if (out && !to.isEmpty()) meta << QStringLiteral("для @") + to;
+            if (!meta.isEmpty()) {
+                auto* m = new QLabel(meta.join(QStringLiteral(" · ")), grow);
+                m->setStyleSheet(QStringLiteral(
+                    "color:#726C82;font-size:12px;background:transparent;"));
+                gc->addWidget(m);
+            }
+            const int price = pl.value(QStringLiteral("price")).toInt(0);
+            if (price > 0) {
+                auto* pr = new QLabel(QStringLiteral("%1 ★").arg(price), grow);
+                pr->setStyleSheet(QStringLiteral(
+                    "color:#F5C518;font-size:12px;font-weight:600;background:transparent;"));
+                gc->addWidget(pr);
+            }
+            gl->addLayout(gc);
+            gl->addStretch();
+            bl->addWidget(grow);
+            bubble->setMinimumWidth(240);
+        }
     } else if (msg.isVoice()) {
         // Голосовое (Telegram-style): ▶/⏸ + waveform + время.
         const QString seed = msg.id.isEmpty() ? msg.filePath : msg.id;

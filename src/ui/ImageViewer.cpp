@@ -11,6 +11,13 @@
 #include <QWheelEvent>
 #include <QDrag>
 #include <QMimeData>
+#include <QApplication>
+#include <QClipboard>
+#include <QDesktopServices>
+#include <QFileDialog>
+#include <QMenu>
+#include <QUrl>
+#include <QSaveFile>
 
 ImageViewer::ImageViewer(QWidget* parent, const QStringList& paths, int index,
                          const Loader& loader, const Requester& requester)
@@ -158,6 +165,48 @@ void ImageViewer::mouseDoubleClickEvent(QMouseEvent* e) {
     e->accept();
     if (fitMode_) applyZoom(1.0, e->position());   // «вписать» → 100%
     else resetZoom();                              // увеличено → «вписать»
+}
+
+// Контекстное меню просмотрщика (как в Telegram/Discord): правый клик по
+// открытому фото больше не «мёртвый» — те же действия, что и в чате.
+void ImageViewer::contextMenuEvent(QContextMenuEvent* e) {
+    QMenu menu(this);
+    QAction* copyAct = menu.addAction(QString::fromUtf8("Копировать изображение"));
+    QAction* saveAct = menu.addAction(QString::fromUtf8("Сохранить как…"));
+    QAction* openAct = menu.addAction(QString::fromUtf8("Открыть в системе"));
+    menu.addSeparator();
+    QAction* closeAct = menu.addAction(QString::fromUtf8("Закрыть просмотр"));
+    QAction* chosen = menu.exec(e->globalPos());
+    if (!chosen) return;
+
+    if (chosen == copyAct) {
+        if (!pm_.isNull()) QApplication::clipboard()->setPixmap(pm_);
+        return;
+    }
+    if (chosen == saveAct) {
+        // Оригинальные байты (качество не теряем), фолбэк — что на экране.
+        QByteArray bytes;
+        if (index_ >= 0 && index_ < paths_.size() && loader_)
+            bytes = loader_(paths_[index_]);
+        QString suggested = QFileInfo(paths_.value(index_)).fileName();
+        if (suggested.isEmpty()) suggested = QStringLiteral("photo.png");
+        const QString dest = QFileDialog::getSaveFileName(
+            this, QString::fromUtf8("Сохранить"), QDir::homePath() + QLatin1Char('/') + suggested);
+        if (dest.isEmpty()) return;
+        if (!bytes.isEmpty()) {
+            QSaveFile out(dest);
+            if (out.open(QIODevice::WriteOnly)) { out.write(bytes); out.commit(); }
+        } else {
+            pm_.save(dest);
+        }
+        return;
+    }
+    if (chosen == openAct) {
+        const QString tmp = ensureDragFile();
+        if (!tmp.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(tmp));
+        return;
+    }
+    if (chosen == closeAct) close();
 }
 
 void ImageViewer::mousePressEvent(QMouseEvent* e) {

@@ -1,5 +1,6 @@
 #include "ui/ProfilePanel.h"
 #include "ui/AvatarUtil.h"
+#include "ui/GiftArt.h"
 #include "ui/Icons.h"
 #include "ui/ModalOverlay.h"
 #include "ui/SuperSearchDialog.h"   // SuperSearchClickFilter (клики по строкам)
@@ -1210,12 +1211,18 @@ void ProfilePanel::fillGiftsRow(const QJsonArray& list) {
         auto* cl = new QVBoxLayout(card);
         cl->setContentsMargins(8, 12, 8, 12);
         cl->setSpacing(6);
-        auto* art = new QLabel(g.value(QStringLiteral("icon")).toString(
-            g.value(QStringLiteral("art")).toString(QString::fromUtf8("\U0001F381"))), card);
+        // Векторный арт каталога (GiftArt, 1:1 с gift-art.js веба): слаг из
+        // visual_key/gift_id/icon — сырой текст «crown» здесь был багом.
+        const QString slug = g.value(QStringLiteral("visual_key")).toString(
+            g.value(QStringLiteral("gift_id")).toString(
+                g.value(QStringLiteral("icon")).toString(
+                    g.value(QStringLiteral("art")).toString())));
+        auto* art = new QLabel(card);
         art->setAlignment(Qt::AlignCenter);
-        art->setStyleSheet(QStringLiteral("font-size:32px;"));
+        art->setPixmap(GiftArt::pixmap(slug, 52));
         auto* nm = new QLabel(g.value(QStringLiteral("name")).toString(
-            g.value(QStringLiteral("title")).toString()), card);
+            GiftArt::name(slug).isEmpty() ? QStringLiteral("Подарок")
+                                          : GiftArt::name(slug)), card);
         nm->setObjectName(QStringLiteral("profGiftName"));
         nm->setAlignment(Qt::AlignHCenter);
         nm->setWordWrap(true);
@@ -1269,24 +1276,48 @@ void ProfilePanel::buildCollectionScreen(QWidget* host) {
         auto* hl = new QHBoxLayout(card);
         hl->setContentsMargins(12, 12, 12, 12);
         hl->setSpacing(12);
-        auto* art = new QLabel(g.value(QStringLiteral("icon")).toString(
-            g.value(QStringLiteral("art")).toString(QString::fromUtf8("\U0001F381"))), card);
-        art->setStyleSheet(QStringLiteral("font-size:34px;background:transparent;"));
+        // Векторный арт + локальное имя/редкость/номер из каталога (GiftArt).
+        const QString slug = g.value(QStringLiteral("art")).toString(
+            g.value(QStringLiteral("visual_key")).toString(
+                g.value(QStringLiteral("gift_id")).toString()));
+        auto* art = new QLabel(card);
+        art->setPixmap(GiftArt::pixmap(slug, 44));
         auto* col2 = new QVBoxLayout();
         col2->setSpacing(2);
+        const QString localName = GiftArt::name(slug);
         auto* nm = new QLabel(g.value(QStringLiteral("name")).toString(
-            g.value(QStringLiteral("title")).toString()), card);
+            localName.isEmpty() ? QStringLiteral("Подарок") : localName), card);
         nm->setStyleSheet(QStringLiteral(
             "color:#F3F1F8;font-size:14px;font-weight:600;background:transparent;"));
         col2->addWidget(nm);
+        // Чип редкости (xp-gift-rar веба): цвет по разряду каталога,
+        // серверный признак тиража редкость только поднимает.
+        {
+            static const auto tierColor = [](const QString& tier) {
+                if (tier == QLatin1String("legendary")) return QStringLiteral("#F5C518");
+                if (tier == QLatin1String("epic"))      return QStringLiteral("#B78BFA");
+                if (tier == QLatin1String("rare"))      return QStringLiteral("#6FB1FC");
+                return QStringLiteral("#726C82");
+            };
+            const QString tier = GiftArt::rarityFor(
+                slug, g.value(QStringLiteral("rarity")).toString());
+            auto* rar = new QLabel(GiftArt::rarityLabel(tier), card);
+            rar->setStyleSheet(QStringLiteral(
+                "color:%1;font-size:11px;font-weight:600;background:transparent;")
+                .arg(tierColor(tier)));
+            col2->addWidget(rar);
+        }
         if (pinned) {
             auto* pin = new QLabel(QStringLiteral("Закреплён"), card);
             pin->setStyleSheet(QStringLiteral(
                 "color:#BBA4FF;font-size:11px;background:transparent;"));
             col2->addWidget(pin);
         }
-        // «от @user · 22 сентября» — как xp-gc__meta.
+        // «№ 12345 · от @user · 22 сентября» — как xp-gc__meta; номер
+        // экземпляра стабильный (FNV-1a от UUID копии, как в вебе).
         QStringList meta;
+        const int instanceNo = GiftArt::number(g.value(QStringLiteral("id")).toString());
+        if (instanceNo > 0) meta << QStringLiteral("№ %1").arg(instanceNo);
         const QString from = g.value(QStringLiteral("from")).toString();
         if (!from.isEmpty()) meta << QStringLiteral("от @") + from;
         const QDateTime dt = parseServerTime(g.value(QStringLiteral("created_at")).toString());
