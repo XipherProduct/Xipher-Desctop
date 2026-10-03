@@ -1,11 +1,15 @@
 #include "ui/ImageViewer.h"
 
 #include <QFile>
+#include <QFileInfo>
+#include <QDir>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTimer>
 #include <QWheelEvent>
+#include <QDrag>
+#include <QMimeData>
 
 ImageViewer::ImageViewer(QWidget* parent, const QStringList& paths, int index,
                          const Loader& loader, const Requester& requester)
@@ -157,7 +161,39 @@ void ImageViewer::mouseMoveEvent(QMouseEvent* e) {
         e->accept();
         return;
     }
+    // MDV-03: drag-out — тащим картинку из вьюера в проводник/мессенджер.
+    // Работает в «вписать»-режиме (в увеличенном ЛКМ занята паном): тянем
+    // за пределы окна — отдаём temp-файл через QMimeData(file://).
+    if (e->buttons() & Qt::LeftButton && fitMode_ && !pm_.isNull() && !paths_.isEmpty()) {
+        const QPointF d = e->position() - pressPos_;
+        if (qAbs(d.x()) > 12 || qAbs(d.y()) > 12) {
+            const QPoint g = e->globalPosition().toPoint();
+            if (!rect().contains(mapFromGlobal(g))) {
+                const QString file = ensureDragFile();
+                if (!file.isEmpty()) {
+                    auto* drag = new QDrag(this);
+                    auto* md = new QMimeData;
+                    md->setUrls({QUrl::fromLocalFile(file)});
+                    drag->setMimeData(md);
+                    drag->setPixmap(pm_.scaled(120, 120, Qt::KeepAspectRatio,
+                                               Qt::SmoothTransformation));
+                    drag->exec(Qt::CopyAction);
+                    return;
+                }
+            }
+        }
+    }
     QWidget::mouseMoveEvent(e);
+}
+
+// MDV-03: кадр → temp-файл (имя из пути/дат), для драг-аута и теста.
+QString ImageViewer::ensureDragFile() {
+    if (pm_.isNull()) return QString();
+    QString name = paths_.isEmpty() ? QString() : QFileInfo(paths_[index_]).fileName();
+    if (name.isEmpty()) name = QStringLiteral("photo.png");
+    const QString file = QDir::tempPath() + QStringLiteral("/xipher_drag_") + name;
+    if (!pm_.save(file)) return QString();
+    return file;
 }
 
 void ImageViewer::mouseReleaseEvent(QMouseEvent* e) {

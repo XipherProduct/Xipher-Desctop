@@ -72,6 +72,33 @@ void VideoMessageWidget::buildUi() {
     connect(playBtn_, &QPushButton::clicked, this, &VideoMessageWidget::togglePlay);
 
     if (!circular_) {
+        // Покадровый шаг (MDV-04): пауза + ±1 кадр (≈30 fps), как «,» и «.» в ТГ.
+        auto* steps = new QWidget(this);
+        auto* sl = new QHBoxLayout(steps);
+        sl->setContentsMargins(0, 0, 0, 0);
+        sl->setSpacing(6);
+        const QString stepQss = QStringLiteral(
+            "QPushButton{border:none;border-radius:12px;background:rgba(255,255,255,0.10);"
+            "color:#F3F1F8;font-size:14px;min-width:26px;min-height:24px;}"
+            "QPushButton:hover{background:rgba(139,92,246,0.4);}");
+        auto* back = new QPushButton(QStringLiteral("‹"), steps);
+        back->setCursor(Qt::PointingHandCursor);
+        back->setToolTip(QStringLiteral("Кадр назад"));
+        back->setStyleSheet(stepQss);
+        connect(back, &QPushButton::clicked, this, [this]() { stepFrame(-1); });
+        auto* fwd = new QPushButton(QStringLiteral("›"), steps);
+        fwd->setCursor(Qt::PointingHandCursor);
+        fwd->setToolTip(QStringLiteral("Кадр вперёд"));
+        fwd->setStyleSheet(stepQss);
+        connect(fwd, &QPushButton::clicked, this, [this]() { stepFrame(+1); });
+        auto* cap = new QLabel(QStringLiteral("кадр"), steps);
+        cap->setStyleSheet(QStringLiteral("color:#726C82;font-size:11px;"));
+        sl->addWidget(back);
+        sl->addWidget(fwd);
+        sl->addWidget(cap);
+        sl->addStretch();
+        root->addWidget(steps);
+
         info_ = new QLabel(this);
         const QString name = fileName_.isEmpty() ? QStringLiteral("Видео") : fileName_;
         info_->setText(QStringLiteral("%1  %2")
@@ -97,6 +124,20 @@ void VideoMessageWidget::hideEvent(QHideEvent* e) {
     playing_ = false;
     playBtn_->setText(QStringLiteral("▶"));
     QWidget::hideEvent(e);
+}
+
+// Покадровый шаг (MDV-04): пауза + позиция ± один кадр (30 fps ≈ 33 мс).
+void VideoMessageWidget::stepFrame(int dir) {
+    if (!player_) return;
+    if (player_->playbackState() == QMediaPlayer::PlayingState) {
+        player_->pause();
+        playing_ = false;
+        if (playBtn_) playBtn_->setText(QStringLiteral("▶"));
+    }
+    const qint64 frameMs = 33;
+    const qint64 pos = player_->position() + dir * frameMs;
+    player_->setPosition(qBound<qint64>(0, pos,
+                          qMax<qint64>(1, player_->duration())));
 }
 
 void VideoMessageWidget::stopPlayback() {

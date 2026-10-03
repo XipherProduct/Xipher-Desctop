@@ -31,6 +31,8 @@ public:
     qreal zoomPercent() const { return zoom_ * 100.0; }
     bool isFitMode() const { return fitMode_; }
     QPoint panOffset() const { return QPoint(qRound(panX_), qRound(panY_)); }
+    // MDV-03: temp-файл кадра для драг-аута (QMimeData с file:// URL).
+    QString ensureDragFile();
 
 protected:
     void paintEvent(QPaintEvent*) override;

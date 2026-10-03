@@ -31,6 +31,9 @@ public:
     bool eventFilter(QObject* obj, QEvent* e) override;
     void stopPlayback();   // полная остановка (смена чата / удаление строки)
 
+    // MDV-04: покадровый шаг (пауза + ±1 кадр ~33 мс). Публично для теста.
+    void stepFrame(int dir);
+
 protected:
     void hideEvent(QHideEvent* e) override;
 

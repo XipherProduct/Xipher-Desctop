@@ -32,6 +32,7 @@
 #include "ui/RichRender.h"
 #include "ui/RichEditor.h"
 #include "ui/VoiceMessageWidget.h"
+#include "ui/VideoMessageWidget.h"
 
 // Шов для эмуляции сигнала скорости (VOX-02).
 static void emitHelperSpeed(VoiceMessageWidget* w, qreal r) {
@@ -1653,6 +1654,47 @@ int main(int argc, char** argv) {
               && quick.at(1) == QString::fromUtf8("\U0001F389"),
               QStringLiteral("избранные 🔥🎉 идут первыми в стрипе"));
         Prefs::setStr(QStringLiteral("xipher_favorite_reactions"), QString());
+    }
+
+    // ── Медиа: drag-out файла + покадровый шаг (MDV-03, MDV-04).
+    {
+        printf("\nДраг-аут и покадрово (MDV-03/04)\n");
+        // MDV-03: кадр выгружается в temp-файл для QDrag.
+        QPixmap dragPix(200, 100);
+        dragPix.fill(Qt::darkCyan);
+        ImageViewer::show(&page, dragPix);
+        ImageViewer* dv = page.findChild<ImageViewer*>();
+        bool dragFileOk = false;
+        if (dv) {
+            dv->QWidget::show();   // статический show() затеняет член
+            for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+            // Одиночное фото: paths_ пуст — используем галерею из одного пути.
+            const QString tmpImg = QDir::temp().filePath(QStringLiteral("dv_mdv03.png"));
+            dragPix.save(tmpImg, "PNG");
+            ImageViewer::showGallery(static_cast<QWidget*>(&page), QStringList() << tmpImg, 0, ImageViewer::Loader());
+            for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+            auto* gal = page.findChildren<ImageViewer*>().value(0);
+            // второй вьюер (галерея) — берём последний созданный
+            for (auto* v : page.findChildren<ImageViewer*>()) dv = v;
+            const QString f = dv->ensureDragFile();
+            dragFileOk = !f.isEmpty() && QFileInfo(f).size() > 0;
+        }
+        check(dragFileOk, QStringLiteral("drag-out: temp-файл кадра создан"));
+        for (auto* v : page.findChildren<ImageViewer*>()) v->close();
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+
+        // MDV-04: кнопки покадрового шага + метод не падает без плеера.
+        {
+            VideoMessageWidget vmw(static_cast<ApiClient*>(nullptr), QStringLiteral("/files/v.mp4"),
+                                   QStringLiteral("v.mp4"), qint64(1000), false, nullptr);
+            bool hasStep = false;
+            for (QPushButton* b : vmw.findChildren<QPushButton*>())
+                if (b->toolTip() == QStringLiteral("Кадр вперёд")) hasStep = true;
+            check(hasStep, QStringLiteral("кнопки «кадр ‹/›» у видео"));
+            vmw.stepFrame(+1);   // без плеера — тихий no-op, не краш
+            vmw.stepFrame(-1);
+            check(true, QStringLiteral("шаг кадра без плеера не падает"));
+        }
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).
