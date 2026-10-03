@@ -76,6 +76,7 @@ public:
     QString debugCurrentChatId() const { return currentPeerId_; }
     int debugChatIndex(const QString& id) const { return indexOfChat(id); }
     int debugMessageCount() const { return currentMessages_.size(); }   // MLT-02 тест
+    int debugCurrentQueueIdx() const { return audioIdx_; }               // VOX-03 тест
     // Прыжок из поиска с подсветкой (SRC-04; публично для design-verify).
     void onSearchResultPickedForTest(const QString& chatId, const QString& messageId,
                                      const QString& keywords) {
@@ -439,6 +440,21 @@ private:
     QSet<QString> shownIds_;   // дедуп сообщений в открытом чате
     int tempCounter_ = 0;
     qreal voiceRate_ = 1.0;   // скорость голосовых (VOX-02), живёт между треками
+    // Мини-плеер с очередью (VOX-03): все аудио чата, next/prev/shuffle.
+    void buildAudioQueue();
+    void playQueueAt(int idx);
+    void queueNext();
+    void queuePrev();
+    void toggleShuffle();
+    void updatePlayerBar();
+    QWidget* audioBar_ = nullptr;
+    QLabel* audioTitle_ = nullptr;
+    QPushButton* audioPlayBtn_ = nullptr;
+    QPushButton* audioShuffleBtn_ = nullptr;
+    QStringList audioQueue_, audioNames_;
+    int audioIdx_ = -1;
+    bool audioShuffle_ = false;
+
     // Обрезка голосовых (VOX-01): трим-диапазон перед отправкой.
     void openVoiceTrimDialog(const QString& m4aPath, const QByteArray& pcm, int durMs);
     void sendVoiceFile(const QString& path, const QString& mimeType, int secs);

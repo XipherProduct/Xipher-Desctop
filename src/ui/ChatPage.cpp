@@ -51,6 +51,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QSlider>
+#include <QRandomGenerator>
 #include <QDateTimeEdit>
 #include <QWidgetAction>
 #include <QAction>
@@ -704,10 +705,14 @@ ChatPage::ChatPage(ApiClient* api, WsClient* ws, QWidget* parent)
         if (activeVoice_) activeVoice_->setTotalMs(dur);
     });
     connect(player_, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus s) {
-        if (s == QMediaPlayer::EndOfMedia && activeVoice_) {
-            activeVoice_->setPlaying(false);
-            activeVoice_->setProgress(0.0);
-            activeVoice_->setElapsedMs(0);
+        if (s == QMediaPlayer::EndOfMedia) {
+            if (activeVoice_) {
+                activeVoice_->setPlaying(false);
+                activeVoice_->setProgress(0.0);
+                activeVoice_->setElapsedMs(0);
+            }
+            // VOX-03: конец трека — следующий из очереди (плеер-бар активен).
+            if (audioIdx_ >= 0 && !audioQueue_.isEmpty()) queueNext();
         }
     });
     connect(player_, &QMediaPlayer::errorOccurred, this, [this](int, const QString& err) {
@@ -1054,6 +1059,56 @@ void ChatPage::buildUi() {
     scheduledLay_->setSpacing(2);
     scheduledBar_->setVisible(false);
     cblOuter->addWidget(scheduledBar_);
+
+    // Мини-плеер (VOX-03): очередь всех аудио чата, next/prev/shuffle.
+    audioBar_ = new QWidget(composerBar);
+    audioBar_->setObjectName(QStringLiteral("replyBar"));
+    {
+        auto* abl = new QHBoxLayout(audioBar_);
+        abl->setContentsMargins(8, 4, 8, 6);
+        abl->setSpacing(6);
+        const QString btnQss = QStringLiteral(
+            "QPushButton{background:transparent;border:none;border-radius:14px;"
+            "color:#ACA6BD;font-size:14px;min-width:28px;min-height:28px;}"
+            "QPushButton:hover{background:rgba(255,255,255,0.06);color:#F3F1F8;}"
+            "QPushButton:checked{color:#8B5CF6;}");
+        auto mk = [&](const QString& t, const char* tip) {
+            auto* b = new QPushButton(t, audioBar_);
+            b->setCursor(Qt::PointingHandCursor);
+            b->setStyleSheet(btnQss);
+            b->setToolTip(QString::fromUtf8(tip));
+            abl->addWidget(b);
+            return b;
+        };
+        connect(mk(QStringLiteral("⏮"), "Предыдущий"), &QPushButton::clicked,
+                this, [this]() { queuePrev(); });
+        audioPlayBtn_ = mk(QStringLiteral("▶"), "Воспроизведение");
+        connect(audioPlayBtn_, &QPushButton::clicked, this, [this]() {
+            if (audioIdx_ < 0) { buildAudioQueue(); if (!audioQueue_.isEmpty()) playQueueAt(0); }
+            else if (player_->playbackState() == QMediaPlayer::PlayingState) player_->pause();
+            else player_->play();
+            updatePlayerBar();
+        });
+        connect(mk(QStringLiteral("⏭"), "Следующий"), &QPushButton::clicked,
+                this, [this]() { queueNext(); });
+        audioShuffleBtn_ = mk(QStringLiteral("🔀"), "Перемешать");
+        audioShuffleBtn_->setCheckable(true);
+        connect(audioShuffleBtn_, &QPushButton::toggled, this, [this](bool on) {
+            audioShuffle_ = on;
+        });
+        audioTitle_ = new QLabel(QStringLiteral("Очередь пуста"), audioBar_);
+        audioTitle_->setStyleSheet(QStringLiteral(
+            "color:#ACA6BD;font-size:13px;padding:0 6px;"));
+        abl->addWidget(audioTitle_, 1);
+        auto* closeBtn = mk(QStringLiteral("✕"), "Закрыть плеер");
+        connect(closeBtn, &QPushButton::clicked, this, [this]() {
+            player_->stop();
+            audioIdx_ = -1;
+            updatePlayerBar();
+        });
+        audioBar_->setVisible(false);
+    }
+    cblOuter->addWidget(audioBar_);
 
     // Полоса отложенных аттачей (MLT-06): дроп файлов → чипы-превью здесь,
     // отправка — вместе со следующим «Отправить» (как pendingAttachments веба).
@@ -2035,6 +2090,10 @@ void ChatPage::debugAction(const QString& name, int arg) {
     else if (name == QLatin1String("deleteSelectedConfirmed")) deleteSelectedConfirmed();
     else if (name == QLatin1String("exitSelection")) exitSelectionMode();
     else if (name == QLatin1String("applyStreamerMode")) applyStreamerMode();
+    else if (name == QLatin1String("buildAudioQueue")) buildAudioQueue();
+    else if (name == QLatin1String("playQueueAt")) playQueueAt(arg);
+    else if (name == QLatin1String("queueNext")) queueNext();
+    else if (name == QLatin1String("queuePrev")) queuePrev();
     else if (name == QLatin1String("archiveChat") && arg >= 0 && arg < chats_.size()) {
         const QString key = chatKeyFor(chats_[arg]);
         if (archivedChats_.contains(key)) archivedChats_.remove(key);
@@ -5974,6 +6033,76 @@ QSlider::handle:horizontal{background:#F3F1F8;width:14px;margin:-6px 0;border-ra
     ov->showAnimated();
 }
 
+// ── Мини-плеер с очередью (VOX-03) ──────────────────────────────────────────
+
+// Очередь = все аудио текущего чата (голосовые + аудиофайлы), хронология.
+void ChatPage::buildAudioQueue() {
+    audioQueue_.clear();
+    audioNames_.clear();
+    for (const ChatMessage& m : currentMessages_) {
+        const bool isAudio = m.isVoice()
+            || m.messageType == QStringLiteral("audio")
+            || m.fileName.toLower().endsWith(QStringLiteral(".mp3"))
+            || m.fileName.toLower().endsWith(QStringLiteral(".m4a"))
+            || m.fileName.toLower().endsWith(QStringLiteral(".wav"))
+            || m.fileName.toLower().endsWith(QStringLiteral(".ogg"));
+        if (isAudio && !m.filePath.isEmpty()) {
+            audioQueue_.append(m.filePath);
+            audioNames_.append(m.fileName.isEmpty() ? m.content.left(24) : m.fileName);
+        }
+    }
+    updatePlayerBar();
+}
+
+void ChatPage::playQueueAt(int idx) {
+    if (audioQueue_.isEmpty()) buildAudioQueue();
+    if (idx < 0 || idx >= audioQueue_.size()) return;
+    audioIdx_ = idx;
+    playVoice(audioQueue_[idx]);
+    updatePlayerBar();
+}
+
+void ChatPage::queueNext() {
+    if (audioQueue_.isEmpty()) buildAudioQueue();
+    if (audioQueue_.isEmpty()) return;
+    if (audioShuffle_) {
+        if (audioQueue_.size() == 1) { playQueueAt(0); return; }
+        int r = QRandomGenerator::global()->bounded(audioQueue_.size());
+        if (r == audioIdx_) r = (r + 1) % audioQueue_.size();
+        playQueueAt(r);
+    } else {
+        playQueueAt((audioIdx_ + 1) % audioQueue_.size());
+    }
+}
+
+void ChatPage::queuePrev() {
+    if (audioQueue_.isEmpty()) buildAudioQueue();
+    if (audioQueue_.isEmpty()) return;
+    playQueueAt((audioIdx_ - 1 + audioQueue_.size()) % audioQueue_.size());
+}
+
+void ChatPage::toggleShuffle() {
+    audioShuffle_ = !audioShuffle_;
+    if (audioShuffleBtn_) audioShuffleBtn_->setChecked(audioShuffle_);
+}
+
+void ChatPage::updatePlayerBar() {
+    if (!audioBar_) return;
+    const bool has = !audioQueue_.isEmpty();
+    audioBar_->setVisible(has);
+    if (!has) return;
+    if (audioIdx_ >= 0 && audioIdx_ < audioNames_.size())
+        audioTitle_->setText(QStringLiteral("🎵 %1  (%2/%3)")
+            .arg(elide(audioNames_[audioIdx_], QFont(), 260))
+            .arg(audioIdx_ + 1).arg(audioQueue_.size()));
+    else
+        audioTitle_->setText(QStringLiteral("🎵 Аудио в чате: %1").arg(audioQueue_.size()));
+    if (audioPlayBtn_)
+        audioPlayBtn_->setText(player_->playbackState() == QMediaPlayer::PlayingState
+                                   ? QStringLiteral("⏸") : QStringLiteral("▶"));
+    if (audioShuffleBtn_) audioShuffleBtn_->setChecked(audioShuffle_);
+}
+
 void ChatPage::onVoiceUploaded(const QString& filePath, const QString& fileName,
                                long long fileSize, const QString& tempId) {
     Q_UNUSED(tempId);
@@ -5986,6 +6115,11 @@ void ChatPage::onVoiceUploaded(const QString& filePath, const QString& fileName,
 
 void ChatPage::playVoice(const QString& path) {
     player_->setPlaybackRate(voiceRate_ > 0.0 ? voiceRate_ : 1.0);   // VOX-02
+    // VOX-03: играем через очередь — бар показывает позицию трека.
+    if (!audioQueue_.contains(path)) buildAudioQueue();
+    const int qi = audioQueue_.indexOf(path);
+    if (qi >= 0) { audioIdx_ = qi; updatePlayerBar(); }
+    else updatePlayerBar();
     if (path.isEmpty()) return;
     // Локальный путь (оптимистичный или уже скачанный) — играем сразу.
     if (!path.startsWith(QStringLiteral("/files"))) {

@@ -1760,6 +1760,57 @@ int main(int argc, char** argv) {
         check(!shot.isNull(), QStringLiteral("скрин редактора сохранён"));
     }
 
+    // ── Мини-плеер с очередью (VOX-03).
+    {
+        printf("\nМини-плеер (VOX-03)\n");
+        QList<ChatMessage> withAudio = msgs;
+        for (int i = 0; i < 3; ++i) {
+            ChatMessage a;
+            a.id = QStringLiteral("aud%1").arg(i);
+            a.sent = false;
+            a.messageType = QStringLiteral("audio");
+            a.filePath = QStringLiteral("/files/track%1.mp3").arg(i);
+            a.fileName = QStringLiteral("track%1.mp3").arg(i);
+            a.content = QStringLiteral("трек %1").arg(i);
+            a.createdAt = QStringLiteral("2026-09-14T13:%1:00").arg(i, 2, 10, QLatin1Char('0'));
+            withAudio.append(a);
+        }
+        page.injectForDesignTest(chats, QList<Folder>{work},
+                                  QStringLiteral("u_alice"), withAudio);
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        page.debugAction(QStringLiteral("buildAudioQueue"));
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        auto* audioBar = page.findChild<QWidget*>(QStringLiteral("replyBar"));
+        QWidget* playerBar = nullptr;
+        for (auto* w : page.findChildren<QWidget*>(QStringLiteral("replyBar")))
+            if (w->isVisible() && w->findChildren<QPushButton*>().size() >= 5) playerBar = w;
+        check(playerBar != nullptr, QStringLiteral("бар плеера показался"));
+        bool title3 = false, buttons = false, shuffleBtn = false;
+        if (playerBar)
+            for (QLabel* l : playerBar->findChildren<QLabel*>())
+                if (l->text().contains(QStringLiteral("Аудио в чате: 3"))) title3 = true;
+        if (playerBar) {
+            QStringList tips;
+            for (QPushButton* b : playerBar->findChildren<QPushButton*>())
+                tips << b->toolTip();
+            buttons = tips.contains(QStringLiteral("Следующий"))
+                   && tips.contains(QStringLiteral("Предыдущий"));
+            shuffleBtn = tips.contains(QStringLiteral("Перемешать"));
+        }
+        check(title3, QStringLiteral("очередь из 3 аудио собрана"));
+        check(buttons, QStringLiteral("кнопки next/prev есть"));
+        check(shuffleBtn, QStringLiteral("кнопка shuffle есть"));
+        // Переход по очереди без сети: индекс двигается, бар обновляется.
+        page.debugAction(QStringLiteral("playQueueAt"), 0);
+        page.debugAction(QStringLiteral("queueNext"));
+        for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
+        check(page.debugCurrentQueueIdx() == 1,
+              QStringLiteral("next: индекс 0 → 1"));
+        page.debugAction(QStringLiteral("queuePrev"));
+        check(page.debugCurrentQueueIdx() == 0,
+              QStringLiteral("prev: индекс 1 → 0"));
+    }
+
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).
     {
         printf("\nМедиавьюер: зум/пан (MDV-01)\n");
