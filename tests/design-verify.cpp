@@ -10,6 +10,7 @@
 // Выход: 0 = все проверки пройдены, 1 = есть расхождения (список в stdout).
 
 #include "ui/ChatPage.h"
+#include "app/MainWindow.h"
 #include "ui/ProfilePanel.h"
 #include "ui/CallOverlay.h"
 #include "ui/EmojiPicker.h"
@@ -25,6 +26,7 @@
 #include "net/WsClient.h"
 #include "net/Session.h"
 #include "net/Prefs.h"
+#include "util/Autostart.h"
 #include "net/RnNoise.h"
 #include "ui/RichDoc.h"
 #include "ui/RichRender.h"
@@ -1574,6 +1576,42 @@ int main(int argc, char** argv) {
         const bool slashWorked = ed.debugSlashCount() > slashBefore;
         qunsetenv("DV_TEST");
         check(slashWorked, QStringLiteral("«/» открывает меню блоков"));
+    }
+
+    // ── Рабочий стол: трей/автозапуск/геометрия (WIN-06/07/08).
+    {
+        printf("\nРабочий стол (WIN-06/07/08)\n");
+        // WIN-07: галка создаёт/удаляет ~/.config/autostart/xipher.desktop.
+        const QString desktop = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+                               + QStringLiteral("/autostart/xipher.desktop");
+        QFile::remove(desktop);
+        Autostart::set(true);
+        check(QFile::exists(desktop), QStringLiteral("автозапуск: .desktop создан"));
+        Autostart::set(false);
+        check(!QFile::exists(desktop), QStringLiteral("автозапуск: снятая галка удаляет файл"));
+        // WIN-08: геометрия сохраняется и восстанавливается.
+        {
+            MainWindow mw;
+            mw.resize(777, 555);
+            mw.saveGeometryForTest();
+            MainWindow mw2;
+            mw2.resize(1280, 800);
+            mw2.restoreGeometryForTest();
+            check(mw2.width() == 777 && mw2.height() == 555,
+                  QStringLiteral("геометрия: ресайз+рестарт — та же (777×555)"));
+        }
+        // WIN-06: галка закрытия в трей доступна в настройках (карточка
+        // «Рабочий стол»), опция в Prefs. Сам трей в offscreen недоступен.
+        bool hasTrayToggle = false, hasAutoToggle = false;
+        {
+            SettingsDialog dlg(&api, &page);
+            for (QLabel* l : dlg.findChildren<QLabel*>()) {
+                if (l->text() == QStringLiteral("Закрывать окно в трей")) hasTrayToggle = true;
+                if (l->text() == QStringLiteral("Запускать вместе с системой")) hasAutoToggle = true;
+            }
+        }
+        check(hasTrayToggle, QStringLiteral("настройки: галка «закрывать в трей»"));
+        check(hasAutoToggle, QStringLiteral("настройки: галка автозапуска"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

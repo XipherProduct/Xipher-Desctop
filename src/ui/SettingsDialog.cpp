@@ -1,4 +1,5 @@
 #include "ui/SettingsDialog.h"
+#include "util/Autostart.h"
 #include "ui/Icons.h"
 #include "ui/Theme.h"
 #include <QUrlQuery>
@@ -706,6 +707,25 @@ QWidget* SettingsDialog::buildNotificationsPage() {
     addToggle(b1, QStringLiteral("Показывать превью сообщений"), QStringLiteral("xipher_notif_preview"), true);
     addToggle(b1, QStringLiteral("Звук звонков"), QStringLiteral("xipher_notif_call_sound"), true);
     v->addWidget(c1);
+
+    // Рабочий стол (WIN-06/07): закрытие в трей + автозапуск с системой.
+    {
+        QVBoxLayout* b9 = nullptr;
+        auto* c9 = sectionCard(QStringLiteral("Рабочий стол"), b9);
+        auto* swTray = new ToggleSwitch();
+        swTray->setChecked(Prefs::getBool(QStringLiteral("xipher_close_to_tray"), false));
+        QObject::connect(swTray, &QAbstractButton::toggled, [](bool on) {
+            Prefs::setBool(QStringLiteral("xipher_close_to_tray"), on);
+        });
+        rowLabeled(QStringLiteral("Закрывать окно в трей"), swTray, b9);
+        auto* swAuto = new ToggleSwitch();
+        swAuto->setChecked(Autostart::isOn());
+        QObject::connect(swAuto, &QAbstractButton::toggled, [](bool on) {
+            Autostart::set(on);
+        });
+        rowLabeled(QStringLiteral("Запускать вместе с системой"), swAuto, b9);
+        v->addWidget(c9);
+    }
 
     // Тихие часы: одна строка «Время тишины» + два time-поля (как в вебе).
     QVBoxLayout* b2 = nullptr;

@@ -17,7 +17,10 @@
 #include <QTimer>
 #include <QSystemTrayIcon>
 #include <QStyle>
+#include <QMenu>
+#include <QCloseEvent>
 #include "net/Prefs.h"
+#include "util/Autostart.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -78,12 +81,38 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         enterChat();
     });
 
-    // Системные уведомления (трей) о входящих сообщениях.
+    // Трей (WIN-06): иконка + меню (открыть/опции/выход), клик — разворот,
+    // опция «закрывать в трей» — закрытие окна прячет приложение.
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
         tray_ = new QSystemTrayIcon(this);
         tray_->setIcon(windowIcon().isNull() ? style()->standardIcon(QStyle::SP_MessageBoxInformation)
                                              : windowIcon());
         tray_->setToolTip(QStringLiteral("Xipher"));
+        auto* trayMenu = new QMenu(this);
+        auto* openAct = trayMenu->addAction(QStringLiteral("Открыть Xipher"));
+        connect(openAct, &QAction::triggered, this, [this]() { activateWindowFromTray(); });
+        auto* trayClose = trayMenu->addAction(QStringLiteral("Закрывать окно в трей"));
+        trayClose->setCheckable(true);
+        trayClose->setChecked(Prefs::getBool(QStringLiteral("xipher_close_to_tray"), false));
+        connect(trayClose, &QAction::toggled, this, [](bool on) {
+            Prefs::setBool(QStringLiteral("xipher_close_to_tray"), on);
+        });
+        auto* autoAct = trayMenu->addAction(QStringLiteral("Запускать с системой"));
+        autoAct->setCheckable(true);
+        autoAct->setChecked(Autostart::isOn());
+        connect(autoAct, &QAction::toggled, this, [](bool on) { Autostart::set(on); });
+        trayMenu->addSeparator();
+        auto* quitAct = trayMenu->addAction(QStringLiteral("Выход"));
+        connect(quitAct, &QAction::triggered, qApp, []() {
+            Prefs::setBool(QStringLiteral("__quitting"), true);
+            qApp->quit();
+        });
+        tray_->setContextMenu(trayMenu);
+        connect(tray_, &QSystemTrayIcon::activated, this,
+                [this](QSystemTrayIcon::ActivationReason r) {
+            if (r == QSystemTrayIcon::Trigger || r == QSystemTrayIcon::DoubleClick)
+                activateWindowFromTray();
+        });
         tray_->show();
     }
     connect(chat_, &ChatPage::notify, this, [this](const QString& title, const QString& body) {
@@ -150,6 +179,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Минимальный размер окна: ниже раскладка не сжимается, а перестраивается.
     setMinimumSize(680, 480);
     resize(1280, 800);
+    restoreGeometryFromPrefs();   // WIN-08: прошлая геометрия окна
     tryRestoreSession();
 }
 
@@ -189,6 +219,37 @@ void MainWindow::enterChat() {
     stack_->setCurrentIndex(PageChat);
     chat_->load();   // грузим чаты + запускаем realtime
     if (callPoll_) callPoll_->start();   // следим за входящими звонками
+}
+
+void MainWindow::closeEvent(QCloseEvent* e) {
+    // WIN-06: опция «закрывать в трей» — окно прячется, приложение живёт.
+    if (tray_ && Prefs::getBool(QStringLiteral("xipher_close_to_tray"), false)
+        && !property("forceQuit").toBool()) {
+        hide();
+        e->ignore();
+        return;
+    }
+    saveGeometryToPrefs();
+    QMainWindow::closeEvent(e);
+}
+
+void MainWindow::saveGeometryForTest() { saveGeometryToPrefs(); }
+bool MainWindow::restoreGeometryForTest() { return restoreGeometryFromPrefs(); }
+
+void MainWindow::saveGeometryToPrefs() {
+    Prefs::store().setValue(QStringLiteral("xipher_window_geometry"), saveGeometry());
+}
+
+bool MainWindow::restoreGeometryFromPrefs() {
+    const QByteArray geo = Prefs::store()
+        .value(QStringLiteral("xipher_window_geometry")).toByteArray();
+    return !geo.isEmpty() && restoreGeometry(geo);
+}
+
+void MainWindow::activateWindowFromTray() {
+    showNormal();
+    raise();
+    activateWindow();
 }
 
 void MainWindow::tryRestoreSession() {
