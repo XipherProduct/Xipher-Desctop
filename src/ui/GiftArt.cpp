@@ -9,7 +9,7 @@
 #include <QMutexLocker>
 #include <QPainter>
 
-#ifdef QT_SVG_LIB
+#ifdef XIPHER_QT_SVG
 #include <QSvgRenderer>
 #endif
 
@@ -48,7 +48,7 @@ QPixmap GiftArt::pixmap(const QString& slug, int px) {
     QImage img(px * 2, px * 2, QImage::Format_ARGB32_Premultiplied);
     img.fill(Qt::transparent);
     bool painted = false;
-#ifdef QT_SVG_LIB
+#ifdef XIPHER_QT_SVG
     {
         QSvgRenderer renderer(markup);
         if (renderer.isValid()) {

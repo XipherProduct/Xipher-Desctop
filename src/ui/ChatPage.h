@@ -522,6 +522,8 @@ private:
     void forwardSelected();    // MLT-02
     void copySelected();       // MLT-02
     // Опросы (MSG-06): рендер карточки, обновление по get-poll, создание.
+    void addStarGiftBubble(QWidget* bubble, QVBoxLayout* bl,
+                           const ChatMessage& msg, bool out);   // карточка подарка
     void addPollBubble(QWidget* bubble, QVBoxLayout* bl, const ChatMessage& msg);
     void onPollLoaded(const QString& messageId, const QJsonObject& poll, bool ok);
     void openPollDialog();

@@ -18,6 +18,9 @@
 #include <QMenu>
 #include <QUrl>
 #include <QSaveFile>
+#include <QCloseEvent>
+#include <QMessageBox>
+#include <QTemporaryDir>
 
 ImageViewer::ImageViewer(QWidget* parent, const QStringList& paths, int index,
                          const Loader& loader, const Requester& requester)
@@ -185,10 +188,13 @@ void ImageViewer::contextMenuEvent(QContextMenuEvent* e) {
     }
     if (chosen == saveAct) {
         // Оригинальные байты (качество не теряем), фолбэк — что на экране.
+        // Оригинальные байты (качество не теряем); если кадр ещё не скачан —
+        // просим загрузку и сохраняем экранную копию с честным предупреждением.
+        const QString path = paths_.value(index_);
         QByteArray bytes;
-        if (index_ >= 0 && index_ < paths_.size() && loader_)
-            bytes = loader_(paths_[index_]);
-        QString suggested = QFileInfo(paths_.value(index_)).fileName();
+        if (!path.isEmpty() && loader_) bytes = loader_(path);
+        if (bytes.isEmpty() && !path.isEmpty() && requester_) requester_(path);
+        QString suggested = QFileInfo(path).fileName();
         if (suggested.isEmpty()) suggested = QStringLiteral("photo.png");
         const QString dest = QFileDialog::getSaveFileName(
             this, QString::fromUtf8("Сохранить"), QDir::homePath() + QLatin1Char('/') + suggested);
@@ -196,8 +202,9 @@ void ImageViewer::contextMenuEvent(QContextMenuEvent* e) {
         if (!bytes.isEmpty()) {
             QSaveFile out(dest);
             if (out.open(QIODevice::WriteOnly)) { out.write(bytes); out.commit(); }
-        } else {
-            pm_.save(dest);
+        } else if (pm_.save(dest)) {
+            QMessageBox::information(this, QString::fromUtf8("Сохранено"),
+                QString::fromUtf8("Оригинал ещё не загружен — сохранена копия с экрана."));
         }
         return;
     }
@@ -262,11 +269,35 @@ void ImageViewer::mouseMoveEvent(QMouseEvent* e) {
 // MDV-03: кадр → temp-файл (имя из пути/дат), для драг-аута и теста.
 QString ImageViewer::ensureDragFile() {
     if (pm_.isNull()) return QString();
+    // Оригинальные байты из кэша (loader_) — качество и формат без потерь;
+    // экранная копия — только если оригинала ещё нет.
+    QByteArray bytes;
+    if (index_ >= 0 && index_ < paths_.size() && loader_)
+        bytes = loader_(paths_[index_]);
     QString name = paths_.isEmpty() ? QString() : QFileInfo(paths_[index_]).fileName();
     if (name.isEmpty()) name = QStringLiteral("photo.png");
-    const QString file = QDir::tempPath() + QStringLiteral("/xipher_drag_") + name;
-    if (!pm_.save(file)) return QString();
+    if (!name.contains(QLatin1Char('.'))) {
+        name += bytes.startsWith("\x89PNG") ? QStringLiteral(".png")
+                                            : QStringLiteral(".jpg");
+    }
+    const QString file = QDir::tempPath()
+        + QStringLiteral("/xipher_view_") + QString::number(qHash(name)) + QLatin1Char('_') + name;
+    bool ok = false;
+    if (!bytes.isEmpty()) {
+        QFile f(file);
+        ok = f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size();
+    } else {
+        ok = pm_.save(file);
+    }
+    if (!ok) return QString();
+    if (!tempFiles_.contains(file)) tempFiles_.append(file);
     return file;
+}
+
+// Temp-копии живут только пока открыт вьюер — снаружи файл не нужен.
+void ImageViewer::cleanupTempFiles() {
+    for (const QString& f : std::as_const(tempFiles_)) QFile::remove(f);
+    tempFiles_.clear();
 }
 
 void ImageViewer::mouseReleaseEvent(QMouseEvent* e) {
@@ -298,6 +329,11 @@ bool ImageViewer::eventFilter(QObject* obj, QEvent* e) {
         update();
     }
     return QWidget::eventFilter(obj, e);
+}
+
+void ImageViewer::closeEvent(QCloseEvent* e) {
+    cleanupTempFiles();
+    QWidget::closeEvent(e);
 }
 
 void ImageViewer::paintEvent(QPaintEvent*) {

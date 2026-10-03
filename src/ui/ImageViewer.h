@@ -35,8 +35,11 @@ public:
     QPoint panOffset() const { return QPoint(qRound(panX_), qRound(panY_)); }
     QPushButton* winBtn_ = nullptr;   // WIN-05: вынос в отдельное окно
     bool detached_ = false;
-    // MDV-03: temp-файл кадра для драг-аута (QMimeData с file:// URL).
+    // MDV-03: temp-файл кадра для драг-аута/«открыть в системе».
+    // Пишет ОРИГИНАЛЬНЫЕ байты кадра (loader_), экранная копия — фолбэк;
+    // файл регистрируется и удаляется при закрытии вьюера.
     QString ensureDragFile();
+    void cleanupTempFiles();   // удалить temp-копии кадров
 
 protected:
     void paintEvent(QPaintEvent*) override;
@@ -45,6 +48,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent*) override;
     void mouseDoubleClickEvent(QMouseEvent*) override;
     void contextMenuEvent(QContextMenuEvent*) override;   // ПКМ — меню (как в ТГ/ДС)
+    void closeEvent(QCloseEvent*) override;               // убрать temp-копии
     void wheelEvent(QWheelEvent*) override;
     void keyPressEvent(QKeyEvent*) override;
     bool eventFilter(QObject* obj, QEvent* e) override;
@@ -76,4 +80,5 @@ private:
     QPoint panPressPos_;
     qreal panPressX_ = 0.0, panPressY_ = 0.0;
     QPointF pressPos_;               // где началось нажатие (клик vs драг)
+    QStringList tempFiles_;          // temp-копии кадра — чистятся при закрытии
 };

@@ -38,6 +38,19 @@
 //  Палитра — токены tokens.css; размеры — из profile.css, без «на глаз».
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
+namespace {
+
+// Слаг подарка для GiftArt: profile/view кладёт его в visual_key,
+// of-user — в art (на сервере это один и тот же COALESCE(visual_key, id)
+// каталога). Больше полей не существует; icon — эмодзи, gift_id/id — UUID.
+QString giftSlug(const QJsonObject& g) {
+    QString slug = g.value(QStringLiteral("visual_key")).toString();
+    if (slug.isEmpty()) slug = g.value(QStringLiteral("art")).toString();
+    return slug;
+}
+
+} // namespace
+
 
 // Токены темы (тёмная), 1:1 с tokens.css.
 const QColor  kSurf1(0x13, 0x12, 0x18);      // surface-1 — фон панели
@@ -1211,18 +1224,14 @@ void ProfilePanel::fillGiftsRow(const QJsonArray& list) {
         auto* cl = new QVBoxLayout(card);
         cl->setContentsMargins(8, 12, 8, 12);
         cl->setSpacing(6);
-        // Векторный арт каталога (GiftArt, 1:1 с gift-art.js веба): слаг из
-        // visual_key/gift_id/icon — сырой текст «crown» здесь был багом.
-        const QString slug = g.value(QStringLiteral("visual_key")).toString(
-            g.value(QStringLiteral("gift_id")).toString(
-                g.value(QStringLiteral("icon")).toString(
-                    g.value(QStringLiteral("art")).toString())));
+        // Векторный арт каталога (GiftArt, 1:1 с gift-art.js веба).
+        const QString slug = giftSlug(g);
         auto* art = new QLabel(card);
         art->setAlignment(Qt::AlignCenter);
         art->setPixmap(GiftArt::pixmap(slug, 52));
+        // Сервер всегда отдаёт name; локальное имя — фолбэк для будущего поля.
         auto* nm = new QLabel(g.value(QStringLiteral("name")).toString(
-            GiftArt::name(slug).isEmpty() ? QStringLiteral("Подарок")
-                                          : GiftArt::name(slug)), card);
+            GiftArt::name(slug)), card);
         nm->setObjectName(QStringLiteral("profGiftName"));
         nm->setAlignment(Qt::AlignHCenter);
         nm->setWordWrap(true);
@@ -1277,16 +1286,13 @@ void ProfilePanel::buildCollectionScreen(QWidget* host) {
         hl->setContentsMargins(12, 12, 12, 12);
         hl->setSpacing(12);
         // Векторный арт + локальное имя/редкость/номер из каталога (GiftArt).
-        const QString slug = g.value(QStringLiteral("art")).toString(
-            g.value(QStringLiteral("visual_key")).toString(
-                g.value(QStringLiteral("gift_id")).toString()));
+        const QString slug = giftSlug(g);
         auto* art = new QLabel(card);
         art->setPixmap(GiftArt::pixmap(slug, 44));
         auto* col2 = new QVBoxLayout();
         col2->setSpacing(2);
-        const QString localName = GiftArt::name(slug);
         auto* nm = new QLabel(g.value(QStringLiteral("name")).toString(
-            localName.isEmpty() ? QStringLiteral("Подарок") : localName), card);
+            GiftArt::name(slug)), card);
         nm->setStyleSheet(QStringLiteral(
             "color:#F3F1F8;font-size:14px;font-weight:600;background:transparent;"));
         col2->addWidget(nm);

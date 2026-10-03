@@ -4,6 +4,8 @@
 // ровно то, что видит пользователь, без ручных скриншотов.
 #include <QApplication>
 #include <QTimer>
+#include <QScrollBar>
+#include <QScrollArea>
 #include <QWidget>
 #include <QJsonDocument>
 #include <QLabel>
@@ -34,7 +36,7 @@ int main(int argc, char** argv) {
     ApiClient api;
     api.setBaseUrl(QStringLiteral("https://messenger.xipher.pro"));
 
-    ProfilePanel prof(&api, &host);
+    auto* prof = new ProfilePanel(&api, &host);
     QObject::connect(&api, &ApiClient::profileViewLoaded,
                      &app, [](qint64, const QJsonObject& data, bool ok, const QString& err) {
         if (!ok || data.isEmpty()) {
@@ -63,27 +65,38 @@ int main(int argc, char** argv) {
     });
 
     // Себя открываем: у пользователя именно свой профиль под рукой.
-    prof.openFor(Session::instance().userId);
+    prof->openFor(Session::instance().userId);
 
     // Есть ли секция «Подарки» в отрисованном профиле.
     QTimer::singleShot(3000, &app, [&]() {
         int giftLabels = 0;
-        for (QLabel* l : prof.findChildren<QLabel*>())
+        for (QLabel* l : prof->findChildren<QLabel*>())
             if (l->text() == QStringLiteral("Подарки")) ++giftLabels;
         fprintf(stderr, "[widgets] меток «Подарки»: %d\n", giftLabels);
         int giftCards = 0;
-        for (QWidget* w : prof.findChildren<QWidget*>())
+        for (QWidget* w : prof->findChildren<QWidget*>())
             if (w->objectName() == QStringLiteral("profGift")) ++giftCards;
         fprintf(stderr, "[widgets] карточек подарков: %d\n", giftCards);
     });
     int shots = 0;
     QTimer t;
     QObject::connect(&t, &QTimer::timeout, &app, [&]() {
-        const QPixmap pm = prof.grab();
+        // Кадр 3+ — доскролливаем контент до секции подарков, чтобы ряд
+        // попал в скрин целиком (в первом кадре он за нижним краем).
+        if (shots >= 3) {
+            // Первый попавшийся QScrollBar — не факт что контентный: берём
+            // вертикальные скроллы всех QScrollArea с реальным диапазоном.
+            for (QScrollArea* sa : prof->findChildren<QScrollArea*>()) {
+                if (QScrollBar* vs = sa->verticalScrollBar(); vs && vs->maximum() > 0)
+                    vs->setValue(vs->maximum());
+            }
+            for (int i = 0; i < 15; ++i) QCoreApplication::processEvents();
+        }
+        const QPixmap pm = prof->grab();
         pm.save(QStringLiteral("/tmp/profile-live-%1.png").arg(shots));
         fprintf(stderr, "[grab %d] %dx%d → /tmp/profile-live-%1.png\n",
                 shots, pm.width(), pm.height());
-        if (++shots >= 4) app.quit();
+        if (++shots >= 5) app.quit();
     });
     t.start(2500);
 
