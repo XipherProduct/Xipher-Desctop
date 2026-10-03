@@ -73,6 +73,8 @@ signals:
     // keywords — последний запрос (для подсветки в бабблах, SRC-04).
     void resultPicked(const QString& chatId, const QString& messageId,
                       const QString& keywords);
+    // SRC-02: выбрана дата — открыть чат и догрузить до неё.
+    void dateJumpRequested(const QString& chatId, const QString& isoDate);
 
 protected:
     void keyPressEvent(QKeyEvent* e) override;

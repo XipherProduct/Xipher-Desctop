@@ -104,6 +104,9 @@
 #include <QMediaPlayer>
 #include <QAudioOutput>
 #include <QDir>
+#include <zlib.h>
+#include <QDataStream>
+#include <functional>
 #include <QFile>
 #include <QBuffer>
 #include <QImage>
@@ -132,6 +135,45 @@ QString streamerSafeName(const QString& name, int idx, bool own) {
 QString elide(const QString& s, const QFont& f, int px) {
     return QFontMetrics(f).elidedText(s.isEmpty() ? QString() : s, Qt::ElideRight, px);
 }
+// ── Эмодзи-эффект (MSG-16): одиночный ❤️/🎉 при отправке — всплеск на экране.
+class EmojiBurst : public QWidget {
+public:
+    EmojiBurst(const QString& emoji, QWidget* host)
+        : QWidget(host), emoji_(emoji) {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setAttribute(Qt::WA_DeleteOnClose);
+        setGeometry(host->rect());
+        raise();
+        show();
+        auto* a = new QPropertyAnimation(this, "burstPhase", this);
+        a->setDuration(1500);
+        a->setStartValue(0.0);
+        a->setEndValue(1.0);
+        a->setEasingCurve(QEasingCurve::OutCubic);
+        connect(a, &QPropertyAnimation::finished, this, &QWidget::close);
+        a->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+    qreal burstPhase() const { return phase_; }
+    void setBurstPhase(qreal p) { phase_ = p; update(); }
+    Q_PROPERTY(qreal burstPhase READ burstPhase WRITE setBurstPhase)
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::TextAntialiasing);
+        // Крупное эмодзи взлетает из низа и тает; масштаб 64→220.
+        const qreal t = phase_;
+        QFont f = p.font();
+        f.setPixelSize(int(64 + 160 * t));
+        p.setFont(f);
+        p.setOpacity(1.0 - t * 0.9);
+        p.drawText(QRectF(0, height() * (0.75 - 0.55 * t), width(), height() * 0.5),
+                   Qt::AlignHCenter, emoji_);
+    }
+private:
+    QString emoji_;
+    qreal phase_ = 0.0;
+};
+
 
 constexpr int kPcmBytesPerMs = 96;   // 48кГц/моно/16 бит (VOX-01)
 
@@ -1460,6 +1502,9 @@ void ChatPage::buildUi() {
     connect(newChatBtn, &QPushButton::clicked, this, &ChatPage::openNewChatDialog);
     connect(menuBtn_, &QPushButton::clicked, this, &ChatPage::toggleAppMenu);
     connect(chatList_, &QListWidget::itemClicked, this, &ChatPage::onChatClicked);
+    // LST-05: pull-жест — тянешь список вниз у самого верха → прыжок к
+    // следующему непрочитанному (как в мобильном ТГ).
+    chatList_->viewport()->installEventFilter(this);
     chatList_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(chatList_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& p) {
         QListWidgetItem* it = chatList_->itemAt(p);
@@ -1899,6 +1944,15 @@ void ChatPage::openSuperSearch() {
         superSearch_->setGeometry(rect());
         connect(superSearch_, &SuperSearchDialog::resultPicked,
                 this, &ChatPage::onSearchResultPicked);
+    // SRC-02: прыжок к дате — открыть чат и найти первое сообщение дня.
+    connect(superSearch_, &SuperSearchDialog::dateJumpRequested, this,
+            [this](const QString& chatId, const QString& isoDate) {
+        const int idx = indexOfChat(chatId);
+        if (idx < 0) return;
+        openChat(chats_[idx]);
+        pendingJumpDate_ = isoDate;
+        tryJumpToDate();
+    });
     }
     superSearch_->setChats(chats_);   // для области «Во всех чатах»
     // Группа (форум-темы считаем группой) или личка; без чата — глобально.
@@ -2149,6 +2203,7 @@ void ChatPage::debugAction(const QString& name, int arg) {
     else if (name == QLatin1String("detachChat")) {
         if (arg >= 0 && arg < chats_.size()) detachChatToWindow(chats_[arg].id);
     }
+    else if (name == QLatin1String("jumpNextUnread")) jumpToNextUnread();
     else if (name == QLatin1String("closeDetached")) {
         if (arg >= 0 && arg < chats_.size()) {
             ChatWindow* w = detachedWindows_.value(chats_[arg].id);
@@ -2896,6 +2951,23 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
             }
         }
     }
+    // LST-05: pull-жест списка чатов к следующему непрочитанному.
+    if (obj == chatList_->viewport()
+        && (e->type() == QEvent::MouseButtonPress || e->type() == QEvent::MouseMove)) {
+        auto* me = static_cast<QMouseEvent*>(e);
+        auto* sb = chatList_->verticalScrollBar();
+        if (e->type() == QEvent::MouseButtonPress && sb->value() == 0) {
+            listPullStart_ = me->position().toPoint();
+            listPullActive_ = true;
+        } else if (e->type() == QEvent::MouseMove && listPullActive_) {
+            const int dy = me->position().toPoint().y() - listPullStart_.y();
+            if (dy > 80) {
+                listPullActive_ = false;
+                jumpToNextUnread();
+            }
+        }
+    }
+
     // Мультивыбор (MLT-01): клик по области сообщений toggle'ит баббл под
     // курсором; Ctrl+клик в обычном режиме начинает выделение.
     if (msgScroll_ && obj == msgScroll_->viewport()
@@ -4011,6 +4083,7 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     if (plain && !isSavedChat)   // «В избранное» — как пересылка в «Избранные» (1 клик)
         fav = menu.addAction(QStringLiteral("⭐  В избранное"));
     QAction* copy = plain ? menu.addAction(QStringLiteral("Копировать")) : nullptr;
+    QAction* copyHtml = plain ? menu.addAction(QStringLiteral("Копировать как HTML")) : nullptr; // MLT-03
     QAction* pin = nullptr;
     if ((currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel)
         && !id.isEmpty() && !id.startsWith(QStringLiteral("tmp_")))
@@ -4029,6 +4102,13 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
     if (ch == reply)         setReplyTo(id, author, text);
     else if (edit && ch == edit) startEditing(id, text);
     else if (ch == copy)     QApplication::clipboard()->setText(text);
+    else if (copyHtml && ch == copyHtml) {
+        // MLT-03: rich-буфер — жирный/курсив сохраняются в Writer/LibreOffice.
+        QMimeData* md = new QMimeData;
+        md->setHtml(formatMessageHtml(text).replace(QStringLiteral("color:#F3F1F8"), QString()));
+        md->setText(text);
+        QApplication::clipboard()->setMimeData(md);
+    }
     else if (ch == del)      api_->deleteMessage(id, currentKind_, currentPeerId_);
     else if (ch == forward) {
         if (ChatMessage* mm = findMessage(id)) forwardMessageFull(*mm);
@@ -4181,6 +4261,13 @@ void ChatPage::onSendClicked() {
         else                                        api_->sendMessage(currentPeerId_, text, tempId, disappearTtl_, replyTo);
         if (currentTopicId_.isEmpty())
             bumpChat(currentPeerId_, text, m.time, /*incrementUnread*/ false);
+    }
+
+    // MSG-16: одиночные ❤️/🎉 — полноэкранный всплеск на 1.5 с.
+    if (text == QStringLiteral("\u2764\uFE0F") || text == QStringLiteral("\U0001F389")
+        || text == QStringLiteral("\U0001F495")) {
+        auto* burst = new EmojiBurst(text, window());
+        Q_UNUSED(burst);
     }
 
     // Отложенные аттачи (MLT-06): уходят следом за текстом, каждый своим
@@ -4915,6 +5002,88 @@ void ChatPage::stageFiles(const QList<QUrl>& urls) {
     for (const QUrl& u : urls) {
         if (!u.isLocalFile()) continue;
         const QFileInfo fi(u.toLocalFile());
+        // MLT-07: дроп папки = zip на лету (store, zlib-CRC; приватный
+        // QZipWriter в Qt6 недоступен — ручные заголовки строго по спецификации).
+        if (fi.isDir()) {
+            const QString zipPath = QDir::temp().filePath(
+                QStringLiteral("%1.zip").arg(fi.fileName()));
+            struct Entry { QString name; QByteArray data; quint32 crc; };
+            QList<Entry> entries;
+            std::function<void(const QDir&, const QString&)> pack =
+                [&](const QDir& dir, const QString& prefix) {
+                const auto es = dir.entryInfoList(
+                    QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+                for (const QFileInfo& e : es) {
+                    if (e.isDir()) pack(QDir(e.absoluteFilePath()),
+                                        prefix + e.fileName() + QLatin1Char('/'));
+                    else {
+                        QFile f(e.absoluteFilePath());
+                        if (f.open(QIODevice::ReadOnly)) {
+                            Entry en;
+                            en.name = prefix + e.fileName();
+                            en.data = f.readAll();
+                            en.crc = crc32(0,
+                                reinterpret_cast<const Bytef*>(en.data.constData()),
+                                uint(en.data.size()));
+                            entries.append(en);
+                        }
+                    }
+                }
+            };
+            pack(QDir(fi.absoluteFilePath()), QString());
+            QFile out(zipPath);
+            if (!out.open(QIODevice::WriteOnly) || entries.isEmpty()) continue;
+            QByteArray central;
+            QBuffer centralBuf(&central);
+            centralBuf.open(QIODevice::WriteOnly);
+            QDataStream cl(&centralBuf);
+            cl.setByteOrder(QDataStream::LittleEndian);
+            QDataStream le(&out);
+            le.setByteOrder(QDataStream::LittleEndian);
+            QList<quint32> offsets;
+            for (const Entry& en : entries) {
+                const QByteArray name = en.name.toUtf8();
+                offsets.append(quint32(out.pos()));
+                out.write(QByteArray::fromHex("504b0304"));   // local sig
+                le << quint16(20)      // version needed
+                   << quint16(0)       // flags
+                   << quint16(0)       // method = store
+                   << quint16(0) << quint16(0x21)   // time, date(1980)
+                   << en.crc << quint32(en.data.size()) << quint32(en.data.size())
+                   << quint16(name.size()) << quint16(0);   // nlen, elen
+                out.write(name);
+                out.write(en.data);
+                // Central directory record.
+                centralBuf.write(QByteArray::fromHex("504b0102"));
+                cl << quint16(20) << quint16(20)   // ver made/needed
+                   << quint16(0) << quint16(0)     // flags, method
+                   << quint16(0) << quint16(0x21)  // time, date
+                   << en.crc << quint32(en.data.size()) << quint32(en.data.size())
+                   << quint16(name.size())   // nlen
+                   << quint16(0)      // extra len
+                   << quint16(0)      // comment len
+                   << quint16(0)      // disk number start
+                   << quint16(0)      // internal attr
+                   << quint32(0)                    // external attr
+                   << offsets.last();               // local header offset
+                centralBuf.write(name);
+            }
+            const quint32 cdStart = quint32(out.pos());
+            out.write(central);
+            const quint32 cdSize = quint32(out.pos()) - cdStart;
+            out.write(QByteArray::fromHex("504b0506"));
+            le << quint16(0) << quint16(0) << quint16(entries.size())
+               << quint16(entries.size()) << cdSize << cdStart << quint16(0);
+            out.close();
+            StagedAttachment a;
+            a.path = zipPath;
+            a.name = fi.fileName() + QStringLiteral(".zip");
+            a.size = QFileInfo(zipPath).size();
+            a.isImage = false;
+            stagedFiles_.append(a);
+            ++added;
+            continue;
+        }
         if (!fi.isFile() || fi.size() <= 0) continue;
         StagedAttachment a;
         a.path = fi.absoluteFilePath();
@@ -5191,7 +5360,43 @@ void ChatPage::copySelected() {
     QApplication::clipboard()->setText(parts.join(QLatin1Char('\n')));
 }
 
-// ── Э6-мелочь ────────────────────────────────────────────────────────────────
+// LST-05: прыжок к следующему непрочитанному (порядок списка, по кругу).
+void ChatPage::jumpToNextUnread() {
+    const int cur = visibleChatIds_.indexOf(currentPeerId_);
+    for (int step = 1; step <= visibleChatIds_.size(); ++step) {
+        const int i = (cur + step) % visibleChatIds_.size();
+        const int ci = indexOfChat(visibleChatIds_[i]);
+        if (ci >= 0 && chats_[ci].unread > 0
+            && !archivedChats_.contains(chatKeyFor(chats_[ci]))) {
+            openChat(chats_[ci]);
+            return;
+        }
+    }
+}
+
+// SRC-02: прыжок к первому сообщению выбранного дня (клиентски по истории).
+void ChatPage::tryJumpToDate() {
+    if (pendingJumpDate_.isEmpty()) return;
+    const QString day = pendingJumpDate_;
+    for (const ChatMessage& m : currentMessages_) {
+        if (m.createdAt.left(10) == day && !m.id.isEmpty()
+            && !m.id.startsWith(QStringLiteral("tmp"))) {
+            pendingJumpDate_.clear();
+            jumpToMessage(m.id);
+            return;
+        }
+    }
+    // Сообщений дня нет в хвосте — догрузим одну страницу старых и повторим
+    // (цикл продолжится приходом onMessagesLoaded).
+    if (hasMoreServer_ && !fetchingOlder_ && renderedFrom_ <= 0) {
+        pendingJumpDate_.clear();   // одну попытку — не зацикливаемся
+        fetchOlderFromServer();
+    } else {
+        pendingJumpDate_.clear();
+    }
+}
+
+// ── Э6-мелочь// ── Э6-мелочь ────────────────────────────────────────────────────────────────
 
 // LST-06: тотал непрочитанных в заголовке окна «(12) Xipher».
 void ChatPage::updateUnreadTotalTitle() {

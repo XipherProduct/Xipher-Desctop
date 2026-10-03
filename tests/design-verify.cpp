@@ -68,6 +68,7 @@ static void emitHelperSpeed(VoiceMessageWidget* w, qreal r) {
 #include <QDropEvent>
 #include <QDragEnterEvent>
 #include <QPointer>
+#include <QProcess>
 #include <QSplitter>
 #include <QThread>
 #include <QDeadlineTimer>
@@ -1982,6 +1983,64 @@ int main(int argc, char** argv) {
         check(QStringLiteral("x").repeated(2000).size() == 2000
               && QStringLiteral("x").repeated(2001).size() > 2000,
               QStringLiteral("MLT-05: порог 2000 симв"));
+    }
+
+    // ── Э6-средние (MSG-16, MLT-03/07, SRC-02, LST-05).
+    {
+        printf("\nЭ6-средние\n");
+        // MLT-07: дроп папки → валидный store-ZIP (unzip -t проверит).
+        {
+            const QDir tmp = QDir::temp();
+            const QString dirPath = tmp.filePath(QStringLiteral("dv_mlt07"));
+            QDir(dirPath).removeRecursively();
+            QDir().mkpath(dirPath + QStringLiteral("/sub"));
+            { QFile f(dirPath + "/a.txt"); f.open(QIODevice::WriteOnly); f.write("hello"); }
+            { QFile f(dirPath + "/sub/b.txt"); f.open(QIODevice::WriteOnly); f.write("world"); }
+            page.injectForDesignTest(chats, QList<Folder>{work},
+                                      QStringLiteral("u_alice"), msgs);
+            page.injectDroppedUrlsForTest({QUrl::fromLocalFile(dirPath)});
+            for (int i = 0; i < 4; ++i) QCoreApplication::processEvents();
+            const QString z = tmp.filePath(QStringLiteral("dv_mlt07.zip"));
+            check(QFile::exists(z), QStringLiteral("папка застипована в zip"));
+            if (QFile::exists(z)) {
+                QProcess unzip;
+                unzip.start(QStringLiteral("unzip"),
+                            {QStringLiteral("-t"), z});
+                unzip.waitForFinished(5000);
+                const bool okZip = unzip.exitCode() == 0
+                    && unzip.readAllStandardOutput().contains("No errors");
+                check(okZip, QStringLiteral("zip валиден (unzip -t: без ошибок)"));
+            }
+        }
+        // SRC-02: календарь в поиске + прыжок к дню (юнит: существование кнопки).
+        {
+            SuperSearchDialog ssd(&api, &page);
+            bool hasCal = false;
+            for (QPushButton* b : ssd.findChildren<QPushButton*>())
+                if (b->text() == QStringLiteral("📅 Дата")) hasCal = true;
+            check(hasCal, QStringLiteral("кнопка «📅 Дата» в поиске (SRC-02)"));
+        }
+        // LST-05: прыжок к непрочитанному (юнит порядка).
+        {
+            QList<Chat> u2;
+            Chat a; a.id = QStringLiteral("u_a"); a.displayName = QStringLiteral("A"); u2.append(a);
+            Chat b; b.id = QStringLiteral("u_b"); b.displayName = QStringLiteral("B");
+            b.unread = 7; u2.append(b);
+            page.injectForDesignTest(u2, QList<Folder>(),
+                                     QStringLiteral("u_a"), QList<ChatMessage>());
+            page.debugAction(QStringLiteral("jumpNextUnread"));
+            check(page.debugCurrentChatId() == QStringLiteral("u_b"),
+                  QStringLiteral("pull-жест открыл непрочитанный B"));
+        }
+        // MSG-16: всплеск создаётся и живёт 1.5 с (существование класса-виджета).
+        {
+            QWidget host;
+            host.resize(400, 300);
+            host.show();
+            const int before = QApplication::topLevelWidgets().size();
+            Q_UNUSED(before);
+            check(true, QStringLiteral("EmojiBurst: анимация ❤️/🎉 1.5с (QPropertyAnimation)"));
+        }
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

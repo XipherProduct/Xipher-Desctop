@@ -229,7 +229,11 @@ private:
     void renderMessages(const QString& filter);   // отрисовать (с фильтром поиска)
     void updateGreeting();   // показать/скрыть пустой-чат приветствие
     void scrollToBottom();
-    void tryJumpToPending();   // прыжок к сообщению из поиска, когда виджет достроен
+    void tryJumpToPending();
+    void tryJumpToDate();   // SRC-02
+    void jumpToNextUnread();   // LST-05
+    bool listPullActive_ = false;
+    QPoint listPullStart_;   // прыжок к сообщению из поиска, когда виджет достроен
     // Боты: inline-кнопки в бабблах, reply-клавиатура над композером, MiniApps.
     void addInlineKeyboard(QVBoxLayout* bubbleLayout, const ChatMessage& msg);
     void applyReplyKeyboard(const QJsonObject& markup);
@@ -307,6 +311,7 @@ private:
     bool         fetchingOlder_ = false;
     // Прыжок к сообщению из единого поиска: ждём достройку виджетов.
     QString      pendingJumpId_;
+    QString      pendingJumpDate_;   // SRC-02
     QString      pendingMiniappUrl_;   // MiniApp ждёт initData от сервера
     EmptyChatGreeting* greeting_ = nullptr;
     int          bubbleCount_ = 0;   // сколько сообщений сейчас в переписке

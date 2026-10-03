@@ -15,6 +15,8 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QTimer>
+#include <QCalendarWidget>
+#include <QDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <algorithm>
@@ -285,6 +287,29 @@ void SuperSearchDialog::buildUi() {
         typeChips_.append(b);
         chips->addWidget(b);
     }
+    // SRC-02: прыжок к дате — кнопка 📅 в ряду чипов.
+    auto* jumpDate = new QPushButton(QStringLiteral("📅 Дата"));
+    jumpDate->setObjectName(QStringLiteral("ssChip"));
+    jumpDate->setCursor(Qt::PointingHandCursor);
+    connect(jumpDate, &QPushButton::clicked, this, [this]() {
+        QDialog dlg(this);
+        dlg.setWindowTitle(QStringLiteral("Перейти к дате"));
+        auto* v = new QVBoxLayout(&dlg);
+        auto* cal = new QCalendarWidget(&dlg);
+        cal->setMaximumDate(QDate::currentDate());
+        v->addWidget(cal);
+        auto* ok = new QPushButton(QStringLiteral("Перейти"), &dlg);
+        v->addWidget(ok);
+        connect(ok, &QPushButton::clicked, &dlg, &QDialog::accept);
+        if (dlg.exec() != QDialog::Accepted) return;
+        const QDate d = cal->selectedDate();
+        const QString iso = d.toString(Qt::ISODate);
+        input_->setText(QStringLiteral("after:%1 before:%2")
+            .arg(iso, d.addDays(1).toString(Qt::ISODate)));
+        emit dateJumpRequested(chatId_, iso);
+        hide();
+    });
+    chips->addWidget(jumpDate);
     chips->addStretch();
     cl->addLayout(chips);
 
