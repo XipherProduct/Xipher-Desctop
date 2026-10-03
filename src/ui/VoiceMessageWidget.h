@@ -3,6 +3,7 @@
 #include <QVector>
 
 class QLabel;
+class QPushButton;
 class PlayPauseButton;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ public:
 signals:
     void playPauseClicked();
     void seekRequested(qreal frac);
+    void speedRequested(qreal rate);   // VOX-02: 0.5..2.0
 
 private:
     QString fmt(qint64 ms) const;
@@ -52,6 +54,7 @@ private:
     PlayPauseButton* playBtn_;
     Waveform*        wave_;
     QLabel*          time_;
+    QPushButton*     speedBtn_ = nullptr;   // VOX-02: «×1.0» → меню скоростей
     bool playing_ = false;
     bool outgoing_;
     qint64 totalMs_ = 0;

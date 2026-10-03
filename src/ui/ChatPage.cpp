@@ -3256,6 +3256,11 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         const QString path = msg.filePath;
         connect(voice, &VoiceMessageWidget::playPauseClicked, this,
                 [this, voice, path]() { onVoicePlayPause(voice, path); });
+        // VOX-02: скорость этого плеера (применяется сразу и к следующим).
+        connect(voice, &VoiceMessageWidget::speedRequested, this, [this](qreal rate) {
+            voiceRate_ = rate;
+            player_->setPlaybackRate(rate);
+        });
         voice->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(voice, &QWidget::customContextMenuRequested, this, [this, voice, path](const QPoint& p) {
             showMediaMenu(voice, path, QStringLiteral("voice"), p);
@@ -3805,14 +3810,21 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
         auto* bl2 = new QHBoxLayout(bar);
         bl2->setContentsMargins(10, 6, 10, 6);
         bl2->setSpacing(2);
-        const QStringList quick = {QString::fromUtf8("\U0001F44D"),
-                                   QString::fromUtf8("\u2764\uFE0F"),
-                                   QString::fromUtf8("\U0001F602"),
-                                   QString::fromUtf8("\U0001F62E"),
-                                   QString::fromUtf8("\U0001F622"),
-                                   QString::fromUtf8("\U0001F525"),
-                                   QString::fromUtf8("\U0001F44F"),
-                                   QString::fromUtf8("\U0001F389")};
+        // STK-02: избранные (Prefs) идут первыми, затем стандартный набор без дублей.
+        const QStringList base = {QString::fromUtf8("\U0001F44D"),
+                                  QString::fromUtf8("\u2764\uFE0F"),
+                                  QString::fromUtf8("\U0001F602"),
+                                  QString::fromUtf8("\U0001F62E"),
+                                  QString::fromUtf8("\U0001F622"),
+                                  QString::fromUtf8("\U0001F525"),
+                                  QString::fromUtf8("\U0001F44F"),
+                                  QString::fromUtf8("\U0001F389")};
+        QStringList quick;
+        for (const QString& f : Prefs::getStr(QStringLiteral("xipher_favorite_reactions"))
+                                  .split(QLatin1Char(','), Qt::SkipEmptyParts))
+            if (base.contains(f) && !quick.contains(f)) quick << f;
+        for (const QString& e : base)
+            if (!quick.contains(e)) quick << e;
         for (const QString& e : quick) {
             auto* b = new QPushButton(e, bar);
             b->setFlat(true);
@@ -3820,6 +3832,29 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
             b->setStyleSheet(QStringLiteral(
                 "QPushButton{border:none;border-radius:8px;font-size:18px;padding:4px 6px;}"
                 "QPushButton:hover{background:rgba(139,92,246,0.25);}"));
+            // ПКМ по эмодзи — «в избранное» (STK-02): стрип начнётся с него.
+            b->setContextMenuPolicy(Qt::CustomContextMenu);
+            connect(b, &QPushButton::customContextMenuRequested, this, [this, e, b](const QPoint& p) {
+                QMenu m(this);
+                m.setStyleSheet(QStringLiteral(
+                    "QMenu{background:#1A1822;border:1px solid rgba(255,255,255,0.12);"
+                    "border-radius:10px;color:#F3F1F8;} QMenu::item{padding:6px 18px;}"));
+                QStringList favs = Prefs::getStr(QStringLiteral("xipher_favorite_reactions"))
+                                      .split(QLatin1Char(','), Qt::SkipEmptyParts);
+                const QString act = favs.contains(e)
+                    ? QStringLiteral("★ Убрать из избранных") : QStringLiteral("★ В избранное");
+                connect(m.addAction(act), &QAction::triggered, this, [this, e, favs]() {
+                    QStringList f2 = favs;
+                    if (f2.contains(e)) f2.removeAll(e);
+                    else {
+                        f2.removeAll(e);
+                        f2.prepend(e);
+                        while (f2.size() > 5) f2.removeLast();   // топ-5, как в ТЗ
+                    }
+                    Prefs::setStr(QStringLiteral("xipher_favorite_reactions"), f2.join(QLatin1Char(',')));
+                });
+                m.exec(b->mapToGlobal(p));
+            });
             const QString emoji = e, mid = id;
             connect(b, &QPushButton::clicked, this, [this, mid, emoji, &menu]() {
                 toggleReaction(mid, emoji);
@@ -5817,6 +5852,7 @@ void ChatPage::onVoiceUploaded(const QString& filePath, const QString& fileName,
 }
 
 void ChatPage::playVoice(const QString& path) {
+    player_->setPlaybackRate(voiceRate_ > 0.0 ? voiceRate_ : 1.0);   // VOX-02
     if (path.isEmpty()) return;
     // Локальный путь (оптимистичный или уже скачанный) — играем сразу.
     if (!path.startsWith(QStringLiteral("/files"))) {

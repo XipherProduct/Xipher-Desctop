@@ -31,6 +31,12 @@
 #include "ui/RichDoc.h"
 #include "ui/RichRender.h"
 #include "ui/RichEditor.h"
+#include "ui/VoiceMessageWidget.h"
+
+// Шов для эмуляции сигнала скорости (VOX-02).
+static void emitHelperSpeed(VoiceMessageWidget* w, qreal r) {
+    emit w->speedRequested(r);
+}
 
 #include <QApplication>
 #include <QColor>
@@ -1612,6 +1618,41 @@ int main(int argc, char** argv) {
         }
         check(hasTrayToggle, QStringLiteral("настройки: галка «закрывать в трей»"));
         check(hasAutoToggle, QStringLiteral("настройки: галка автозапуска"));
+    }
+
+    // ── Голосовые скорости + избранные реакции (VOX-02, STK-02).
+    {
+        printf("\nСкорости и избранные реакции (VOX-02/STK-02)\n");
+        // VOX-02: у виджета есть кнопка «×1.0», сигнал меняет ставку.
+        VoiceMessageWidget vw(QStringLiteral("seed"), false);
+        bool hasSpeed = false;
+        for (QPushButton* b : vw.findChildren<QPushButton*>())
+            if (b->text() == QStringLiteral("×1.0")) hasSpeed = true;
+        check(hasSpeed, QStringLiteral("кнопка скорости «×1.0» у голосового"));
+        qreal gotRate = 0.0;
+        QObject::connect(&vw, &VoiceMessageWidget::speedRequested, &vw, [&gotRate](qreal r) {
+            gotRate = r;
+        });
+        emitHelperSpeed(&vw, 2.0);
+        check(gotRate == 2.0, QStringLiteral("сигнал скорости 2.0 проходит"));
+
+        // STK-02: избранные в Prefs — стрип начинается с них (проверка
+        // переупорядочивания списка, как в showMessageMenu).
+        Prefs::setStr(QStringLiteral("xipher_favorite_reactions"),
+                      QStringLiteral("\U0001F525,\U0001F389"));
+        const QStringList base = {QString::fromUtf8("\U0001F44D"), QString::fromUtf8("\u2764\uFE0F"),
+                                  QString::fromUtf8("\U0001F602"), QString::fromUtf8("\U0001F525"),
+                                  QString::fromUtf8("\U0001F389")};
+        QStringList quick;
+        for (const QString& f : Prefs::getStr(QStringLiteral("xipher_favorite_reactions"))
+                                  .split(QLatin1Char(','), Qt::SkipEmptyParts))
+            if (base.contains(f) && !quick.contains(f)) quick << f;
+        for (const QString& e : base)
+            if (!quick.contains(e)) quick << e;
+        check(quick.first() == QString::fromUtf8("\U0001F525")
+              && quick.at(1) == QString::fromUtf8("\U0001F389"),
+              QStringLiteral("избранные 🔥🎉 идут первыми в стрипе"));
+        Prefs::setStr(QStringLiteral("xipher_favorite_reactions"), QString());
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

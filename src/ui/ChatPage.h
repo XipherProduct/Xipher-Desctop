@@ -437,6 +437,8 @@ private:
     QString     currentPeerName_;
     QSet<QString> shownIds_;   // дедуп сообщений в открытом чате
     int tempCounter_ = 0;
+    qreal voiceRate_ = 1.0;   // скорость голосовых (VOX-02), живёт между треками
+
     // Подсветка поискового запроса в бабблах (SRC-04): живёт с последнего
     // прыжка из поиска до смены чата.
     QString highlightQuery_;

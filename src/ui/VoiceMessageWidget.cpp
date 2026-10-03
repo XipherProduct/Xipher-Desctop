@@ -6,6 +6,8 @@
 #include <QHBoxLayout>
 #include <QAbstractButton>
 #include <QLabel>
+#include <QMenu>
+#include <QPushButton>
 
 // ── PlayPauseButton — круглая кнопка с векторной иконкой play/pause ───────────
 class PlayPauseButton : public QAbstractButton {
@@ -155,8 +157,35 @@ VoiceMessageWidget::VoiceMessageWidget(const QString& seed, bool outgoing, QWidg
     time_->setStyleSheet(QString("color:%1;font-size:12px;")
         .arg(outgoing_ ? QStringLiteral("rgba(240,236,250,0.75)") : QStringLiteral("#ACA6BD")));
 
+    // VOX-02: кнопка скорости — меню 0.5..2.0 (2x играет вдвое быстрее).
+    speedBtn_ = new QPushButton(QStringLiteral("×1.0"), this);
+    speedBtn_->setCursor(Qt::PointingHandCursor);
+    speedBtn_->setFlat(true);
+    speedBtn_->setToolTip(QStringLiteral("Скорость"));
+    speedBtn_->setStyleSheet(QString(
+        "QPushButton{border:none;border-radius:6px;color:%1;font-size:11px;"
+        "font-weight:700;padding:2px 6px;}"
+        "QPushButton:hover{background:rgba(139,92,246,0.25);}")
+        .arg(outgoing_ ? QStringLiteral("rgba(240,236,250,0.75)") : QStringLiteral("#ACA6BD")));
+    connect(speedBtn_, &QAbstractButton::clicked, this, [this]() {
+        QMenu m(this);
+        m.setStyleSheet(QStringLiteral(
+            "QMenu{background:#1A1822;border:1px solid rgba(255,255,255,0.12);"
+            "border-radius:10px;color:#F3F1F8;} QMenu::item{padding:6px 18px;}"));
+        for (qreal r : {0.5, 0.75, 1.0, 1.25, 1.5, 2.0}) {
+            QAction* a = m.addAction(QStringLiteral("×%1").arg(r));
+            connect(a, &QAction::triggered, this, [this, r]() {
+                speedBtn_->setText(QStringLiteral("×%1").arg(r));
+                emit speedRequested(r);
+            });
+        }
+        QPoint pos = speedBtn_->mapToGlobal(QPoint(0, -m.sizeHint().height() - 4));
+        m.exec(pos);
+    });
+
     lay->addWidget(playBtn_);
     lay->addWidget(wave_, 1);
+    lay->addWidget(speedBtn_);
     lay->addWidget(time_);
 
     connect(playBtn_, &QAbstractButton::clicked, this, &VoiceMessageWidget::playPauseClicked);
