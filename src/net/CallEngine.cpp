@@ -459,6 +459,7 @@ void CallEngine::addRemoteCandidate(const QString&, const QString&) {}
 void CallEngine::hangup() {}
 void CallEngine::setMuted(bool) {}
 void CallEngine::setDeaf(bool) {}
+void CallEngine::setNoiseSuppression(bool) {}
 void CallEngine::setTestTone(bool) {}
 void CallEngine::sendToneFrame() {}
 void CallEngine::encodeAndSend(const void*) {}
