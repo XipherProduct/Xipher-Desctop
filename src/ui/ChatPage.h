@@ -7,6 +7,7 @@
 #include <QJsonObject>
 
 #include "net/Models.h"
+#include "util/Accounts.h"
 
 class ApiClient;
 class WsClient;
@@ -134,6 +135,8 @@ signals:
     void callRequested(const QString& peerId, const QString& peerName, const QString& avatarUrl);
     void notify(const QString& title, const QString& body);   // системное уведомление
     void pollBarsNeedUpdate();   // опрос: пересчитать полосы после layout-прохода
+    void switchAccountRequested(const QString& userId);   // DSC-04
+    void addAccountRequested();                            // DSC-04
 
 public:
     void openChatWith(const QString& userId, const QString& displayName, const QString& username);
@@ -536,6 +539,7 @@ private:
     // Streamer Mode (DSC-03).
     void applyStreamerMode();
     void updateStreamerLabel(QPushButton* btn);
+    QList<Accounts::Profile> accountsForMenu() const;   // DSC-04
 
     // Клавиатурная навигация (KEY-02/03): порядок видимого списка чатов
     // (обновляется в rebuildChatList) и стеки истории переходов.

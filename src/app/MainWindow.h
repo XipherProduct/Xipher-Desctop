@@ -1,5 +1,6 @@
 #pragma once
 #include <QMainWindow>
+#include "util/Accounts.h"
 
 class QStackedWidget;
 class QWidget;
@@ -18,7 +19,12 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
 
-    // Тестовые швы (design-verify, WIN-08): сохранить/прочитать геометрию.
+    // Мультиаккаунт (DSC-04): реестр профилей и переключение.
+    void rememberCurrentProfile();
+    void switchToAccount(const QString& userId);
+    QList<Accounts::Profile> otherProfiles() const;
+
+    // Тестовые шовы (design-verify, WIN-08): сохранить/прочитать геометрию.
     void saveGeometryForTest();
     bool restoreGeometryForTest();
 

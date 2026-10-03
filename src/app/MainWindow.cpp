@@ -21,6 +21,7 @@
 #include <QCloseEvent>
 #include "net/Prefs.h"
 #include "util/Autostart.h"
+#include "util/Accounts.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -76,9 +77,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         stack_->setCurrentIndex(PageLogin);
     });
 
-    // Успешный вход → мессенджер.
+    // Успешный вход → мессенджер (+профиль в реестр мультиаккаунта, DSC-04).
     connect(login_, &LoginPage::loginSucceeded, this, [this]() {
+        rememberCurrentProfile();
         enterChat();
+    });
+    // DSC-04: меню приложения просит переключить/добавить аккаунт.
+    connect(chat_, &ChatPage::switchAccountRequested, this,
+            [this](const QString& userId) { switchToAccount(userId); });
+    connect(chat_, &ChatPage::addAccountRequested, this, [this]() {
+        // Новый аккаунт: не выкидывая старый (он в реестре) — вход заново.
+        ws_->stop();
+        if (callPoll_) callPoll_->stop();
+        Session::instance().clear();   // токен не удаляем из реестра
+        stack_->setCurrentIndex(PageLogin);
     });
 
     // Трей (WIN-06): иконка + меню (открыть/опции/выход), клик — разворот,
@@ -159,7 +171,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         stack_->setCurrentIndex(PageLogin);
     });
 
-    // Восстановление сессии по сохранённому токену.
+    // Восстановление сессии по сохранённому токену (+профиль в реестр).
     connect(api_, &ApiClient::tokenValidated, this, [this](const AuthResult& r) {
         if (r.success) {
             Session& s = Session::instance();
@@ -169,8 +181,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             s.premiumPlan = r.premiumPlan;
             s.premiumExpiresAt = r.premiumExpiresAt;
             s.save();
+            rememberCurrentProfile();
             enterChat();
         } else {
+            // Токен текущего профиля умер: выкинуть из реестра, есть другие —
+            // предложить переключиться, иначе экран входа (DSC-04).
+            Accounts::remove(Accounts::activeId());
+            if (!Accounts::all().isEmpty()) {
+                switchToAccount(Accounts::all().first().userId);
+                return;
+            }
             Session::instance().clear();
             stack_->setCurrentIndex(PageLogin);
         }
@@ -250,6 +270,48 @@ void MainWindow::activateWindowFromTray() {
     showNormal();
     raise();
     activateWindow();
+}
+
+// ── Мультиаккаунт (DSC-04) ─────────────────────────────────────────────────────
+
+void MainWindow::rememberCurrentProfile() {
+    const Session& s = Session::instance();
+    if (!s.isAuthenticated()) return;
+    Accounts::Profile p;
+    p.userId = s.userId;
+    p.username = s.username;
+    p.token = s.token;
+    Accounts::upsertActive(p);
+}
+
+// Переключение: сессионные кэши привязаны к пользователю — чистим, как при
+// выходе, затем валидируем токен нового профиля (роутинг сделает tokenValidated).
+void MainWindow::switchToAccount(const QString& userId) {
+    for (const Accounts::Profile& p : Accounts::all()) {
+        if (p.userId != userId) continue;
+        ws_->stop();
+        if (callPoll_) callPoll_->stop();
+        ChatCache::instance().clearAll();
+        FileCache::instance().clearAll();
+        Session::instance().clear();
+        Session& s = Session::instance();
+        s.token = p.token;
+        s.userId = p.userId;
+        s.username = p.username;
+        s.save();
+        Prefs::setStr(QStringLiteral("xipher_active_account"), p.userId);
+        stack_->setCurrentIndex(PageSplash);
+        api_->validateToken(p.token);
+        return;
+    }
+}
+
+QList<Accounts::Profile> MainWindow::otherProfiles() const {
+    QList<Accounts::Profile> out;
+    const QString cur = Accounts::activeId();
+    for (const Accounts::Profile& p : Accounts::all())
+        if (p.userId != cur) out.append(p);
+    return out;
 }
 
 void MainWindow::tryRestoreSession() {

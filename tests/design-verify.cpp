@@ -30,6 +30,7 @@
 #include "net/Prefs.h"
 #include "net/VoiceRecorder.h"
 #include "util/Autostart.h"
+#include "util/Accounts.h"
 #include "util/MprisAdapter.h"
 #include "util/PulseAttenuator.h"
 #include "util/GlobalHotkeys.h"
@@ -2141,6 +2142,52 @@ int main(int argc, char** argv) {
         Prefs::setBool(QStringLiteral("xipher_hw_render"), false);
         check(!Prefs::getBool(QStringLiteral("xipher_hw_render"), true),
               QStringLiteral("галка рендера персистится (PRF-01)"));
+    }
+
+    // ── Мультиаккаунт (DSC-04).
+    {
+        printf("\nМультиаккаунт (DSC-04)\n");
+        // Реестр: upsert/активный/удаление — персист в Prefs.
+        Prefs::setStr(QStringLiteral("xipher_accounts"), QString());
+        Accounts::Profile a1; a1.userId = QStringLiteral("u1");
+        a1.username = QStringLiteral("personal"); a1.token = QStringLiteral("t1");
+        Accounts::Profile a2; a2.userId = QStringLiteral("u2");
+        a2.username = QStringLiteral("work"); a2.token = QStringLiteral("t2");
+        Accounts::upsertActive(a1);
+        Accounts::upsertActive(a2);
+        check(Accounts::all().size() == 2 && Accounts::activeId() == QStringLiteral("u2"),
+              QStringLiteral("два профиля, активный work"));
+        // Upsert существующего не плодит дублей.
+        a2.username = QStringLiteral("work2");
+        Accounts::upsertActive(a2);
+        check(Accounts::all().size() == 2
+              && Accounts::all().at(1).username == QStringLiteral("work2"),
+              QStringLiteral("upsert обновляет без дублей"));
+        // Меню: чужие профили как пункты + «Добавить аккаунт».
+        {
+            ChatPage mp(&api, &ws);
+            mp.resize(1200, 800);
+            mp.show();
+            for (int i = 0; i < 6; ++i) QCoreApplication::processEvents();
+            // Дергаем построитель меню программно (toggleAppMenu строит шторку).
+            mp.debugAction(QStringLiteral("openAppMenu"));
+            for (int i = 0; i < 6; ++i) QCoreApplication::processEvents();
+            bool hasOther = false, hasAdd = false;
+            for (QPushButton* b : mp.findChildren<QPushButton*>()) {
+                if (b->text() == QStringLiteral("↔ personal")) hasOther = true;
+                if (b->text() == QStringLiteral("＋ Добавить аккаунт")) hasAdd = true;
+            }
+            check(hasOther, QStringLiteral("переключатель «↔ personal» в меню"));
+            check(hasAdd, QStringLiteral("«＋ Добавить аккаунт» в меню"));
+            mp.hide();
+        }
+        // Удаление профиля чистит активность.
+        Accounts::remove(QStringLiteral("u2"));
+        check(Accounts::all().size() == 1
+              && Accounts::activeId().isEmpty(),
+              QStringLiteral("удаление: профиль вычеркнут, активность снята"));
+        Accounts::remove(QStringLiteral("u1"));
+        check(Accounts::all().isEmpty(), QStringLiteral("реестр пуст после удаления всех"));
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

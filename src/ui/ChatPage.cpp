@@ -2307,6 +2307,9 @@ void ChatPage::debugAction(const QString& name, int arg) {
         if (arg >= 0 && arg < chats_.size()) detachChatToWindow(chats_[arg].id);
     }
     else if (name == QLatin1String("jumpNextUnread")) jumpToNextUnread();
+    else if (name == QLatin1String("openAppMenu")) {
+        toggleAppMenu();
+    }
     else if (name == QLatin1String("closeDetached")) {
         if (arg >= 0 && arg < chats_.size()) {
             ChatWindow* w = detachedWindows_.value(chats_[arg].id);
@@ -4852,6 +4855,26 @@ void ChatPage::buildAppMenu() {
         openChatWith(Session::instance().userId, QStringLiteral("Избранное"),
                      Session::instance().username);
     });
+    // DSC-04: мультиаккаунт — переключатель профилей в шторке меню.
+    {
+        const QList<Accounts::Profile> others = accountsForMenu();
+        if (!others.isEmpty()) {
+            auto* accCap = new QLabel(QStringLiteral("Аккаунты"), appMenu_);
+            accCap->setStyleSheet(QStringLiteral(
+                "color:#726C82;font-size:11px;font-weight:700;"
+                "text-transform:uppercase;padding:10px 12px 2px;"));
+            root->addWidget(accCap);
+            for (const Accounts::Profile& p : others) {
+                const QString name = p.username.isEmpty() ? p.userId : p.username;
+                addItem(QStringLiteral("↔ %1").arg(name), [this, p]() {
+                    emit switchAccountRequested(p.userId);
+                });
+            }
+        }
+        addItem(QStringLiteral("＋ Добавить аккаунт"), [this]() {
+            emit addAccountRequested();
+        });
+    }
     addItem(QStringLiteral("Настройки"), [this]() { openSettings(); });
     addItem(QStringLiteral("Каталог"), [this]() { openCatalog(); });
     root->addStretch();
@@ -4871,6 +4894,14 @@ void ChatPage::buildAppMenu() {
     });
     root->addWidget(streamer);
     appMenu_->hide();
+}
+
+QList<Accounts::Profile> ChatPage::accountsForMenu() const {
+    const QString cur = Accounts::activeId();
+    QList<Accounts::Profile> out;
+    for (const Accounts::Profile& p : Accounts::all())
+        if (p.userId != cur) out.append(p);
+    return out;
 }
 
 void ChatPage::updateStreamerLabel(QPushButton* btn) {
