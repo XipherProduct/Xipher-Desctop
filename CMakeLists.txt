@@ -84,6 +84,8 @@ set(SOURCES
     src/ui/ComposerEdit.cpp
     src/util/QrCode.cpp
     src/util/MprisAdapter.cpp
+    src/util/PulseAttenuator.cpp
+    src/util/GlobalHotkeys.cpp
 )
 
 set(HEADERS
@@ -276,6 +278,14 @@ if(NOT WIN32)
         foreach(t Xipher design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan)
             target_include_directories(${t} PRIVATE ${RNNOISE_INCLUDE_DIRS})
             target_link_libraries(${t} PRIVATE ${RNNOISE_LIBRARIES})
+        endforeach()
+    endif()
+
+    find_package(X11 QUIET)
+    if(X11_FOUND)
+        target_link_libraries(Xipher PRIVATE X11::X11)
+        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan)
+            target_link_libraries(${t} PRIVATE X11::X11)
         endforeach()
     endif()
 

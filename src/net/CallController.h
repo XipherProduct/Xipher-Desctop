@@ -13,6 +13,7 @@ class ApiClient;
 class WsClient;
 class CallEngine;
 class CallOverlay;
+class GlobalHotkeys;
 class QWidget;
 class QTimer;
 
@@ -46,6 +47,7 @@ private:
     WsClient*    ws_;
     QWidget*     window_;
     CallEngine*  engine_ = nullptr;
+    GlobalHotkeys* hotkeys_ = nullptr;   // CAL-05/DSC-02
     CallOverlay* overlay_ = nullptr;
     QString      peerId_, peerName_, avatarUrl_;
     QString      incomingOffer_;      // offer из WS-push (может быть пуст)

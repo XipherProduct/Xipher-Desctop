@@ -23,6 +23,7 @@ struct OpusDecoder;
 //  Совместим с браузерным пиром (веб-клиент): SDP offer/answer + trickle ICE.
 // ─────────────────────────────────────────────────────────────────────────────
 class RnNoise;
+class PulseAttenuator;
 
 class CallEngine : public QObject {
     Q_OBJECT
@@ -43,7 +44,17 @@ public:
     void setDeaf(bool deaf);
     // Шумоподавление микрофона (CAL-04): rnnoise в цепочке перед opus.
     void setNoiseSuppression(bool on);
-    bool noiseSuppression() const { return denoiser_ != nullptr; }   // не слышать собеседника (динамик в 0)
+    bool noiseSuppression() const { return denoiser_ != nullptr; }
+    bool isMuted() const { return muted_; }
+    bool isDeaf() const { return deaf_; }
+    // Живой звонок (для глобальных хоткеев): активный pc_ с аудио.
+    bool inCall() const { return audioStarted_ || pc_ != nullptr; }
+    // Приглушение прочих приложений (CAL-03): attenuate на старте, restore по концу.
+    void setAttenuation(bool on);
+    PulseAttenuator* attenuator() const { return attenuator_; }
+    // Клип (CAL-02): кольцевой буфер последних 60 с эфира; сохранить в WAV.
+    QString saveClip() const;
+    int clipMsAvailable() const { return clipBuf_.size() / 96; }   // 96 байт/мс   // не слышать собеседника (динамик в 0)
 
     // Статистика RTP: сколько кадров улетело/прилетело (20 мс Opus каждый).
     // Нужно демо-звонку и диагностике «есть ли звук вообще».
@@ -83,6 +94,9 @@ private:
     // Audio (48 kHz mono, 20 ms кадры)
     QAudioSource* mic_ = nullptr;
     RnNoise*      denoiser_ = nullptr;   // CAL-04 (создаётся по флагу)
+    PulseAttenuator* attenuator_ = nullptr;   // CAL-03
+    // CAL-02: кольцо эфира (входящий PCM 48к/моно/16), максимум 60 с.
+    mutable QByteArray clipBuf_;
     QIODevice*    micIo_ = nullptr;
     QAudioSink*   spk_ = nullptr;
     QIODevice*    spkIo_ = nullptr;

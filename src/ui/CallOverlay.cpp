@@ -236,6 +236,12 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
         nrBtn_->setStyleSheet(on ? QLatin1String(kToggleQss) : QLatin1String(kToggleActiveQss));
         emit noiseSuppressionToggled(!on);
     });
+    // 🔴 Клип (CAL-02): выгрузить кольцевой буфер 60 с эфира в WAV.
+    clipBtn_ = makeToggle(QStringLiteral("🔴"));
+    clipBtn_->setStyleSheet(QLatin1String(kToggleQss));
+    connect(clipBtn_, &QPushButton::clicked, this, [this]() {
+        emit clipRequested();
+    });
     spkBtn_ = makeToggle(QStringLiteral("Звук"));
     spkBtn_->setStyleSheet(QLatin1String(kToggleActiveQss));   // звук по умолчанию вкл
     connect(spkBtn_, &QPushButton::clicked, this, [this]() {
@@ -255,6 +261,7 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
     al->addStretch();
     al->addWidget(micBtn_);
     al->addWidget(nrBtn_);
+    al->addWidget(clipBtn_);
     al->addWidget(spkBtn_);
     al->addSpacing(12);
     al->addWidget(end);
@@ -309,9 +316,53 @@ void CallOverlay::setPeer(const QString& name, const QString& avatarUrl) {
     miniBar_->setPeer(name, avatarUrl);
 }
 
+// Временная строка статуса (CAL-02 «Клип сохранён…») — гаснет через 4 с.
+void CallOverlay::setInfo(const QString& text) {
+    if (!headerStatus_) return;
+    const QString prev = headerStatus_->text();
+    headerStatus_->setText(text);
+    QTimer::singleShot(4000, this, [this, prev]() {
+        if (headerStatus_) headerStatus_->setText(prev);
+    });
+}
+
 void CallOverlay::setState(State st) {
     state_ = st;
     applyState();
+    // CAL-01: после завершения — панель оценки 1-5★ (локально, API нет).
+    if (st == State::Active) ratingShown_ = false;
+}
+
+// Панель оценки (CAL-01): ★★★★★ над кнопками, клик эмитит rated(n).
+void CallOverlay::showRatingStars() {
+    if (ratingShown_ || !activeBtns_) return;
+    ratingShown_ = true;
+    auto* row = new QWidget(this);
+    auto* rl = new QHBoxLayout(row);
+    rl->setContentsMargins(0, 6, 0, 6);
+    rl->setSpacing(10);
+    auto* cap = new QLabel(QStringLiteral("Оцените звонок:"), row);
+    cap->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:13px;"));
+    rl->addWidget(cap);
+    for (int i = 1; i <= 5; ++i) {
+        auto* b = new QPushButton(QStringLiteral("★"), row);
+        b->setCursor(Qt::PointingHandCursor);
+        b->setFlat(true);
+        b->setStyleSheet(QStringLiteral(
+            "QPushButton{border:none;color:#726C82;font-size:22px;}"
+            "QPushButton:hover{color:#F5B301;}"));
+        const int n = i;
+        connect(b, &QPushButton::clicked, this, [this, n, row]() {
+            emit rated(n);
+            row->deleteLater();
+        });
+        rl->addWidget(b);
+    }
+    row->setParent(this);
+    row->setGeometry((width() - 360) / 2, height() - 170, 360, 40);
+    row->raise();
+    row->show();
+    QTimer::singleShot(15000, row, [row]() { row->deleteLater(); });   // самоуход
 }
 
 void CallOverlay::applyState() {

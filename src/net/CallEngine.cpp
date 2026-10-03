@@ -11,6 +11,11 @@
 
 #include <QAudioSource>
 #include "net/RnNoise.h"
+#include "util/PulseAttenuator.h"
+#include "net/VoiceRecorder.h"
+#include <QStandardPaths>
+#include <QFile>
+#include <QDateTime>
 #include "net/Prefs.h"
 #include <QTimer>
 #include <cmath>
@@ -329,6 +334,18 @@ void CallEngine::setDeaf(bool deaf) {
     if (spk_) spk_->setVolume(deaf ? 0.0f : 1.0f);
 }
 
+// CAL-03: приглушить прочие приложения (музыка в фоне тише во время звонка).
+void CallEngine::setAttenuation(bool on) {
+    if (on && !attenuator_) {
+        attenuator_ = new PulseAttenuator(this);
+        attenuator_->attenuate(20);
+    } else if (!on && attenuator_) {
+        attenuator_->restore();
+        attenuator_->deleteLater();
+        attenuator_ = nullptr;
+    }
+}
+
 // ── Шумоподавление (CAL-04): A/B на живом звонке, состояние в Prefs ─────────
 
 void CallEngine::setNoiseSuppression(bool on) {
@@ -351,6 +368,9 @@ void CallEngine::startAudioIo() {
     if (audioStarted_) return;
     audioStarted_ = true;
 
+    // CAL-03: приглушение прочих приложений (по умолчанию вкл, Prefs).
+    if (Prefs::getBool(QStringLiteral("xipher_call_attenuation"), true))
+        setAttenuation(true);
     // CAL-04: шумоподавление из настроек (по умолчанию вкл при наличии rnnoise).
     if (Prefs::getBool(QStringLiteral("xipher_call_noise_suppression"), true))
         setNoiseSuppression(true);
@@ -374,6 +394,7 @@ void CallEngine::startAudioIo() {
 void CallEngine::stopAudioIo() {
     audioStarted_ = false;
     if (denoiser_) { delete denoiser_; denoiser_ = nullptr; }   // CAL-04
+    setAttenuation(false);   // CAL-03: громкости прочих приложений вернуть
     if (mic_) { mic_->stop(); mic_->deleteLater(); mic_ = nullptr; micIo_ = nullptr; }
     if (spk_) { spk_->stop(); spk_->deleteLater(); spk_ = nullptr; spkIo_ = nullptr; }
     capBuf_.clear();
@@ -424,7 +445,27 @@ void CallEngine::onIncomingRtp(const QByteArray& rtp) {
     if (samples > 0) {
         spkIo_->write(reinterpret_cast<const char*>(pcm), samples * 2);
         ++rtpReceived_;
+        // CAL-02: кольцо последних 60 с (96 байт/мс × 60000 = 5.76 МБ максимум).
+        clipBuf_.append(reinterpret_cast<const char*>(pcm), samples * 2);
+        const int maxBytes = 96 * 60000;
+        if (clipBuf_.size() > maxBytes)
+            clipBuf_.remove(0, clipBuf_.size() - maxBytes);
     }
+}
+
+// CAL-02: выгрузить кольцо в WAV (Downloads/xipher-clip-*.wav).
+QString CallEngine::saveClip() const {
+    if (clipBuf_.isEmpty()) return QString();
+    const QByteArray wav = VoiceRecorder::pcmToWav(clipBuf_, 0, clipBuf_.size() / 96);
+    if (wav.isEmpty()) return QString();
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    const QString path = dir + QStringLiteral("/xipher-clip-%1.wav")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) return QString();
+    f.write(wav);
+    f.close();
+    return path;
 }
 
 void CallEngine::hangup() {
@@ -460,6 +501,7 @@ void CallEngine::hangup() {}
 void CallEngine::setMuted(bool) {}
 void CallEngine::setDeaf(bool) {}
 void CallEngine::setNoiseSuppression(bool) {}
+QString CallEngine::saveClip() const { return QString(); }
 void CallEngine::setTestTone(bool) {}
 void CallEngine::sendToneFrame() {}
 void CallEngine::encodeAndSend(const void*) {}

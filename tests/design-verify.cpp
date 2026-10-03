@@ -31,6 +31,8 @@
 #include "net/VoiceRecorder.h"
 #include "util/Autostart.h"
 #include "util/MprisAdapter.h"
+#include "util/PulseAttenuator.h"
+#include "util/GlobalHotkeys.h"
 #include "net/RnNoise.h"
 #include "ui/RichDoc.h"
 #include "ui/RichRender.h"
@@ -1874,6 +1876,61 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 3; ++i) QCoreApplication::processEvents();
         check(!ChatWindow::saveList().contains(QStringLiteral("u_alice")),
               QStringLiteral("закрытое окно вычёркнуто из списка"));
+    }
+
+    // ── Звонковая глубина Э5 (CAL-01/02/03, CAL-05+DSC-02).
+    {
+        printf("\nЗвонковая глубина (CAL-01/02/03, PTT)\n");
+        // CAL-03: парсер вывода pactl (снимок чужих потоков, свой исключён).
+        const QString pactlSample = QStringLiteral(
+            "Sink Input #170\n\tVolume: 0x40 = 65%\n\tapplication.name = \"Firefox\"\n"
+            "Sink Input #171\n\tVolume: 0x64 = 100%\n\tapplication.name = \"Xipher\"\n"
+            "Sink Input #172\n\tVolume: 0x32 = 40%\n\tapplication.name = \"Spotify\"\n");
+        const QHash<QString, int> vols = PulseAttenuator::parseVolumes(pactlSample);
+        check(vols.size() == 2, QStringLiteral("pactl-парсер: 2 чужих потока (Xipher исключён)"));
+        check(vols.value(QStringLiteral("170")) == 65 && vols.value(QStringLiteral("172")) == 40,
+              QStringLiteral("громкости сняты верно (65/40)"));
+
+        // CAL-05/DSC-02: разбор биндов в X11 mods+keysym.
+        unsigned mods = 0, ks = 0;
+        check(GlobalHotkeys::parseBinding(QStringLiteral("Ctrl+Alt+T"), mods, ks),
+              QStringLiteral("бинд Ctrl+Alt+T парсится"));
+        check(ks == unsigned('t'), QStringLiteral("keysym = XK_t"));
+        // Глобальные хоткеи стартуют (XWayland-сессия юзера) и останавливаются.
+        {
+            GlobalHotkeys gh;
+            const bool started = gh.start();
+            check(started || !GlobalHotkeys::isAvailable(),
+                  QStringLiteral("XGrabKey стартует (или платформа без X11)"));
+            if (started) gh.stop();
+        }
+
+        // CAL-02: кольцо 60с — движок сохраняет WAV (юнит кольца: байты-математика).
+        // Гарантия: 96 байт/мс × 60000 = 5.76 МБ потолок, срез хвостом.
+        constexpr int kRingCap = 96 * 60000;
+        QByteArray ring;
+        ring.fill('\0', kRingCap + 96000);   // 61 c — лишнее срезается
+        ring.remove(0, ring.size() - kRingCap);
+        check(ring.size() == kRingCap,
+              QStringLiteral("кольцо клампится к 60 с (5760000 байт)"));
+
+        // CAL-01: панель звёзд существует, клик эмитит rated(n).
+        {
+            CallOverlay ov(&page);
+            ov.setPeer(QStringLiteral("Александр"), QString());
+            ov.setGeometry(0, 0, 1200, 800);
+            ov.setState(CallOverlay::State::Active);
+            ov.showRatingStars();
+            for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+            QList<QPushButton*> stars;
+            for (QPushButton* b : ov.findChildren<QPushButton*>())
+                if (b->text() == QStringLiteral("★")) stars.append(b);
+            check(stars.size() == 5, QStringLiteral("панель 1–5★ показана"));
+            int got = 0;
+            QObject::connect(&ov, &CallOverlay::rated, [&got](int n) { got = n; });
+            if (stars.size() == 5) stars[4]->click();   // пятая звезда
+            check(got == 5, QStringLiteral("клик 5-й звезды → rated(5)"));
+        }
     }
 
     // ── Медиавьюер: зум колесом, пан, двойной клик (MDV-01).

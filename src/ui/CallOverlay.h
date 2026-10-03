@@ -38,6 +38,10 @@ class CallOverlay : public QWidget {
     Q_OBJECT
 public:
     enum class State { Outgoing, Incoming, Active };
+    State state() const { return state_; }
+    // CAL-01: панель 1–5★ на экране завершения (публично для контроллера/теста).
+    void showRatingStars();
+    void setInfo(const QString& text);   // временная строка статуса (клип и др.)
 
     explicit CallOverlay(QWidget* parent);
 
@@ -57,6 +61,8 @@ signals:
     void decline();
     void muteToggled(bool muted);
     void noiseSuppressionToggled(bool on);   // CAL-04: A/B шумодава
+    void clipRequested();                    // CAL-02: сохранить 60с эфира
+    void rated(int stars);                   // CAL-01: локальная оценка
     void deafToggled(bool deaf);
     void minimizeRequested();
     void restoreRequested();
@@ -83,6 +89,9 @@ private:
     QWidget*     incomingBtns_;
     QWidget*     activeBtns_;
     QPushButton* nrBtn_ = nullptr;   // шумодав (CAL-04)
+    QPushButton* clipBtn_ = nullptr; // 🔴 кольцо 60с (CAL-02)
+    bool ratingShown_ = false;
+
     QPushButton* micBtn_;
     QPushButton* spkBtn_;
 

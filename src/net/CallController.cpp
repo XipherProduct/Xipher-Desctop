@@ -1,4 +1,6 @@
 #include "net/CallController.h"
+#include "util/GlobalHotkeys.h"
+#include "net/Prefs.h"
 #include "net/CallEngine.h"
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
@@ -207,6 +209,40 @@ void CallController::wireOverlay() {
     // CAL-04: A/B шумодава прямо в звонке.
     connect(overlay_, &CallOverlay::noiseSuppressionToggled, this,
             [this](bool on) { if (engine_) engine_->setNoiseSuppression(on); });
+    // CAL-02: 🔴 — кольцевой буфер 60 с эфира → WAV в загрузки.
+    connect(overlay_, &CallOverlay::clipRequested, this, [this]() {
+        if (!engine_) return;
+        const QString path = engine_->saveClip();
+        overlay_->setInfo(path.isEmpty()
+            ? QStringLiteral("Клип пуст (эфир <1 с)")
+            : QStringLiteral("Клип сохранён: %1").arg(path));
+    });
+    // CAL-01: звёзды пишутся локально (серверного API оценки нет — блокер ТЗ).
+    connect(overlay_, &CallOverlay::rated, this, [this](int stars) {
+        Prefs::setStr(QStringLiteral("xipher_call_rating_last"),
+                      QString::number(stars));
+    });
+    // CAL-05/DSC-02: глобальные хоткеи (PTT/mute/deaf/accept) — вне окна.
+    hotkeys_ = new GlobalHotkeys(this);
+    connect(hotkeys_, &GlobalHotkeys::pttPressed, this, [this]() {
+        if (engine_ && engine_->inCall())
+            engine_->setMuted(false);
+    });
+    connect(hotkeys_, &GlobalHotkeys::pttReleased, this, [this]() {
+        if (engine_ && engine_->inCall())
+            engine_->setMuted(true);
+    });
+    connect(hotkeys_, &GlobalHotkeys::muteToggled, this, [this]() {
+        if (engine_) engine_->setMuted(!engine_->isMuted());
+    });
+    connect(hotkeys_, &GlobalHotkeys::deafToggled, this, [this]() {
+        if (engine_) engine_->setDeaf(!engine_->isDeaf());
+    });
+    connect(hotkeys_, &GlobalHotkeys::acceptCall, this, [this]() {
+        if (overlay_ && overlay_->isVisible() && overlay_->state() == CallOverlay::State::Incoming)
+            acceptIncoming();
+    });
+    hotkeys_->start();
     connect(overlay_, &CallOverlay::deafToggled, this, [this](bool d) { if (engine_) engine_->setDeaf(d); });
     connect(overlay_, &CallOverlay::minimizeRequested, this, [this]() {
         if (!overlay_) return;
@@ -359,6 +395,8 @@ void CallController::closeWithStatus(const QString& text) {
     overlay_->setState(CallOverlay::State::Active);
     overlay_->minimizedBar()->hide();
     if (overlay_->isVisible()) overlay_->raise();
+    // CAL-01: звёзды на экране завершения (локально; API оценки на сервере нет).
+    if (connected_) overlay_->showRatingStars();
     QTimer::singleShot(1500, this, [this]() { cleanup(); });
 }
 
