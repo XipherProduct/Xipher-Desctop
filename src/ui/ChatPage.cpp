@@ -106,7 +106,7 @@
 #include <QMediaPlayer>
 #include <QAudioOutput>
 #include <QDir>
-#include <zlib.h>
+
 #include <QDataStream>
 #include <functional>
 #include <QFile>
@@ -122,6 +122,28 @@ namespace {
 // Маркер опроса (MSG-06): сервер не помечает poll-сообщения — конвенция
 // контента, как у чек-листов. Отправитель шлёт send-message с этим префиксом
 // и вешает create-poll на полученный id; получатель по префиксу тянет get-poll.
+// MLT-07: crc32 для store-zip (папку в zip пакуем сами). Раньше тянули
+// zlib.h ради одной функции — Windows-сборка падала без пакета zlib.
+namespace {
+quint32 zipCrc32(const QByteArray& data) {
+    static quint32 table[256];
+    static bool init = false;
+    if (!init) {
+        for (quint32 n = 0; n < 256; ++n) {
+            quint32 c = n;
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+            table[n] = c;
+        }
+        init = true;
+    }
+    quint32 crc = 0xFFFFFFFFu;
+    for (unsigned char b : data)
+        crc = table[(crc ^ b) & 0xFFu] ^ (crc >> 8);
+    return crc ^ 0xFFFFFFFFu;
+}
+} // namespace
+
 const char kPollMarker[] = "\xF0\x9F\x93\x8A POLL: ";   // «📊 POLL: »
 
 // Streamer Mode (DSC-03): подмена имён «Участник N», свои — сохраняются.
@@ -5197,9 +5219,7 @@ void ChatPage::stageFiles(const QList<QUrl>& urls) {
                             Entry en;
                             en.name = prefix + e.fileName();
                             en.data = f.readAll();
-                            en.crc = crc32(0,
-                                reinterpret_cast<const Bytef*>(en.data.constData()),
-                                uint(en.data.size()));
+                            en.crc = zipCrc32(en.data);
                             entries.append(en);
                         }
                     }

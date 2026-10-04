@@ -302,11 +302,7 @@ if(NOT WIN32)
         endforeach()
     endif()
 
-    find_package(ZLIB REQUIRED)
-    target_link_libraries(Xipher PRIVATE ZLIB::ZLIB)
-    foreach(tz design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro)
-        target_link_libraries(${tz} PRIVATE ZLIB::ZLIB)
-    endforeach()
+    # zlib больше не нужен: crc32 для store-zip — локальная реализация в ChatPage.
 
     find_package(X11 QUIET)
     if(X11_FOUND)
