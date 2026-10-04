@@ -87,4 +87,31 @@ public slots:
 private:
     MprisAdapter* owner_;
 };
+#else // !Q_OS_UNIX
+
+// Стаб без D-Bus: тот же API и сигналы — ChatPage разницы не видит,
+// системные медиа-клавиши просто не приходят.
+class MprisAdapter : public QObject {
+    Q_OBJECT
+public:
+    explicit MprisAdapter(QObject* playerOwner, QObject* parent = nullptr);
+    bool isActive() const { return registered_; }
+    bool isPlaying() const { return playing_; }
+    QString title() const { return title_; }
+    QString artist() const { return artist_; }
+    void setMedia(const QString& title, const QString& artist = QString());
+    void setPlaying(bool playing);
+
+signals:
+    void playPauseRequested();
+    void nextRequested();
+    void previousRequested();
+    void stopRequested();
+
+private:
+    bool registered_ = false;
+    QString title_, artist_;
+    bool playing_ = false;
+};
+
 #endif // Q_OS_UNIX
