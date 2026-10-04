@@ -1,5 +1,6 @@
 #include "util/MprisAdapter.h"
 
+#ifdef Q_OS_UNIX
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QVariantMap>
@@ -64,3 +65,18 @@ void MprisPlayerAdaptor::Pause() { emit owner_->playPauseRequested(); }
 void MprisPlayerAdaptor::Stop() { emit owner_->stopRequested(); }
 void MprisPlayerAdaptor::Next() { emit owner_->nextRequested(); }
 void MprisPlayerAdaptor::Previous() { emit owner_->previousRequested(); }
+
+#else // !Q_OS_UNIX
+
+MprisAdapter::MprisAdapter(QObject* playerOwner, QObject* parent)
+    : QObject(parent) {
+    Q_UNUSED(playerOwner);
+}
+
+void MprisAdapter::setMedia(const QString& title, const QString& artist) {
+    title_ = title; artist_ = artist;
+}
+
+void MprisAdapter::setPlaying(bool playing) { playing_ = playing; }
+
+#endif // Q_OS_UNIX

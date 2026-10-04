@@ -1,9 +1,14 @@
 #pragma once
+#include <QObject>
+#include <QString>
+
+// D-Bus есть только на Linux/BSD: на Windows/macOS (и в CI без QtDBus)
+// MprisPlayerAdaptor не существует — MprisAdapter компилируется стабом
+// с тем же API, ChatPage разницы не видит.
+#ifdef Q_OS_UNIX
 #include <QDBusAbstractAdaptor>
 #include <QDBusArgument>
 #include <QDBusConnection>
-#include <QObject>
-#include <QString>
 
 class QDBusMessage;
 
@@ -82,3 +87,4 @@ public slots:
 private:
     MprisAdapter* owner_;
 };
+#endif // Q_OS_UNIX
