@@ -1,9 +1,9 @@
 name: build-and-sign
 
-# Сборка Windows-релиза Xipher Desktop и подпись.
-# Подпись бесплатна через SignPath Foundation (для open-source) — см. docs/SIGNING.md.
-# Шаг подписи выполняется только если задана переменная репозитория
-# SIGNPATH_ORGANIZATION_ID, иначе просто публикуется неподписанный артефакт.
+# Релизные сборки Xipher Desktop: Windows x64, Linux x86_64, macOS.
+# Подпись Windows бесплатна через SignPath Foundation (для open-source) —
+# см. docs/SIGNING.md. Шаг подписи выполняется только если задана переменная
+# репозитория SIGNPATH_ORGANIZATION_ID, иначе публикуется неподписанный zip.
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
       # MSVC-окружение (cl, link) для генератора Ninja.
       - uses: ilammy/msvc-dev-cmd@v1
 
-      # Qt 6 + модуль WebSockets.
+      # Qt 6 + модули WebSockets/Multimedia.
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
@@ -39,13 +39,19 @@ jobs:
       - name: Deploy Qt runtime
         run: windeployqt --release --no-translations --no-system-d3d-compiler build/bin/Xipher.exe
 
-      # Неподписанный артефакт (всегда). Если настроен SignPath — он будет подписан ниже.
-      - name: Upload unsigned artifact
+      # Готовая к распаковке папка: zip вместо россыпи файлов в релизе.
+      - name: Package (zip)
+        shell: pwsh
+        run: |
+          $VER = "${{ github.ref_name }}".TrimStart('v')
+          Compress-Archive -Path build/bin/* -DestinationPath "Xipher-$VER-windows-x64.zip"
+
+      - name: Upload artifact
         id: upload-unsigned
         uses: actions/upload-artifact@v4
         with:
-          name: Xipher-windows
-          path: build/bin
+          name: Xipher-windows-x64
+          path: Xipher-*-windows-x64.zip
 
       # ── Подпись через SignPath (бесплатно для open-source) ──────────────────
       # Что заполнить (один раз):
@@ -57,7 +63,7 @@ jobs:
       - name: Sign with SignPath
         id: signpath
         if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        # Подпись — необязательный шаг: неподписанный артефакт уже загружен,
+        # Подпись — необязательный шаг: неподписанный zip уже загружен,
         # и истёкший токен SignPath не должен ронять выпуск релиза.
         continue-on-error: true
         uses: signpath/github-action-submit-signing-request@v1
@@ -71,13 +77,6 @@ jobs:
           wait-for-completion: true
           output-artifact-directory: 'signed'
 
-      - name: Upload signed artifact
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && steps.signpath.outcome == 'success' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Xipher-windows-signed
-          path: signed
-
   # ── Linux (x86_64): Qt из дистрибутива, WebRTC из third_party ─────────────
   linux:
     runs-on: ubuntu-24.04
@@ -89,7 +88,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build g++ \
-            qt6-base-dev qt6-multimedia-dev qt6-websockets-dev \
+            qt6-base-dev qt6-svg-dev qt6-multimedia-dev qt6-websockets-dev \
             libopus-dev libssl-dev zlib1g-dev
 
       # third_party/ не в git (там же лежат локальные сборки): WebRTC берём
@@ -126,12 +125,12 @@ jobs:
           Xipher Desktop $VER (Linux x86_64)
 
           Запуск: ./Xipher
-
-          Системные зависимости (есть в актуальных дистрибутивах):
-            Qt 6 (Base, Multimedia, WebSockets), libopus, OpenSSL, zlib.
-
-          WebRTC (libdatachannel) и Opus-кодек уже внутри бинарня;
+          Системные зависимости: Qt 6 (Base, Svg, Multimedia, WebSockets),
+          libopus, OpenSSL, zlib.
+          WebRTC (libdatachannel) и Opus-кодек уже внутри бинарника;
           TURN/STUN-конфигурация запрашивается у сервера при звонке.
+
+          Вариант «скачал и запустил» — AppImage со страницы релиза.
           EOT
           tar -C pkg -czf "Xipher-$VER-linux-x86_64.tar.gz" "Xipher-$VER-linux-x86_64"
 
@@ -141,10 +140,91 @@ jobs:
           name: Xipher-linux-x86_64
           path: Xipher-*.tar.gz
 
-  # ── Релиз: тег → GitHub Release с артефактами обеих платформ ─────────────
+  # ── macOS (arm64, Apple Silicon) ──────────────────────────────────────────
+  # Бинарник не подписан разработчиком Apple: при первом запуске macOS может
+  # спросить подтверждение (правый клик → «Открыть», либо xattr -cr Xipher.app).
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: brew install ninja
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.*'
+          host: mac
+          target: desktop
+          modules: 'qtwebsockets qtmultimedia'
+          cache: true
+
+      - name: Fetch libdatachannel v0.24.5 (WebRTC)
+        run: |
+          mkdir -p third_party
+          git clone --depth 1 --branch v0.24.5 \
+            --recurse-submodules --shallow-submodules \
+            https://github.com/paullouisageneau/libdatachannel.git \
+            third_party/libdatachannel
+
+      - name: Build libdatachannel (WebRTC)
+        run: |
+          cmake -S third_party/libdatachannel -B third_party/libdatachannel/build-mac \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DNO_WEBSOCKET=ON
+          cmake --build third_party/libdatachannel/build-mac \
+            --target datachannel-static -j"$(sysctl -n hw.ncpu)"
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      # Голый бинарник (MACOSX_BUNDLE не задан) оборачиваем в .app вручную:
+      # macdeployqt затянет Qt-библиотеки и плагины внутрь бандла.
+      - name: Package (.app → zip)
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          APP="Xipher.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp build/bin/Xipher "$APP/Contents/MacOS/Xipher"
+          cat > "$APP/Contents/Info.plist" <<EOT
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>Xipher</string>
+            <key>CFBundleIdentifier</key><string>pro.xipher.desktop</string>
+            <key>CFBundleName</key><string>Xipher</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$VER</string>
+            <key>CFBundleVersion</key><string>$VER</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOT
+          ICON_SRC="$(find resources -name 'xipher.icns' -o -name 'xipher.png' | head -1)"
+          if [ -n "$ICON_SRC" ]; then
+            cp "$ICON_SRC" "$APP/Contents/Resources/xipher.$(basename "$ICON_SRC" | sed 's/.*\.//')"
+          fi
+          macdeployqt "$APP" -verbose=1
+          # Ad-hoc подпись: без неё Gatekeeper ругается сильнее, с ней локально
+          # достаточно «правый клик → Открыть».
+          codesign --force --deep -s - "$APP" || true
+          zip -qry "Xipher-$VER-macos-arm64.zip" "$APP"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Xipher-macos-arm64
+          path: Xipher-*-macos-arm64.zip
+
+  # ── Релиз: тег → GitHub Release с артефактами всех платформ ───────────────
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [windows, linux]
+    needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -156,4 +236,16 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          body: |
+            **Xipher Desktop ${{ github.ref_name }}**
+
+            | Платформа | Файл | Установка |
+            |---|---|---|
+            | Windows x64 | `Xipher-*-windows-x64.zip` | распаковать → `Xipher.exe` |
+            | Linux x86_64 | `Xipher-*-linux-x86_64.tar.gz` | распаковать → `./Xipher` (нужен Qt6 в системе) |
+            | Linux x86_64 | `Xipher-*-x86_64.AppImage` | `chmod +x` → запустить (всё внутри) |
+            | macOS arm64 (M1/M2/M3) | `Xipher-*-macos-arm64.zip` | распаковать → `Xipher.app`; сборка без подписи Apple: правый клик → «Открыть» |
+
+            Windows: при отсутствии системных библиотек MSVC установите
+            [vc_redist.x64](https://aka.ms/vs/17/release/vc_redist.x64.exe).
           files: dist/*

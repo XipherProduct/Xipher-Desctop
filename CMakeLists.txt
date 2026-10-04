@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21)
 #  Xipher Desktop — фул-нативный клиент на Qt 6 (C++), без webview.
 #  Версия 0.1: вход / регистрация 1:1 с веб-дизайном + мини-экран после входа.
 # ─────────────────────────────────────────────────────────────────────────────
-project(XipherDesktop VERSION 1.6 LANGUAGES CXX)
+project(XipherDesktop VERSION 0.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
