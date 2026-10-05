@@ -19,6 +19,7 @@ public:
     void start();   // сброс таймера + запуск анимаций
     void stop();    // остановить анимации
     void pushLevel(qreal lvl);   // реальный уровень микрофона → волна
+    void setBarIntervalMs(int ms);   // скорость движения волны (мс/бар)
     int  seconds() const { return secs_; }   // длительность текущей записи
 
 signals:

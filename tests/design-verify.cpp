@@ -2345,6 +2345,7 @@ int main(int argc, char** argv) {
         RecordingBar bar;
         bar.resize(360, 50);
         bar.show();
+        bar.setBarIntervalMs(0);   // в тесте каждый пуш = новый бар
         for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
 
         // Тишина: низкая ровная дорожка.
@@ -2387,6 +2388,30 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 500; ++i) bar.pushLevel(i % 2 ? 0.8 : 0.2);
         for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
         check(true, QStringLiteral("500 push'ей уровня — без падений"));
+
+        // Прореживание: при интервале 65 мс/бар мгновенная серия пушей
+        // держит ПРАВЫЙ бар (hold), а не сыплет историю на полную ширину —
+        // именно поэтому волна едет со скоростью Telegram.
+        bar.setBarIntervalMs(60000);   // 60 с: все пуши в один бар
+        bar.stop();                    // сброс
+        for (int i = 0; i < 30; ++i) bar.pushLevel(1.0);
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+        const QImage held = bar.grab().toImage();
+        auto barTopHold = [](const QImage& img, int x) {
+            for (int y = 0; y < img.height(); ++y) {
+                const QColor c = img.pixelColor(x, y);
+                if (c.blue() > 120 && c.red() > 80 && c.alpha() > 40) return y;
+            }
+            return img.height();
+        };
+        // Правый край (близко к новейшему) — громкий; середина (старая зона) — пусто.
+        const int spanHeld = held.height()
+            - barTopHold(held, 340) - barTopHold(held, 340);
+        const int spanMid = held.height()
+            - barTopHold(held, 180) - barTopHold(held, 180);
+        check(spanHeld > spanMid + 8,
+              QStringLiteral("hold: быстрые пуши держат правый бар, не сдвигают историю"));
+        bar.setBarIntervalMs(0);
         bar.stop();   // сброс: новая запись начинается с чистой волной
         const QImage cleared = bar.grab().toImage();
         auto barTopClr = [&cleared](int x) {

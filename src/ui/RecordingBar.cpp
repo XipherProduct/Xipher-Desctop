@@ -2,6 +2,7 @@
 #include "ui/Icons.h"
 
 #include <QPainter>
+#include <QDateTime>
 #include <QTimer>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -51,12 +52,23 @@ public:
     explicit LiveWave(QWidget* parent = nullptr) : QWidget(parent) {
         setMinimumHeight(30);
     }
+    // Прореживание по времени: чанки PCM идут каждые 10–20 мс — если пушить
+    // каждый, история пролетает за полсекунды. Бар «едет» раз в kMsPerBar мс
+    // (как в Telegram ~65 мс/бар ≈ 2.6 с истории на экране); между сдвигами
+    // уровень обновляет ПРАВЫЙ бар (hold), поэтому громкий звук виден сразу.
+    void setBarIntervalMs(int ms) { msPerBar_ = qMax(0, ms); }
     void pushLevel(qreal lvl) {
-        levels_.append(qBound(0.0, lvl, 1.0));
-        while (levels_.size() > kBars) levels_.removeFirst();
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (!levels_.isEmpty() && now - lastBarMs_ < msPerBar_) {
+            levels_.last() = qBound(0.0, lvl, 1.0);   // hold правого бара
+        } else {
+            levels_.append(qBound(0.0, lvl, 1.0));
+            while (levels_.size() > kBars) levels_.removeFirst();
+            lastBarMs_ = now;
+        }
         update();
     }
-    void reset() { levels_.clear(); update(); }
+    void reset() { levels_.clear(); lastBarMs_ = 0; update(); }
 
 protected:
     void paintEvent(QPaintEvent*) override {
@@ -85,6 +97,8 @@ protected:
 
 private:
     static constexpr int kBars = 40;
+    int msPerBar_ = 65;
+    qint64 lastBarMs_ = 0;
     QList<qreal> levels_;
 };
 
@@ -154,4 +168,8 @@ void RecordingBar::stop() {
 
 void RecordingBar::pushLevel(qreal lvl) {
     wave_->pushLevel(lvl);
+}
+
+void RecordingBar::setBarIntervalMs(int ms) {
+    wave_->setBarIntervalMs(ms);
 }
