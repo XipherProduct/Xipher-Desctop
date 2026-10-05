@@ -1684,6 +1684,8 @@ void ChatPage::buildUi() {
     connect(sendBtn_, &QPushButton::clicked, this, &ChatPage::onSendClicked);
     connect(search_, &QLineEdit::textChanged, this, &ChatPage::onSearchChanged);
     connect(micBtn_, &QPushButton::clicked, this, &ChatPage::onMicClicked);
+    // Живая волна записи — реальный уровень микрофона (не декорация).
+    connect(recorder_, &VoiceRecorder::inputLevel, recBar_, &RecordingBar::pushLevel);
     connect(recBar_, &RecordingBar::cancelClicked, this, &ChatPage::cancelRecording);
     connect(recBar_, &RecordingBar::sendClicked, this, &ChatPage::stopAndSendVoice);
     connect(emojiBtn_, &QPushButton::clicked, this, &ChatPage::onEmojiClicked);

@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QTimer>
+#include <cmath>
 
 namespace {
 // PCM-дубликат для обрезки (VOX-01): 48кГц/моно/int16 = 96 байт/мс.
@@ -81,6 +82,20 @@ void VoiceRecorder::startPcmDuplication() {
         const QByteArray chunk = pcmIo_->readAll();
         pcmDup_.append(chunk);
         pcmMs_ = pcmDup_.size() / kPcmBytesPerMs;
+        // RMS чанка → dB-нормировка: -60dB (тишина) → 0, -10dB (громко) → 1.
+        // Линейный RMS у обычного микрофона живёт в 0.003..0.2 — «плавал бы».
+        const auto* samples = reinterpret_cast<const qint16*>(chunk.constData());
+        const int n = chunk.size() / 2;
+        if (n > 0) {
+            double acc = 0.0;
+            for (int i = 0; i < n; ++i) {
+                const double v = samples[i] / 32768.0;
+                acc += v * v;
+            }
+            const double rms = std::sqrt(acc / n);
+            double lvl = (20.0 * std::log10(qMax(rms, 1e-6)) + 60.0) / 50.0;
+            emit inputLevel(qBound(0.0, lvl, 1.0));
+        }
     });
 }
 

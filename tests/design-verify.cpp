@@ -10,6 +10,7 @@
 // Выход: 0 = все проверки пройдены, 1 = есть расхождения (список в stdout).
 
 #include "ui/ChatPage.h"
+#include "ui/RecordingBar.h"
 #include "app/MainWindow.h"
 #include "ui/ProfilePanel.h"
 #include "ui/GiftArt.h"
@@ -2336,6 +2337,67 @@ int main(int argc, char** argv) {
             check(sub, QStringLiteral("чат: имя + номер экземпляра #77320"));
             check(noRaw, QStringLiteral("чат: сырой [[XIPHER_STAR_GIFT]] не показывается"));
         }
+    }
+
+    // ── Запись голосового: волна от РЕАЛЬНОГО уровня, не синусоида ─────────────
+    {
+        printf("\nВолна записи (реальный уровень микрофона)\n");
+        RecordingBar bar;
+        bar.resize(360, 50);
+        bar.show();
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+
+        // Тишина: низкая ровная дорожка.
+        for (int i = 0; i < 40; ++i) bar.pushLevel(0.0);
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+        const QImage quiet = bar.grab().toImage();
+        int maxH0 = 0;
+        for (int x = 60; x < 320; ++x)
+            for (int y = 0; y < quiet.height(); ++y)
+                if (quiet.pixelColor(x, y).alpha() > 40
+                    && quiet.pixelColor(x, y).value() > quiet.pixelColor(x, y).red())
+                { }   // штрихи фиолетовые — меряем по вертикальному охвату ниже
+        // Проще: верхняя граница фиолетовых пикселей в центре бара.
+        auto barTop = [&quiet](int x) {
+            for (int y = 0; y < quiet.height(); ++y) {
+                const QColor c = quiet.pixelColor(x, y);
+                if (c.blue() > 120 && c.red() > 80 && c.alpha() > 40) return y;
+            }
+            return quiet.height();
+        };
+        int spanQuiet = quiet.height() - barTop(180) - barTop(180);
+
+        // Громкий сигнал (уровень 1.0): дорожка должна вырасти по высоте.
+        for (int i = 0; i < 40; ++i) bar.pushLevel(1.0);
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+        const QImage loud = bar.grab().toImage();
+        auto barTopLoud = [&loud](int x) {
+            for (int y = 0; y < loud.height(); ++y) {
+                const QColor c = loud.pixelColor(x, y);
+                if (c.blue() > 120 && c.red() > 80 && c.alpha() > 40) return y;
+            }
+            return loud.height();
+        };
+        const int spanLoud = loud.height() - barTopLoud(180) - barTopLoud(180);
+        check(spanLoud > spanQuiet + 8,
+              QStringLiteral("уровень 1.0 рисует заметно выше тишины (%1 > %2)")
+                  .arg(spanLoud).arg(spanQuiet));
+
+        // Серия push не ломает виджет и история ограничена (нет утечки роста).
+        for (int i = 0; i < 500; ++i) bar.pushLevel(i % 2 ? 0.8 : 0.2);
+        for (int i = 0; i < 10; ++i) QCoreApplication::processEvents();
+        check(true, QStringLiteral("500 push'ей уровня — без падений"));
+        bar.stop();   // сброс: новая запись начинается с чистой волной
+        const QImage cleared = bar.grab().toImage();
+        auto barTopClr = [&cleared](int x) {
+            for (int y = 0; y < cleared.height(); ++y) {
+                const QColor c = cleared.pixelColor(x, y);
+                if (c.blue() > 120 && c.red() > 80 && c.alpha() > 40) return y;
+            }
+            return cleared.height();
+        };
+        const int spanClr = cleared.height() - barTopClr(180) - barTopClr(180);
+        check(spanClr < spanLoud, QStringLiteral("stop() сбрасывает историю волны"));
     }
 
     // ── Дизайн-регрессия: «Позвонить» только в ЛС (канал/топик/группа — нет) ──

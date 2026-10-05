@@ -31,6 +31,9 @@ signals:
     void recordingFinished(const QString& filePath, const QString& mimeType,
                            const QByteArray& pcmDuplicate, int pcmDurationMs);
     void error(const QString& message);
+    // Реальный уровень микрофона (RMS чанка, dB-нормировка 0..1) —
+    // для живой волны RecordingBar, чтобы она дышала от голоса.
+    void inputLevel(qreal level);
 
 private:
     void startPcmDuplication();   // VOX-01: параллельный QAudioSource
