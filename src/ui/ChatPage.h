@@ -462,6 +462,8 @@ private:
     bool longTextBarShown_ = false;
     QStringList channelAllowedReactions_;   // MSG-05
     QPushButton* silentBtn_ = nullptr;      // MSG-08
+    QPushButton* hdrCallBtn_ = nullptr;     // «Позвонить» в шапке — только ЛС
+    QPushButton* tcCallBtn_ = nullptr;      // «Позвонить» в третьей колонке — только ЛС
     QPushButton* narrowToggleBtn_ = nullptr;   // WIN-03
     void pasteAsMarkdown();                 // MLT-04: Ctrl+Shift+V
     QString recentSearchKey() const { return QStringLiteral("xipher_recent_searches"); }

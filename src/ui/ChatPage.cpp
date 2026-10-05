@@ -1070,12 +1070,14 @@ void ChatPage::buildUi() {
     searchBtn->setIcon(Icons::icon(Icons::Search, 20, hdrIcon));
     searchBtn->setIconSize(QSize(20, 20));
     searchBtn->setToolTip(QStringLiteral("Поиск сообщений"));
-    auto* callBtn = new QPushButton(convHeader);
-    callBtn->setObjectName(QStringLiteral("hdrBtn"));
-    callBtn->setCursor(Qt::PointingHandCursor);
-    callBtn->setIcon(Icons::icon(Icons::Phone, 20, hdrIcon));
-    callBtn->setIconSize(QSize(20, 20));
-    callBtn->setToolTip(QStringLiteral("Позвонить"));
+    // Звонок — только в ЛС (как в Telegram): для канала/группы/топика кнопки
+    // нет. Видимость переключается в openChat/openTopic.
+    hdrCallBtn_ = new QPushButton(convHeader);
+    hdrCallBtn_->setObjectName(QStringLiteral("hdrBtn"));
+    hdrCallBtn_->setCursor(Qt::PointingHandCursor);
+    hdrCallBtn_->setIcon(Icons::icon(Icons::Phone, 20, hdrIcon));
+    hdrCallBtn_->setIconSize(QSize(20, 20));
+    hdrCallBtn_->setToolTip(QStringLiteral("Позвонить"));
     moreBtn_ = new QPushButton(convHeader);
     moreBtn_->setObjectName(QStringLiteral("hdrBtn"));
     moreBtn_->setCursor(Qt::PointingHandCursor);
@@ -1083,12 +1085,12 @@ void ChatPage::buildUi() {
     moreBtn_->setIconSize(QSize(20, 20));
     chl->addWidget(superBtn);
     chl->addWidget(searchBtn);
-    chl->addWidget(callBtn);
+    chl->addWidget(hdrCallBtn_);
     chl->addWidget(moreBtn_);
     connect(superBtn, &QPushButton::clicked, this, &ChatPage::openSuperSearch);
     // Единый поиск (обычный + супер, в этом чате / во всех чатах) — как в вебе.
     connect(searchBtn, &QPushButton::clicked, this, &ChatPage::openSuperSearch);
-    connect(callBtn, &QPushButton::clicked, this, &ChatPage::startCall);
+    connect(hdrCallBtn_, &QPushButton::clicked, this, &ChatPage::startCall);
     connect(moreBtn_, &QPushButton::clicked, this, &ChatPage::showChatMenu);
 
     msgScroll_ = new QScrollArea(conv);
@@ -1541,13 +1543,14 @@ void ChatPage::buildUi() {
             profilePanel_->openFor(currentPeerId_);
         });
         bv->addWidget(tcProfile);
-        auto* tcCall = new QPushButton(QStringLiteral("Позвонить"), tcBody);
-        tcCall->setObjectName(QStringLiteral("tcActionGhost"));
-        connect(tcCall, &QPushButton::clicked, this, [this]() {
+        // «Позвонить» — только в ЛС; видимость задаёт setThirdColumnInfo.
+        tcCallBtn_ = new QPushButton(QStringLiteral("Позвонить"), tcBody);
+        tcCallBtn_->setObjectName(QStringLiteral("tcActionGhost"));
+        connect(tcCallBtn_, &QPushButton::clicked, this, [this]() {
             if (currentPeerId_.isEmpty()) return;
             emit callRequested(currentPeerId_, currentPeerName_, QString());
         });
-        bv->addWidget(tcCall);
+        bv->addWidget(tcCallBtn_);
         // Управление группой/каналом — прежняя панель PeerInfoPanel (модалкой).
         auto* tcManage = new QPushButton(QStringLiteral("Управление"), tcBody);
         tcManage->setObjectName(QStringLiteral("tcActionGhost"));
@@ -1877,6 +1880,10 @@ void ChatPage::setThirdColumnInfo() {
     if (tcManageBtn_)
         tcManageBtn_->setVisible(currentKind_ == ChatKind::Group
                                  || currentKind_ == ChatKind::Channel);
+    // Звонок — только ЛС (не «Избранные»): в канал/группу звонков нет.
+    if (tcCallBtn_)
+        tcCallBtn_->setVisible(currentKind_ == ChatKind::User
+                               && currentPeerId_ != Session::instance().userId);
 
     // Мета-строки: тип, участники/подписчики, @ссылка — по данным чата.
     if (QLayout* ml = tcMeta_->layout()) {
@@ -2597,6 +2604,7 @@ void ChatPage::openTopic(const Topic& topic) {
     if (topicBackBtn_) topicBackBtn_->setVisible(true);
     peerName_->setText(topic.name);
     peerStatus_->setText(QStringLiteral("тема • %1").arg(currentPeerName_));
+    if (hdrCallBtn_) hdrCallBtn_->setVisible(false);   // в тему не звонят (как в ТГ)
     convStack_->setCurrentIndex(1);
     clearMessages();
     loadingChat_ = true;   // приветствие не мелькает, пока тема грузится
@@ -2961,6 +2969,8 @@ void ChatPage::openChat(const Chat& chat) {
     peerStatus_->setText(status);
     if (silentBtn_)
         silentBtn_->setVisible(chat.kind == ChatKind::Channel);
+    if (hdrCallBtn_)
+        hdrCallBtn_->setVisible(chat.kind == ChatKind::User && !chat.isSaved);
     setThirdColumnInfo();   // третья колонка: инфо нового чата (если открыта)
     currentForum_ = false;
     currentTopicId_.clear();

@@ -2338,6 +2338,56 @@ int main(int argc, char** argv) {
         }
     }
 
+    // ── Дизайн-регрессия: «Позвонить» только в ЛС (канал/топик/группа — нет) ──
+    {
+        printf("\nКнопка звонка (только ЛС, как в ТГ)\n");
+        auto callBtns = [&page]() {
+            QList<QPushButton*> out;
+            for (QPushButton* b : page.findChildren<QPushButton*>())
+                if (b->toolTip() == QStringLiteral("Позвонить")
+                    && b->isVisibleTo(&page)) out.append(b);
+            return out;
+        };
+
+        QList<Chat> all = chats;
+        Chat chan; chan.id = QStringLiteral("ch_news");
+        chan.displayName = QStringLiteral("Новости"); chan.kind = ChatKind::Channel;
+        all.append(chan);
+        Chat group; group.id = QStringLiteral("gr_team");
+        group.displayName = QStringLiteral("Команда"); group.kind = ChatKind::Group;
+        all.append(group);
+
+        // ЛС: кнопка есть.
+        page.injectForDesignTest(all, QList<Folder>(), QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+        check(!callBtns().isEmpty() && callBtns().first()->isVisibleTo(&page),
+              QStringLiteral("ЛС: кнопка звонка в шапке видна"));
+
+        // Канал: кнопки нет.
+        page.injectForDesignTest(all, QList<Folder>(), QStringLiteral("ch_news"), QList<ChatMessage>());
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+        check(callBtns().isEmpty(),
+              QStringLiteral("канал: кнопки звонка нет"));
+
+        // Группа: кнопки нет.
+        page.injectForDesignTest(all, QList<Folder>(), QStringLiteral("gr_team"), QList<ChatMessage>());
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+        check(callBtns().isEmpty(),
+              QStringLiteral("группа: кнопки звонка нет"));
+
+        // «Избранные» (saved): звонить себе нельзя.
+        page.injectForDesignTest(all, QList<Folder>(), QStringLiteral("offscreen_user"), QList<ChatMessage>());
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+        check(callBtns().isEmpty(),
+              QStringLiteral("«Избранные»: кнопки звонка нет"));
+
+        // Возврат в ЛС — кнопка вернулась.
+        page.injectForDesignTest(all, QList<Folder>(), QStringLiteral("u_alice"), msgs);
+        for (int i = 0; i < 30; ++i) QCoreApplication::processEvents();
+        check(!callBtns().isEmpty() && callBtns().first()->isVisibleTo(&page),
+              QStringLiteral("возврат в ЛС: кнопка звонка снова видна"));
+    }
+
     if (auto* tile = page.findChild<QLabel*>(QStringLiteral("folderRailIcon"))) {
         printf("  folderRailIcon: geo=(%d,%d %dx%d) ss=%s\n",
                tile->mapTo(&page, QPoint(0, 0)).x(), tile->mapTo(&page, QPoint(0, 0)).y(),
