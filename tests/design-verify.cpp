@@ -274,6 +274,48 @@ int main(int argc, char** argv) {
         check(clipped == 0, QStringLiteral("текст не обрезан бабблом"));
     }
 
+    // ── Серии сообщений (TG): подряд одного автора — плотный ряд, между
+    // сериями зазор; «клюв» 4px только у последнего серии.
+    {
+        auto* cont = page.findChild<QWidget*>(QStringLiteral("msgContainer"));
+        struct RowInfo { QFrame* bubble; bool out; int y, h; };
+        QList<RowInfo> rows;
+        if (cont && cont->layout())
+            for (int i = 0; i < cont->layout()->count(); ++i) {
+                auto* it = cont->layout()->itemAt(i);
+                if (!it || !it->widget()) continue;
+                QWidget* w = it->widget();
+                if (w->objectName() != QStringLiteral("msgRow")) continue;
+                QFrame* b = w->findChild<QFrame*>(QStringLiteral("bubbleOut"));
+                const bool out = b != nullptr;
+                if (!b) b = w->findChild<QFrame*>(QStringLiteral("bubbleIn"));
+                if (!b) continue;
+                rows.append({b, out, w->mapTo(cont, QPoint(0, 0)).y(), w->height()});
+            }
+        int sameGap = INT_MAX, diffGap = 0;
+        for (int i = 1; i < rows.size(); ++i) {
+            const int gap = rows[i].y - (rows[i - 1].y + rows[i - 1].h);
+            if (rows[i].out == rows[i - 1].out) sameGap = qMin(sameGap, gap);
+            else diffGap = qMax(diffGap, gap);
+        }
+        check(rows.size() >= 10 && sameGap < diffGap,
+              QStringLiteral("серии: подряд одного автора плотнее (gap %1 < %2)")
+                  .arg(sameGap == INT_MAX ? -1 : sameGap).arg(diffGap));
+        bool tailOk = false, noTailOk = false;
+        for (int i = 0; i < rows.size(); ++i) {
+            const bool lastOfSeries = (i + 1 >= rows.size())
+                                   || (rows[i + 1].out != rows[i].out);
+            const QString ss = rows[i].bubble->styleSheet();
+            const bool hasTail = ss.contains(QStringLiteral("border-bottom-left-radius:4px"))
+                              || ss.contains(QStringLiteral("border-bottom-right-radius:4px"));
+            if (lastOfSeries && hasTail && !rows[i].bubble->property("mediaOnly").toBool())
+                tailOk = true;
+            if (!lastOfSeries && !hasTail) noTailOk = true;
+        }
+        check(tailOk, QStringLiteral("клюв TG: у последнего серии нижний угол 4px"));
+        check(noTailOk, QStringLiteral("серия без клюва: не-последний — полный радиус"));
+    }
+
     auto countRows = [&page]() -> int {
         auto* c = page.findChild<QWidget*>(QStringLiteral("msgContainer"));
         int n = 0;

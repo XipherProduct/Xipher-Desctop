@@ -465,7 +465,8 @@ QString formatMessageHtml(const QString& raw, const QString& highlight) {
         str = out;
     };
     wrap(s, QStringLiteral("\x02S\x02"),
-         QStringLiteral("<span style=\"background-color:#0B0A0E;color:#0B0A0E;border-radius:3px;\" title=\"Спойлер — выделите, чтобы прочитать\">"),
+         QStringLiteral("<span style=\"background-color:rgba(255,255,255,0.13);color:rgba(255,255,255,0.13);"
+                        "border-radius:3px;\" title=\"Спойлер — выделите, чтобы прочитать\">"),
          QStringLiteral("</span>"));
     wrap(s, QStringLiteral("\x02B\x02"), QStringLiteral("<b>"), QStringLiteral("</b>"));
     wrap(s, QStringLiteral("\x02U\x02"), QStringLiteral("<u>"), QStringLiteral("</u>"));
@@ -515,6 +516,7 @@ static QString downloadsDir() {
 
 // Центрированная «пилюля»-разделитель дат.
 QWidget* makeDateSeparator(const QString& label) {
+    const auto th = ThemePreset::current();
     auto* row = new QWidget();
     row->setStyleSheet(QStringLiteral("background:transparent;"));
     auto* l = new QHBoxLayout(row);
@@ -522,8 +524,9 @@ QWidget* makeDateSeparator(const QString& label) {
     l->addStretch();
     auto* pill = new QLabel(label);
     pill->setStyleSheet(QStringLiteral(
-        "background:rgba(255,255,255,0.07);color:#ACA6BD;font-size:13px;font-weight:600;"
-        "padding:4px 14px;border-radius:12px;"));
+        "background:%1;color:%2;font-size:12px;font-weight:600;"
+        "padding:4px 14px;border-radius:12px;")
+        .arg(th.surface3.name(), th.textSecondary.name()));
     l->addWidget(pill);
     l->addStretch();
     return row;
@@ -621,6 +624,43 @@ static QString bubbleInQss() {
     return QStringLiteral(
         "#bubbleIn{background:%1;border:1px solid %2;border-radius:14px;}")
         .arg(th.bubbleIn.name(), th.rgba(th.borderSubtle, 1.0));
+}
+
+// «Клюв» TG: у последнего сообщения серии нижний угол со стороны автора
+// скруглен меньше (4px) — визуальный хвост. mediaOnly-пузыри без фона не трогаем.
+static void setBubbleTail(QFrame* b, bool out, bool tail) {
+    if (!b || b->property("mediaOnly").toBool()) return;
+    b->setProperty("tail", tail);
+    b->setProperty("tailOut", out);
+    QString qss = out ? bubbleOutQss() : bubbleInQss();
+    if (tail)
+        qss.replace(QStringLiteral("border-radius:14px;"),
+                    out ? QStringLiteral("border-radius:14px;border-bottom-right-radius:4px;")
+                        : QStringLiteral("border-radius:14px;border-bottom-left-radius:4px;"));
+    b->setStyleSheet(qss);
+}
+
+// Вертикальный зазор между сериями разных авторов (layout spacing при этом 2px).
+static QWidget* makeSeriesGap(int h = 8) {
+    auto* g = new QWidget();
+    g->setFixedHeight(h);
+    g->setStyleSheet(QStringLiteral("background:transparent;"));
+    return g;
+}
+
+// Мягкая палитра имён авторов в группах (TG): стабильный цвет по hash(senderId).
+static QColor authorColor(const QString& senderId) {
+    const auto th = ThemePreset::current();
+    const QColor palette[] = {
+        th.isLight ? QColor(0x6D,0x28,0xD9) : QColor(0xBB,0xA4,0xFF),
+        th.isLight ? QColor(0x0E,0x7A,0x9E) : QColor(0x6F,0xC5,0xE8),
+        th.isLight ? QColor(0x2F,0x8F,0x5B) : QColor(0x7F,0xDD,0xA9),
+        th.isLight ? QColor(0xB4,0x5F,0x1F) : QColor(0xF0,0xB2,0x7A),
+        th.isLight ? QColor(0xB3,0x3A,0x6B) : QColor(0xF2,0x9A,0xB8),
+        th.isLight ? QColor(0x54,0x6A,0xC4) : QColor(0x9D,0xB4,0xF2),
+    };
+    uint h = qHash(senderId);
+    return palette[h % 6];
 }
 static QString chatQSS();   // единый шаблон стилей чата (определён ниже)
 
@@ -1110,7 +1150,7 @@ void ChatPage::buildUi() {
     msgContainer_->setStyleSheet(QStringLiteral("#msgContainer{background:#0B0A0E;}"));
     msgLayout_ = new QVBoxLayout(msgContainer_);
     msgLayout_->setContentsMargins(18, 14, 18, 14);
-    msgLayout_->setSpacing(6);
+    msgLayout_->setSpacing(2);   // плотность серий TG; зазор между сериями — makeSeriesGap
     msgLayout_->addStretch();   // прижимаем сообщения к низу
     msgScroll_->setWidget(msgContainer_);
 
@@ -3086,6 +3126,10 @@ void ChatPage::clearMessages() {
     mergedChecklists_.clear();
     pendingImage_.clear();   // виджеты-картинки удалены — не держим устаревшие ключи
     bubbleCount_ = 0;
+    lastAuthorKey_.clear();          // серии (TG) начинаются заново
+    lastSeriesBubble_.clear();
+    lastSeriesAvatar_.clear();
+    lastPrependAuthorKey_.clear();
     updateGreeting();
 }
 
@@ -3426,6 +3470,7 @@ void ChatPage::renderMessages(const QString& filter) {
             const QString lbl = dateLabel(m.createdAt);
             if (!lbl.isEmpty()) msgLayout_->addWidget(makeDateSeparator(lbl));
             lastDay = day;
+            lastAuthorKey_.clear();   // новый день — новая серия (TG)
         }
         addBubble(m);
     }
@@ -3465,6 +3510,14 @@ void ChatPage::prependOlderBatch(int floorFrom, int batch) {
     // и более новым сообщением снизу.
     const int from = qMax(floorFrom, renderedFrom_ - batch);
     QString lastDay = currentMessages_.value(renderedFrom_).createdAt.left(10);
+    // Серия prepend-цепочки начинается от нижнего соседа (более нового).
+    if (lastPrependAuthorKey_.isEmpty() && renderedFrom_ < currentMessages_.size()) {
+        const ChatMessage& prev = currentMessages_[renderedFrom_];
+        lastPrependAuthorKey_ = prev.sent ? QStringLiteral("out")
+            : QStringLiteral("in:") + (prev.senderId.isEmpty() ? currentPeerId_
+                                                               : prev.senderId);
+        lastPrependTime_ = QDateTime::fromString(prev.createdAt, Qt::ISODate);
+    }
     for (int i = renderedFrom_ - 1; i >= from; --i) {
         const ChatMessage& m = currentMessages_[i];
         if (!m.id.isEmpty()) shownIds_.insert(m.id);
@@ -3475,6 +3528,7 @@ void ChatPage::prependOlderBatch(int floorFrom, int batch) {
                 const QString lbl = dateLabel(m.createdAt);
                 if (!lbl.isEmpty()) msgLayout_->insertWidget(1, makeDateSeparator(lbl));
                 lastDay = day;
+                lastPrependAuthorKey_.clear();   // новый день — новая серия
             }
         }
     }
@@ -3559,6 +3613,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         || msg.messageType == QStringLiteral("video")
         || msg.messageType == QStringLiteral("video_note"))
         && msg.content.isEmpty();
+    bubble->setProperty("mediaOnly", mediaOnly);
     if (mediaOnly)
         bubble->setStyleSheet(QStringLiteral(
             "#bubbleOut,#bubbleIn{background:transparent;border:none;padding:0;}"));
@@ -3586,7 +3641,8 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     if (!out && (currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel)
         && !msg.senderName.isEmpty() && msg.senderId != Session::instance().userId) {
         auto* author = new QLabel(streamerSafeName(msg.senderName, indexOfChat(currentPeerId_) + 1, false), bubble);
-        author->setStyleSheet(QStringLiteral("color:#8B5CF6;font-size:12px;font-weight:700;"));
+        author->setStyleSheet(QStringLiteral("color:%1;font-size:12px;font-weight:700;")
+                                  .arg(authorColor(msg.senderId).name()));
         author->setCursor(Qt::PointingHandCursor);
         author->setProperty("openProfileFor", msg.senderId);
         author->setProperty("senderName", msg.senderName);   // превью шапки профиля
@@ -3948,13 +4004,71 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     metaRow->addWidget(meta);
     bl->addLayout(metaRow);
 
+    // ── Серии (TG): подряд одного автора ≤5 мин — плотный ряд; клюв у последнего;
+    // аватар автора (группы/каналы) — только под последним серии, место держим.
+    const bool peerWithAvatars = !out && (currentKind_ == ChatKind::Group
+                                       || currentKind_ == ChatKind::Channel);
+    const QString authorKey = out ? QStringLiteral("out")
+                          : QStringLiteral("in:") + (msg.senderId.isEmpty()
+                                                     ? currentPeerId_ : msg.senderId);
+    const QDateTime curT = QDateTime::fromString(msg.createdAt, Qt::ISODate);
+    bool sameSeries = prepend ? (authorKey == lastPrependAuthorKey_)
+                              : (authorKey == lastAuthorKey_);
+    if (sameSeries) {   // окно серии 5 минут (как в Telegram)
+        const QDateTime ref = prepend ? lastPrependTime_ : lastSeriesTime_;
+        if (curT.isValid() && ref.isValid() && qAbs(ref.secsTo(curT)) > 300)
+            sameSeries = false;
+    }
+
+    QLabel* avatarLabel = nullptr;
+    if (peerWithAvatars) {
+        auto* avSlot = new QWidget(row);
+        avSlot->setFixedWidth(38);
+        auto* sl = new QVBoxLayout(avSlot);
+        sl->setContentsMargins(4, 0, 4, 2);
+        sl->addStretch();   // аватар прижат к низу строки (у последнего серии)
+        avatarLabel = new QLabel(avSlot);
+        avatarLabel->setFixedSize(30, 30);
+        const QString avName = msg.senderName.isEmpty() ? currentPeerName_ : msg.senderName;
+        const int pi = indexOfChat(currentPeerId_);
+        const QString avUrl = (currentKind_ == ChatKind::Channel && pi >= 0)
+                              ? chats_[pi].avatarUrl : QString();
+        Avatar::setRound(avatarLabel, avUrl, avName.mid(0, 1), 30);
+        avatarLabel->setCursor(Qt::PointingHandCursor);
+        avatarLabel->setProperty("openProfileFor", msg.senderId);
+        avatarLabel->setProperty("senderName", avName);
+        avatarLabel->installEventFilter(this);
+        sl->addWidget(avatarLabel);
+        rl->addWidget(avSlot);
+    }
     if (out) { rl->addStretch(); rl->addWidget(bubble); }
     else     { rl->addWidget(bubble); rl->addStretch(); }
 
-    if (prepend)
+    if (prepend) {
         msgLayout_->insertWidget(1, row);   // после stretch, ПЕРЕД существующими
-    else
-        msgLayout_->addWidget(row);         // после стартового stretch → прижато к низу
+        if (!sameSeries && !lastPrependAuthorKey_.isEmpty())
+            msgLayout_->insertWidget(2, makeSeriesGap());   // зазор ПОД новой серией
+        setBubbleTail(bubble, out, !sameSeries);
+        if (avatarLabel) avatarLabel->setVisible(!sameSeries);
+        lastPrependAuthorKey_ = authorKey;
+        lastPrependTime_ = curT;
+    } else {
+        if (!sameSeries && !lastAuthorKey_.isEmpty())
+            msgLayout_->addWidget(makeSeriesGap());
+        if (sameSeries) {
+            // серия продолжается: клюв и аватар переезжают на новое сообщение
+            setBubbleTail(lastSeriesBubble_.data(), lastSeriesOut_, false);
+            if (lastSeriesAvatar_) lastSeriesAvatar_->setVisible(false);
+        }
+        setBubbleTail(bubble, out, true);
+        if (avatarLabel) avatarLabel->setVisible(true);
+        lastAuthorKey_ = authorKey;
+        lastSeriesTime_ = curT;
+        lastSeriesBubble_ = bubble;
+        lastSeriesOut_ = out;
+        lastSeriesAvatar_ = avatarLabel;   // nullptr вне групп — сброс не нужен
+        msgLayout_->addWidget(row);        // после стартового stretch → прижато к низу
+    }
 
     // Появление нового сообщения — плавное (fade), как в Telegram/Discord.
     // Только для ЖИВЫХ добавлений: на начальном рендере 50 бабблов анимация
@@ -4857,10 +4971,15 @@ void ChatPage::applyTheme() {
     if (msgContainer_) msgContainer_->setStyleSheet(QStringLiteral("#msgContainer{background:%1;}").arg(th.bgBase.name()));
     if (emptyPage_)    emptyPage_->setStyleSheet(QStringLiteral("background:%1;").arg(th.bgBase.name()));
     if (topicsPage_)   topicsPage_->setStyleSheet(QStringLiteral("background:%1;").arg(th.bgBase.name()));
-    // Перерисовать бабблы под новую поверхность входящих.
+    // Перерисовать бабблы под новую поверхность входящих; клюв серии
+    // (tail-свойство) и mediaOnly-прозрачность переживают смену темы.
     for (QFrame* b : msgContainer_->findChildren<QFrame*>()) {
-        if (b->objectName() == QStringLiteral("bubbleIn"))  b->setStyleSheet(bubbleInQss());
-        else if (b->objectName() == QStringLiteral("bubbleOut")) b->setStyleSheet(bubbleOutQss());
+        if (b->objectName() == QStringLiteral("bubbleIn")
+            || b->objectName() == QStringLiteral("bubbleOut")) {
+            if (b->property("mediaOnly").toBool()) continue;
+            setBubbleTail(b, b->property("tailOut").toBool(),
+                          b->property("tail").toBool());
+        }
     }
 }
 

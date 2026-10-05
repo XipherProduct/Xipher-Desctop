@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QPointer>
 #include <QJsonObject>
+#include <QDateTime>
 
 #include "net/Models.h"
 #include "util/Accounts.h"
@@ -320,6 +321,16 @@ private:
     EmptyChatGreeting* greeting_ = nullptr;
     int          bubbleCount_ = 0;   // сколько сообщений сейчас в переписке
     int          renderedFrom_ = 0;  // индекс первого ОТРИСОВАННОГО сообщения (хвост-рендер)
+    // ── Серии сообщений (TG-паттерн): подряд идущие одного автора в пределах
+    // 5 минут — плотный ряд без повторного аватара/имени; «клюв» пузыря только
+    // у последнего серии. Отдельно для append-конца и prepend-цепочки (старые).
+    QString      lastAuthorKey_;            // "out" | "in:<senderId>"
+    QDateTime    lastSeriesTime_;
+    QPointer<QFrame> lastSeriesBubble_;     // последний серии (владелец клюва)
+    QPointer<QLabel> lastSeriesAvatar_;     // его аватар-лейбл (группы)
+    bool         lastSeriesOut_ = false;
+    QString      lastPrependAuthorKey_;
+    QDateTime    lastPrependTime_;
     bool         loadingOlder_ = false;
     quint64      renderGen_ = 0;    // поколение рендера: смена чата отменяет отложенные чанки
     bool         initialRenderPhase_ = false;
