@@ -1406,13 +1406,13 @@ protected:
         p.fillRect(r, lg);
         // Радиальное свечение акцента у верхнего левого угла.
         QRadialGradient rg(QPointF(r.width() * 0.15, -r.height() * 0.2), r.height() * 1.4);
-        rg.setColorAt(0, QColor(th.accentR, th.accentG, th.accentB, 56));
-        rg.setColorAt(1, QColor(th.accentR, th.accentG, th.accentB, 0));
+        rg.setColorAt(0, QColor(th.accent.red(), th.accent.green(), th.accent.blue(), 56));
+        rg.setColorAt(1, QColor(th.accent.red(), th.accent.green(), th.accent.blue(), 0));
         p.fillRect(r, rg);
         // «Аврора» — мягкая полоса свечения по верху.
         QRadialGradient au(QPointF(r.width() * 0.5, 0), r.width() * 0.6);
-        au.setColorAt(0, QColor(th.accentR, th.accentG, th.accentB, 40));
-        au.setColorAt(1, QColor(th.accentR, th.accentG, th.accentB, 0));
+        au.setColorAt(0, QColor(th.accent.red(), th.accent.green(), th.accent.blue(), 40));
+        au.setColorAt(1, QColor(th.accent.red(), th.accent.green(), th.accent.blue(), 0));
         p.fillRect(QRect(0, 0, r.width(), 110), au);
 
         // Линия пульса: путь из разметки веба (viewBox 600x120).
@@ -1428,7 +1428,7 @@ protected:
         p.scale(width() / 600.0, 1.0);
         // Постоянный след.
         QPen tpen(accent, 1.4);
-        tpen.setColor(QColor(th.accentR, th.accentG, th.accentB, 71));
+        tpen.setColor(QColor(th.accent.red(), th.accent.green(), th.accent.blue(), 71));
         p.setPen(tpen);
         p.drawPath(trace);
         // Бегущий отрезок (spark): штрих 90 из шага 1490, офсет анимируется.
@@ -1486,7 +1486,7 @@ protected:
         p.setRenderHint(QPainter::Antialiasing, false);
         if (isChecked()) {
             QLinearGradient lg(0, 0, r.width() * 0.4, r.height());
-            lg.setColorAt(0, QColor(th.accentR, th.accentG, th.accentB, 56));
+            lg.setColorAt(0, QColor(th.accent.red(), th.accent.green(), th.accent.blue(), 56));
             lg.setColorAt(1, th.surface1);
             p.fillRect(r, lg);
         } else {
@@ -1580,7 +1580,7 @@ QWidget* SettingsDialog::buildPremiumPage() {
         statusChip_->setStyleSheet(QStringLiteral(
             "background:rgba(%1,%2,%3,0.22);border:1px solid rgba(%1,%2,%3,0.34);"
             "border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:#F3F1F8;")
-            .arg(th.accentR).arg(th.accentG).arg(th.accentB));
+            .arg(th.accent.red()).arg(th.accent.green()).arg(th.accent.blue()));
         const QString exp = Session::instance().premiumExpiresAt;
         if (act && !exp.isEmpty()) {
             expiryChip_->setText(QStringLiteral("До ") + exp.left(10));
@@ -1593,13 +1593,13 @@ QWidget* SettingsDialog::buildPremiumPage() {
     plansGrid_ = new QGridLayout();
     plansGrid_->setSpacing(11);
     auto* plansRow = plansGrid_;
-    auto* planTrial = new PulsePlanButton(QStringLiteral("Попробовать"), th.accent,
+    auto* planTrial = new PulsePlanButton(QStringLiteral("Попробовать"), th.accent.name(),
         QStringLiteral("9 ₽"), QStringLiteral("за 7 дней"),
         QStringLiteral("Все возможности на неделю"), page);
     auto* planYear  = new PulsePlanButton(QStringLiteral("Выгодно · −58%"), QStringLiteral("#46B98A"),
         QStringLiteral("499 ₽"), QStringLiteral("за год"),
         QStringLiteral("42 ₽ в месяц"), page);
-    auto* planMonth = new PulsePlanButton(QStringLiteral("Гибко"), th.accent,
+    auto* planMonth = new PulsePlanButton(QStringLiteral("Гибко"), th.accent.name(),
         QStringLiteral("99 ₽"), QStringLiteral("в месяц"),
         QStringLiteral("Отключить можно в любой момент"), page);
     const QList<QPair<PulsePlanButton*, QString>> planBtns = {
@@ -1707,7 +1707,7 @@ QWidget* SettingsDialog::buildPremiumPage() {
         ic->setAlignment(Qt::AlignCenter);
         ic->setStyleSheet(QStringLiteral(
             "background:rgba(%1,%2,%3,0.14);border:1px solid rgba(%1,%2,%3,0.34);border-radius:11px;")
-            .arg(th.accentR).arg(th.accentG).arg(th.accentB));
+            .arg(th.accent.red()).arg(th.accent.green()).arg(th.accent.blue()));
         ic->setPixmap(pulsePerkIcon(perks[i].icon, th));
         pv->addWidget(ic);
         auto* h3 = new QLabel(perks[i].title, perk);

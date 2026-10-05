@@ -607,16 +607,20 @@ void ChatPage::openAttachmentRich(const QString& path) {
 
 
 // Цвета бабблов зависят от активной темы («Оформление» в настройках).
+// Радиус 14 + скошенный «клюв» 4px у последнего сообщения серии задаётся
+// в месте создания пузыря (нужен контекст серии), здесь — база.
 static QString bubbleOutQss() {
+    const auto th = ThemePreset::current();
     return QStringLiteral(
         "#bubbleOut{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-        "stop:0 #4A3A72,stop:1 #3A2D5C);border-radius:18px;}");
+        "stop:0 %1,stop:1 %2);border-radius:14px;}")
+        .arg(th.bubbleOutA.name(), th.bubbleOutB.name());
 }
 static QString bubbleInQss() {
+    const auto th = ThemePreset::current();
     return QStringLiteral(
-        "#bubbleIn{background:%1;border:1px solid rgba(255,255,255,0.07);"
-        "border-radius:18px;}")
-        .arg(ThemePreset::current().surface2.name());
+        "#bubbleIn{background:%1;border:1px solid %2;border-radius:14px;}")
+        .arg(th.bubbleIn.name(), th.rgba(th.borderSubtle, 1.0));
 }
 static QString chatQSS();   // единый шаблон стилей чата (определён ниже)
 
@@ -4686,106 +4690,141 @@ void ChatPage::onSearchChanged(const QString& text) {
 }
 
 static QString chatQSS() {
+    // Все цвета — из ThemePreset (токены tokens.css); подстановки @{имя}.
     const auto th = ThemePreset::current();
-    return QStringLiteral(
-        "#sidebar { background:%1; border-right:1px solid rgba(255,255,255,0.10); }"
-        "#sideHeader, #convHeader { background:%1; border-bottom:1px solid rgba(255,255,255,0.10); }"
-        "#peerHeader { border-radius:10px; }"
-        "#peerHeader:hover { background:%2; }"
-        "#hdrBtn { border:none; background:transparent; min-width:40px; min-height:40px; border-radius:20px; }"
-        "#hdrBtn:hover { background:%2; }"
-        "#searchBar { background:%1; border-bottom:1px solid rgba(255,255,255,0.10); }"
-        "#msgSearch { background:%2; border:1px solid rgba(255,255,255,0.10); border-radius:12px;"
-        "  min-height:38px; padding:0 14px; color:#F3F1F8; }"
-        "#msgSearch:focus { border:1px solid %5; }"
-        "#brandTitle { font-size:18px; font-weight:800; color:#F3F1F8; }"
-        "#searchBox { background:%2; border:1px solid rgba(255,255,255,0.10); border-radius:12px;"
-        "  min-height:38px; padding:0 14px; color:#F3F1F8; }"
-        "#searchBox:focus { border:1px solid %5; }"
-        "#catalogBtn { background:%2; border:1px solid rgba(255,255,255,0.10); border-radius:12px;"
-        "  color:#BBA4FF; font-size:13px; font-weight:600; min-height:38px; padding:0 12px; }"
-        "#catalogBtn:hover { border-color:%5; color:#F3F1F8; }"
-        "#botKeyboardBar { background:transparent; }"
-        "#botKeyboardBtn { background:%2; border:1px solid rgba(255,255,255,0.10); border-radius:12px;"
-        "  min-height:38px; padding:0 14px; color:#BBA4FF; font-size:14px; text-align:center; }"
-        "#botKeyboardBtn:hover { border-color:%5; color:#F3F1F8; background:rgba(%6,%7,%8,0.10); }"
-        "#chatList { background:%1; border:none; outline:none; }"
-        "#chatList::item { border:none; padding:0; }"
-        "#chatList::item:hover { background:%2; border-left:3px solid %5; }"
-        "#chatList::item:selected { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-        "  stop:0 rgba(%6,%7,%8,0.16), stop:1 rgba(%6,%7,%8,0.06)); border-left:3px solid %5; }"
-        "#msgArea { background:%4; border:none; }"
-        "#msgArea > QWidget > QWidget { background:%4; }"
-        "#msgArea QScrollBar:vertical { background:transparent; width:8px; margin:2px; }"
-        "#msgArea QScrollBar::handle:vertical { background:rgba(255,255,255,0.12); border-radius:4px; min-height:36px; }"
-        "#msgArea QScrollBar::handle:vertical:hover { background:rgba(255,255,255,0.22); }"
-        "#msgArea QScrollBar::add-line:vertical, #msgArea QScrollBar::sub-line:vertical { height:0; }"
-        "#msgArea QScrollBar::add-page:vertical, #msgArea QScrollBar::sub-page:vertical { background:transparent; }"
-        "#chatList QScrollBar:vertical { background:transparent; width:8px; margin:2px; }"
-        "#chatList QScrollBar::handle:vertical { background:rgba(255,255,255,0.10); border-radius:4px; min-height:36px; }"
-        "#chatList QScrollBar::handle:vertical:hover { background:rgba(255,255,255,0.20); }"
-        "#chatList QScrollBar::add-line:vertical, #chatList QScrollBar::sub-line:vertical { height:0; }"
-        "#chatList QScrollBar::add-page:vertical, #chatList QScrollBar::sub-page:vertical { background:transparent; }"
-        "#composerBar { background:%1; border-top:1px solid rgba(255,255,255,0.10); }"
-        "#tgInputBar { background:%2; border:1px solid rgba(255,255,255,0.07); border-radius:22px; }"
-        "#composer { background:transparent; border:none; color:#F3F1F8; font-size:15px; padding:0 4px; }"
-        "#composer QScrollBar:vertical { background:transparent; width:7px; margin:4px 2px; }"
-        "#composer QScrollBar::handle:vertical { background:rgba(255,255,255,0.18); border-radius:3px; }"
-        "#composer QScrollBar::add-line:vertical, #composer QScrollBar::sub-line:vertical { height:0; }"
-        "#replyBarText { color:#ACA6BD; font-size:13px; }"
-        "#replyClose { background:transparent; border:none; color:#726C82; font-size:14px; }"
-        "#replyClose:hover { color:#F3F1F8; }"
-        "#replyBar { background:%1; border-top:1px solid rgba(255,255,255,0.06); }"
-        "#stagedBar { background:%1; border-top:1px solid rgba(255,255,255,0.06); }"
-        "#stagedChip { background:%3; border:1px solid rgba(255,255,255,0.10); border-radius:12px; }"
-        "#dropOverlay { background:rgba(139,92,246,0.14); border:3px dashed rgba(139,92,246,0.65); }"
-        "QSplitter::handle:horizontal { background:transparent; width:4px; }"
-        "#thirdCol { background:%2; border-left:1px solid rgba(255,255,255,0.10); }"
-        "#thirdColHeader { background:%2; border-bottom:1px solid rgba(255,255,255,0.10); }"
-        "#tcTitle { color:#F3F1F8; font-size:15px; font-weight:700; }"
-        "#tcBtn { background:transparent; border:none; border-radius:18px; color:#ACA6BD; font-size:15px; }"
-        "#tcBtn:hover { background:%3; color:#F3F1F8; }"
-        "#tcName { color:#F3F1F8; font-size:17px; font-weight:600; }"
-        "#tcSub { color:#726C82; font-size:13px; }"
-        "#tcAction { background:rgba(%6,%7,%8,0.16); border:none; border-radius:12px;"
-        "  color:#F3F1F8; font-size:14px; font-weight:600; min-height:38px; }"
-        "#tcAction:hover { background:rgba(%6,%7,%8,0.28); }"
-        "#tcActionGhost { background:transparent; border:1px solid rgba(255,255,255,0.14);"
-        "  border-radius:12px; color:#ACA6BD; font-size:14px; min-height:36px; }"
-        "#tcActionGhost:hover { background:%3; color:#F3F1F8; }"
-        "#tcMetaKey { color:#726C82; font-size:12px; }"
-        "#tcMetaVal { color:#ACA6BD; font-size:13px; }"
-        "#overlayScrim { background:rgba(0,0,0,140); }"
-        "#sendBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px; border:none;"
-        "  border-radius:18px; background:transparent; color:%5; padding:0; }"
-        "#sendBtn:hover { background:rgba(%6,%7,%8,0.10); }"
-        "#composerIcon, #micBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px;"
-        "  border:none; border-radius:18px; background:transparent; color:#ACA6BD; padding:0; }"
-        "#composerIcon:hover, #micBtn:hover { background:rgba(255,255,255,0.06); color:#F3F1F8; }"
-        "QMenu { background:%2; border:1px solid rgba(255,255,255,0.12); border-radius:10px; color:#F3F1F8; }"
-        "QMenu::item { padding:8px 18px; border-radius:6px; }"
-        "QMenu::item:selected { background:rgba(%6,%7,%8,0.22); }"
-        "#peerName { font-size:15px; font-weight:700; color:#F3F1F8; }"
-        "#peerStatus { font-size:12px; color:#726C82; }"
-        "#emptyHint { font-size:15px; color:#726C82; }"
-        "#iconBtn { border:none; background:transparent; color:#ACA6BD; font-size:13px; }"
-        "#chatsBody { background:%1; }"
-        "#folderRail { background:%1; border-right:1px solid rgba(255,255,255,0.10); }"
-        "#folderRailItem { background:transparent; border:none; border-radius:16px; padding:0; }"
-        "#folderRailItem:hover { background:%2; }"
-        "#folderRailItemActive { background:rgba(%6,%7,%8,0.14); border:none; border-radius:16px; padding:0; }"
-        "#folderRailLabel { color:#ACA6BD; font-size:11px; }"
-        "#folderRailItemActive #folderRailLabel { color:#F3F1F8; font-weight:600; }"
-        "#folderRailCount { background:%5; color:#fff; font-size:10px; font-weight:700;"
-        "  border-radius:9px; min-width:18px; padding:1px 4px; }"
-        "#folderRailEdit { border:none; border-radius:12px; background:transparent; color:#ACA6BD;"
-        "  font-size:16px; padding:0; }"
-        "#folderRailEdit:hover { background:%2; color:#F3F1F8; }"
-        "#scrollDownBtn { background:#221F2C; border:1px solid rgba(255,255,255,0.10);"
-        "  border-radius:22px; color:#F3F1F8; font-size:14px; padding:0; }"
-        "#scrollDownBtn:hover { background:#2B2737; }"
-    ).arg(th.surface1.name(), th.surface2.name(), th.surface3.name(), th.bgBase.name(), th.accent)
-     .arg(th.accentR).arg(th.accentG).arg(th.accentB);
+    const QString scrol  = th.rgba(QColor(255, 255, 255), th.isLight ? 0.28 : 0.12);
+    const QString scrolH = th.rgba(QColor(255, 255, 255), th.isLight ? 0.50 : 0.22);
+    const QString hovW   = th.rgba(QColor(255, 255, 255), th.isLight ? 0.45 : 0.06);
+    QString q = QStringLiteral(R"QSS(
+/* ─── Сайдбар и шапки (surface-1, hairline-разделители) ─── */
+#sidebar { background:@{s1}; border-right:1px solid @{bSub}; }
+#sideHeader, #convHeader { background:@{s1}; border-bottom:1px solid @{bSub}; }
+#peerHeader { border-radius:10px; }
+#peerHeader:hover { background:@{s3}; }
+#hdrBtn { border:none; background:transparent; min-width:40px; min-height:40px; border-radius:20px; }
+#hdrBtn:hover { background:@{s3}; }
+#searchBar { background:@{s1}; border-bottom:1px solid @{bSub}; }
+#msgSearch { background:@{s2}; border:1px solid @{bDef}; border-radius:12px;
+  min-height:38px; padding:0 14px; color:@{tp}; }
+#msgSearch:focus { border:1px solid @{ac}; }
+#brandTitle { font-size:18px; font-weight:800; color:@{tp}; }
+#searchBox { background:@{s2}; border:1px solid @{bDef}; border-radius:12px;
+  min-height:38px; padding:0 14px; color:@{tp}; }
+#searchBox:focus { border:1px solid @{ac}; }
+#catalogBtn { background:@{s2}; border:1px solid @{bDef}; border-radius:12px;
+  color:@{at}; font-size:13px; font-weight:600; min-height:38px; padding:0 12px; }
+#catalogBtn:hover { border-color:@{ac}; color:@{tp}; }
+#botKeyboardBar { background:transparent; }
+#botKeyboardBtn { background:@{s2}; border:1px solid @{bDef}; border-radius:12px;
+  min-height:38px; padding:0 14px; color:@{at}; font-size:14px; text-align:center; }
+#botKeyboardBtn:hover { border-color:@{ac}; color:@{tp}; background:@{soft3}; }
+/* ─── Список чатов: hover surface-3, active — accent-soft + маркер ─── */
+#chatList { background:@{s1}; border:none; outline:none; }
+#chatList::item { border:none; padding:0; }
+#chatList::item:hover { background:@{s3}; }
+#chatList::item:selected { background:@{soft1}; border-left:3px solid @{ac}; }
+/* ─── Лента ─── */
+#msgArea { background:@{bg}; border:none; }
+#msgArea > QWidget > QWidget { background:@{bg}; }
+#msgArea QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
+#msgArea QScrollBar::handle:vertical { background:@{scrol}; border-radius:4px; min-height:36px; }
+#msgArea QScrollBar::handle:vertical:hover { background:@{scrolH}; }
+#msgArea QScrollBar::add-line:vertical, #msgArea QScrollBar::sub-line:vertical { height:0; }
+#msgArea QScrollBar::add-page:vertical, #msgArea QScrollBar::sub-page:vertical { background:transparent; }
+#chatList QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
+#chatList QScrollBar::handle:vertical { background:@{scrol}; border-radius:4px; min-height:36px; }
+#chatList QScrollBar::handle:vertical:hover { background:@{scrolH}; }
+#chatList QScrollBar::add-line:vertical, #chatList QScrollBar::sub-line:vertical { height:0; }
+#chatList QScrollBar::add-page:vertical, #chatList QScrollBar::sub-page:vertical { background:transparent; }
+/* ─── Композер: пилюля surface-2 ─── */
+#composerBar { background:@{s1}; border-top:1px solid @{bSub}; }
+#tgInputBar { background:@{s2}; border:1px solid @{bSub}; border-radius:22px; }
+#composer { background:transparent; border:none; color:@{tp}; font-size:15px; padding:0 4px; }
+#composer QScrollBar:vertical { background:transparent; width:7px; margin:4px 2px; }
+#composer QScrollBar::handle:vertical { background:@{scrolH}; border-radius:3px; }
+#composer QScrollBar::add-line:vertical, #composer QScrollBar::sub-line:vertical { height:0; }
+#replyBarText { color:@{ts}; font-size:13px; }
+#replyClose { background:transparent; border:none; color:@{tt}; font-size:14px; }
+#replyClose:hover { color:@{tp}; }
+#replyBar { background:@{s1}; border-top:1px solid @{bSub}; }
+#stagedBar { background:@{s1}; border-top:1px solid @{bSub}; }
+#stagedChip { background:@{s3}; border:1px solid @{bDef}; border-radius:12px; }
+#dropOverlay { background:@{soft1}; border:3px dashed @{aBord}; }
+QSplitter::handle:horizontal { background:transparent; width:4px; }
+/* ─── Третья колонка (Discord info-панель) ─── */
+#thirdCol { background:@{s2}; border-left:1px solid @{bSub}; }
+#thirdColHeader { background:@{s2}; border-bottom:1px solid @{bSub}; }
+#tcTitle { color:@{tp}; font-size:15px; font-weight:700; }
+#tcBtn { background:transparent; border:none; border-radius:18px; color:@{ts}; font-size:15px; }
+#tcBtn:hover { background:@{s3}; color:@{tp}; }
+#tcName { color:@{tp}; font-size:17px; font-weight:600; }
+#tcSub { color:@{tt}; font-size:13px; }
+#tcAction { background:@{soft4}; border:none; border-radius:12px;
+  color:@{tp}; font-size:14px; font-weight:600; min-height:38px; }
+#tcAction:hover { background:@{soft2}; }
+#tcActionGhost { background:transparent; border:1px solid @{bStr};
+  border-radius:12px; color:@{ts}; font-size:14px; min-height:36px; }
+#tcActionGhost:hover { background:@{s3}; color:@{tp}; }
+#tcMetaKey { color:@{tt}; font-size:12px; }
+#tcMetaVal { color:@{ts}; font-size:13px; }
+#overlayScrim { background:rgba(0,0,0,140); }
+#sendBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px; border:none;
+  border-radius:18px; background:transparent; color:@{ac}; padding:0; }
+#sendBtn:hover { background:@{soft3}; }
+#composerIcon, #micBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px;
+  border:none; border-radius:18px; background:transparent; color:@{ts}; padding:0; }
+#composerIcon:hover, #micBtn:hover { background:@{hovW}; color:@{tp}; }
+/* ─── QMenu: surface-2, radius 12, item-hover accent-soft ─── */
+QMenu { background:@{s2}; border:1px solid @{bDef}; border-radius:12px; color:@{tp}; }
+QMenu::item { padding:8px 16px; border-radius:8px; }
+QMenu::item:selected { background:@{soft2}; }
+QMenu::separator { height:1px; background:@{bSub}; margin:6px 8px; }
+#peerName { font-size:15px; font-weight:700; color:@{tp}; }
+#peerStatus { font-size:12px; color:@{tt}; }
+#emptyHint { font-size:15px; color:@{tt}; }
+#iconBtn { border:none; background:transparent; color:@{ts}; font-size:13px; }
+#chatsBody { background:@{s1}; }
+/* ─── Рейл папок ─── */
+#folderRail { background:@{s1}; border-right:1px solid @{bSub}; }
+#folderRailItem { background:transparent; border:none; border-radius:16px; padding:0; }
+#folderRailItem:hover { background:@{s3}; }
+#folderRailItemActive { background:@{soft1}; border:none; border-radius:16px; padding:0; }
+#folderRailLabel { color:@{ts}; font-size:11px; }
+#folderRailItemActive #folderRailLabel { color:@{tp}; font-weight:600; }
+#folderRailCount { background:@{ac}; color:#fff; font-size:10px; font-weight:700;
+  border-radius:9px; min-width:18px; padding:1px 4px; }
+#folderRailEdit { border:none; border-radius:12px; background:transparent; color:@{ts};
+  font-size:16px; padding:0; }
+#folderRailEdit:hover { background:@{s3}; color:@{tp}; }
+#scrollDownBtn { background:@{s3}; border:1px solid @{bDef};
+  border-radius:22px; color:@{tp}; font-size:14px; padding:0; }
+#scrollDownBtn:hover { background:@{s4}; }
+)QSS");
+    const std::pair<const char*, QString> subs[] = {
+        {"@{s1}",     th.surface1.name()},
+        {"@{s2}",     th.surface2.name()},
+        {"@{s3}",     th.surface3.name()},
+        {"@{s4}",     th.surface4.name()},
+        {"@{bg}",     th.bgBase.name()},
+        {"@{ac}",     th.accent.name()},
+        {"@{tp}",     th.textPrimary.name()},
+        {"@{ts}",     th.textSecondary.name()},
+        {"@{tt}",     th.textTertiary.name()},
+        {"@{at}",     th.accentText.name()},
+        {"@{bSub}",   th.rgba(th.borderSubtle, 1.0)},
+        {"@{bDef}",   th.rgba(th.borderDefault, 1.0)},
+        {"@{bStr}",   th.rgba(th.borderStrong, 1.0)},
+        {"@{soft1}",  th.accentRgba(0.14)},
+        {"@{soft2}",  th.accentRgba(0.22)},
+        {"@{soft3}",  th.accentRgba(0.10)},
+        {"@{soft4}",  th.accentRgba(0.28)},
+        {"@{aBord}",  th.accentRgba(0.34)},
+        {"@{scrol}",  scrol},
+        {"@{scrolH}", scrolH},
+        {"@{hovW}",   hovW},
+    };
+    for (const auto& [key, val] : subs) q.replace(QLatin1String(key), val);
+    return q;
 }
 
 void ChatPage::applyTheme() {
