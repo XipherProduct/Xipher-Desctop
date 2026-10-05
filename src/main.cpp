@@ -54,6 +54,7 @@ int main(int argc, char** argv) {
     // PRF-01: софтверный фолббек до создания QApplication (галка в настройках).
     QCoreApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, !hwRenderPref());
     QApplication app(argc, argv);
+    QCoreApplication::setApplicationVersion(QStringLiteral(XIPHER_VERSION));
 
     qInstallMessageHandler(logToFile);
     rotateLog();
