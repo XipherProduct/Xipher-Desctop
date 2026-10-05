@@ -395,6 +395,7 @@ inline QString applyTokens(const QString& qss) {
         {"@{ok}",    th.success.name()},
         {"@{warn}",  th.warning.name()},
         {"@{danger}",th.danger.name()},
+        {"@{danger14}", th.rgba(th.danger, 0.14)},
     };
     QString out = qss;
     for (const Sub& s : subs) out.replace(QLatin1String(s.key), s.val);

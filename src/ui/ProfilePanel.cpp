@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "ui/ProfilePanel.h"
 #include "ui/AvatarUtil.h"
 #include "ui/GiftArt.h"
@@ -244,14 +245,14 @@ QHash<QString, QPair<qint64, QJsonObject>>& profileCache() {
 }
 
 const char* kPanelQss = R"QSS(
-/* Окно 560px по центру: #131218, радиус 24, тонкая рамка (profile.css). */
-#modalCard { background:#131218; border:1px solid rgba(255,255,255,0.055); border-radius:24px; }
+/* Окно 560px по центру: @{s1}, радиус 24, тонкая рамка (profile.css). */
+#modalCard { background:@{s1}; border:1px solid @{bSub}; border-radius:24px; }
 QScrollArea { background:transparent; border:none; }
 /* Скроллбар-оверлей: в покое невидим, ползунок проявляется при наведении —
    постоянная серая полоса читалась как «линия» поверх профиля. */
 QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
 QScrollBar::handle:vertical { background:transparent; border-radius:4px; min-height:36px; }
-QScrollBar::handle:vertical:hover { background:rgba(255,255,255,0.18); }
+QScrollBar::handle:vertical:hover { background:@{hovW2}; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
 
 /* Кнопка-крестик на обложке: полупрозрачный чёрный круг (на баннере). */
@@ -260,55 +261,55 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
 #profClose:hover { background:rgba(0,0,0,0.55); }
 
 /* Действия: тёмная плитка 64px, иконка + подпись (.xp-act). */
-#profAct { background:#1A1822; border:1px solid rgba(255,255,255,0.055);
+#profAct { background:@{s2}; border:1px solid @{bSub};
            border-radius:14px; }
-#profAct:hover:enabled { background:#221F2C; }
+#profAct:hover:enabled { background:@{s3}; }
 
 /* Секции (.xp-sec) и их заголовки. */
-#profSec { background:#1A1822; border-radius:20px; }
-#profSecTitle { color:#726C82; font-size:12px; font-weight:600;
+#profSec { background:@{s2}; border-radius:20px; }
+#profSecTitle { color:@{tt}; font-size:12px; font-weight:600;
                 letter-spacing:0.6px; text-transform:uppercase; }
-#profSecCount { color:#ACA6BD; font-size:13px; }
+#profSecCount { color:@{ts}; font-size:13px; }
 
 /* Строки сведений (.xp-row): иконка-чип 34px + значение/лейбл. */
-#profRowValue { color:#F3F1F8; font-size:15px; }
-#profRowLabel { color:#726C82; font-size:12px; }
+#profRowValue { color:@{tp}; font-size:15px; }
+#profRowLabel { color:@{tt}; font-size:12px; }
 #profLinkBtn, #profMoreBtn { background:transparent; border:none; border-radius:12px;
-    color:#BBA4FF; font-size:14px; padding:12px; }
-#profLinkBtn:hover, #profMoreBtn:hover { background:#221F2C; }
+    color:@{acT}; font-size:14px; padding:12px; }
+#profLinkBtn:hover, #profMoreBtn:hover { background:@{s3}; }
 
 /* Строка канала (.xp-row--link). */
-#profChanValue { color:#8C7BFF; font-size:15px; font-weight:600; }
+#profChanValue { color:@{acT}; font-size:15px; font-weight:600; }
 
 /* Подарки (.xp-gift) и знаки (.xp-mark). */
-#profGiftName { color:#ACA6BD; font-size:11px; }
-#profMarkTitle { color:#F3F1F8; font-size:14px; }
-#profMarkMeta { color:#726C82; font-size:12px; }
+#profGiftName { color:@{ts}; font-size:11px; }
+#profMarkTitle { color:@{tp}; font-size:14px; }
+#profMarkMeta { color:@{tt}; font-size:12px; }
 
 /* Нижние действия (.xp-bottom). */
 #profBottomItem { background:transparent; border:none; border-radius:12px;
-    color:#F3F1F8; font-size:15px; text-align:left; padding:12px 16px; }
-#profBottomItem:hover { background:#221F2C; }
+    color:@{tp}; font-size:15px; text-align:left; padding:12px 16px; }
+#profBottomItem:hover { background:@{s3}; }
 #profBottomItemDanger { background:transparent; border:none; border-radius:12px;
-    color:#E26A63; font-size:15px; text-align:left; padding:12px 16px; }
-#profBottomItemDanger:hover { background:rgba(226,106,99,0.14); }
+    color:@{danger}; font-size:15px; text-align:left; padding:12px 16px; }
+#profBottomItemDanger:hover { background:@{danger14}; }
 
 /* Ошибка / QR / подарки-диалог. */
-#profErrorTitle { color:#F3F1F8; font-size:17px; font-weight:600; }
-#profErrorText { color:#ACA6BD; font-size:14px; }
-#primaryBtn { background:#8B5CF6; color:#FFFFFF; border:none; border-radius:999px;
+#profErrorTitle { color:@{tp}; font-size:17px; font-weight:600; }
+#profErrorText { color:@{ts}; font-size:14px; }
+#primaryBtn { background:@{ac}; color:#FFFFFF; border:none; border-radius:999px;
               padding:12px 24px; font-size:14px; }
-#primaryBtn:hover { background:#9B72F8; }
-QLineEdit { background:#100F15; border:1px solid rgba(255,255,255,0.10);
-            border-radius:12px; min-height:38px; padding:0 12px; color:#F3F1F8; }
-QLineEdit:focus { border-color:rgba(139,92,246,0.34); }
-#giftCard { background:#1A1822; border:1px solid #2B2737; border-radius:20px; }
-#giftCard:hover { background:#221F2C; border-color:#8B5CF6; }
-QMenu { background:#221F2C; border:1px solid rgba(255,255,255,0.10); border-radius:14px;
-        padding:4px; color:#F3F1F8; }
+#primaryBtn:hover { background:@{acH}; }
+QLineEdit { background:@{inset}; border:1px solid @{bDef};
+            border-radius:12px; min-height:38px; padding:0 12px; color:@{tp}; }
+QLineEdit:focus { border-color:@{ac34}; }
+#giftCard { background:@{s2}; border:1px solid @{s4}; border-radius:20px; }
+#giftCard:hover { background:@{s3}; border-color:@{ac}; }
+QMenu { background:@{s3}; border:1px solid @{bDef}; border-radius:14px;
+        padding:4px; color:@{tp}; }
 QMenu::item { padding:8px 12px; border-radius:12px; }
-QMenu::item:selected { background:#2B2737; }
-QMenu::separator { height:1px; background:rgba(255,255,255,0.08); margin:4px 8px; }
+QMenu::item:selected { background:@{s4}; }
+QMenu::separator { height:1px; background:@{bDef}; margin:4px 8px; }
 )QSS";
 
 // ── Знак идентичности (js/profile/signet.js): РОВНО ОДИН значок у имени. ───
@@ -452,8 +453,8 @@ public:
         nameRow->setSpacing(6);
         nameRow->addStretch(1);
         auto* name = new QLabel(displayName, this);
-        name->setStyleSheet(QStringLiteral(
-            "color:#F3F1F8;font-size:21px;font-weight:700;background:transparent;"));
+        name->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+            "color:@{tp};font-size:21px;font-weight:700;background:transparent;")));
         name->setWordWrap(true);
         name->setAlignment(Qt::AlignHCenter);
         nameRow->addWidget(name, 0, Qt::AlignVCenter);
@@ -466,8 +467,8 @@ public:
         const QString uname = p.value(QStringLiteral("username")).toString();
         if (!uname.isEmpty()) {
             auto* un = new QLabel(QStringLiteral("@") + uname, this);
-            un->setStyleSheet(QStringLiteral(
-                "color:#726C82;font-size:14px;background:transparent;"));
+            un->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                "color:@{tt};font-size:14px;background:transparent;")));
             un->setAlignment(Qt::AlignHCenter);
             un->setTextInteractionFlags(Qt::TextSelectableByMouse);
             lay->addSpacing(2);
@@ -482,9 +483,9 @@ public:
             sub = QStringLiteral("Бот");
         if (!sub.isEmpty()) {
             auto* st = new QLabel(sub, this);
-            st->setStyleSheet(QStringLiteral("color:%1;font-size:14px;background:transparent;")
+            st->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:%1;font-size:14px;background:transparent;")
                 .arg(p.value(QStringLiteral("is_online")).toBool(false)
-                         ? QStringLiteral("#46B98A") : QStringLiteral("#ACA6BD")));
+                         ? QStringLiteral("@{ok}") : QStringLiteral("@{ts}"))));
             st->setAlignment(Qt::AlignHCenter);
             lay->addSpacing(4);
             lay->addWidget(st);
@@ -496,9 +497,9 @@ public:
         if (!moodEmoji.isEmpty() || !moodText.isEmpty()) {
             auto* mood = new QLabel(
                 (moodEmoji.isEmpty() ? QString() : moodEmoji + QLatin1Char(' ')) + moodText, this);
-            mood->setStyleSheet(QStringLiteral(
-                "color:#ACA6BD;font-size:13px;background:#1A1822;border-radius:12px;"
-                "padding:5px 12px;"));
+            mood->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                "color:@{ts};font-size:13px;background:@{s2};border-radius:12px;"
+                "padding:5px 12px;")));
             mood->setAlignment(Qt::AlignHCenter);
             lay->addSpacing(8);
             lay->addWidget(mood, 0, Qt::AlignHCenter);
@@ -638,7 +639,7 @@ void ProfileSkeleton::paintEvent(QPaintEvent*) {
 // ─────────────────────────────────────────────────────────────────────────────
 ProfilePanel::ProfilePanel(ApiClient* api, QWidget* parent)
     : ModalOverlay(parent, 560), api_(api) {
-    card()->setStyleSheet(QLatin1String(kPanelQss));
+    card()->setStyleSheet(ThemePreset::applyTokens(QLatin1String(kPanelQss)));
     // Высота — по содержимому (fit-content в вебе): ручной минимум ломает
     // авторазмер, минимум держит сам скелетон/контент.
     card()->setMinimumHeight(0);
@@ -655,7 +656,7 @@ ProfilePanel::ProfilePanel(ApiClient* api, QWidget* parent)
     scroll_->setWidgetResizable(true);
     scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll_->setFrameShape(QFrame::NoFrame);
-    scroll_->setStyleSheet(QLatin1String(kPanelQss));
+    scroll_->setStyleSheet(ThemePreset::applyTokens(QLatin1String(kPanelQss)));
     auto* content = new QWidget();
     content->setStyleSheet(QStringLiteral("background:transparent;"));
     col_ = new QVBoxLayout(content);
@@ -868,9 +869,9 @@ void ProfilePanel::renderProfile(const QJsonObject& data) {
     if (notice.contains(QStringLiteral("text"))) {
         auto* n = new QLabel(notice.value(QStringLiteral("text")).toString());
         n->setWordWrap(true);
-        n->setStyleSheet(QStringLiteral(
-            "color:#F3F1F8;font-size:13px;background:rgba(217,160,91,0.14);"
-            "border:1px solid #D9A05B;border-radius:14px;padding:12px 16px;"));
+        n->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+            "color:@{tp};font-size:13px;background:rgba(217,160,91,0.14);"
+            "border:1px solid #D9A05B;border-radius:14px;padding:12px 16px;")));
         auto* wrap = new QWidget();
         auto* wl = new QHBoxLayout(wrap);
         wl->setContentsMargins(16, 12, 16, 0);
@@ -915,8 +916,8 @@ QPushButton* ProfilePanel::makeAction(Icons::Kind icon, const QString& label, bo
     ic->setAlignment(Qt::AlignCenter);
     ic->setAttribute(Qt::WA_TransparentForMouseEvents);
     auto* lb = new QLabel(label, w);
-    lb->setStyleSheet(QStringLiteral("color:%1;font-size:11px;")
-        .arg(enabled ? QStringLiteral("#ACA6BD") : QStringLiteral("#4A4656")));
+    lb->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:%1;font-size:11px;")
+        .arg(enabled ? QStringLiteral("@{ts}") : QStringLiteral("#4A4656"))));
     lb->setAlignment(Qt::AlignHCenter);
     lb->setAttribute(Qt::WA_TransparentForMouseEvents);
     v->addWidget(ic, 0, Qt::AlignHCenter);
@@ -994,9 +995,9 @@ QWidget* ProfilePanel::makeInfoRow(Icons::Kind icon, const QString& value,
     row->setAttribute(Qt::WA_StyledBackground, true);
     if (copyable) {
         // is-copyable: курсор-рука и подсветка при наведении, клик копирует.
-        row->setStyleSheet(QStringLiteral(
+        row->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
             "QFrame#profRow{border-radius:12px;}"
-            "QFrame#profRow:hover{background:#221F2C;}"));
+            "QFrame#profRow:hover{background:@{s3};}")));
         row->setCursor(Qt::PointingHandCursor);
         row->setToolTip(QStringLiteral("Нажмите, чтобы скопировать"));
         row->installEventFilter(new SuperSearchClickFilter([value]() {
@@ -1009,7 +1010,7 @@ QWidget* ProfilePanel::makeInfoRow(Icons::Kind icon, const QString& value,
     auto* chip = new QLabel(row);
     chip->setFixedSize(34, 34);
     chip->setAlignment(Qt::AlignCenter);
-    chip->setStyleSheet(QStringLiteral("background:#221F2C;border-radius:10px;"));
+    chip->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("background:@{s3};border-radius:10px;")));
     chip->setPixmap(Icons::pixmap(icon, 20, kRowIcon));
     lay->addWidget(chip, 0, Qt::AlignTop);
     auto* col = new QVBoxLayout();
@@ -1031,9 +1032,9 @@ QWidget* ProfilePanel::makeChannelRow(const QJsonObject& ch) {
     row->setObjectName(QStringLiteral("profChanRow"));
     row->setAttribute(Qt::WA_StyledBackground, true);
     row->setCursor(Qt::PointingHandCursor);
-    row->setStyleSheet(QStringLiteral(
-        "QFrame#profChanRow{background:#221F2C;border-radius:12px;}"
-        "QFrame#profChanRow:hover{background:#2A2637;}"));
+    row->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+        "QFrame#profChanRow{background:@{s3};border-radius:12px;}"
+        "QFrame#profChanRow:hover{background:#2A2637;}")));
     auto* lay = new QHBoxLayout(row);
     lay->setContentsMargins(10, 10, 10, 10);
     lay->setSpacing(10);
@@ -1156,7 +1157,7 @@ QWidget* ProfilePanel::makeMarks(const QJsonArray& marks) {
         auto* icon = new QLabel(row);
         icon->setFixedSize(38, 38);
         icon->setAlignment(Qt::AlignCenter);
-        icon->setStyleSheet(QStringLiteral("background:#221F2C;border-radius:19px;"));
+        icon->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("background:@{s3};border-radius:19px;")));
         icon->setPixmap(Icons::pixmap(Icons::Star, 22, kAccentText));
         rl->addWidget(icon);
         auto* body = new QVBoxLayout();
@@ -1218,8 +1219,8 @@ void ProfilePanel::fillGiftsRow(const QJsonArray& list) {
         auto* card = new QWidget(giftsRow_);
         card->setObjectName(QStringLiteral("profGift"));
         card->setAttribute(Qt::WA_StyledBackground, true);
-        card->setStyleSheet(QStringLiteral(
-            "QWidget#profGift{background:#221F2C;border-radius:14px;}"));
+        card->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+            "QWidget#profGift{background:@{s3};border-radius:14px;}")));
         card->setMinimumHeight(120);
         auto* cl = new QVBoxLayout(card);
         cl->setContentsMargins(8, 12, 8, 12);
@@ -1262,14 +1263,14 @@ void ProfilePanel::buildCollectionScreen(QWidget* host) {
     hv->setSpacing(8);
     if (allGiftsHidden_) {
         auto* note = new QLabel(QStringLiteral("Этот человек скрыл свои подарки"), host);
-        note->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+        note->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tt};font-size:13px;padding:16px;")));
         hv->addWidget(note);
         return;
     }
     if (allGifts_.isEmpty()) {
         auto* note = new QLabel(isSelf_ ? QStringLiteral("Вам пока не дарили подарков")
                                         : QStringLiteral("Подарков пока нет"), host);
-        note->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+        note->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tt};font-size:13px;padding:16px;")));
         hv->addWidget(note);
         return;
     }
@@ -1278,10 +1279,10 @@ void ProfilePanel::buildCollectionScreen(QWidget* host) {
         const bool pinned = g.value(QStringLiteral("pinned")).toBool(false);
         auto* card = new QWidget(host);
         card->setAttribute(Qt::WA_StyledBackground, true);
-        card->setStyleSheet(QStringLiteral(
-            "QWidget{background:#1A1822;border-radius:20px;%1}")
-            .arg(pinned ? QStringLiteral("border:1px solid rgba(139,92,246,0.34);")
-                        : QString()));
+        card->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+            "QWidget{background:@{s2};border-radius:20px;%1}")
+            .arg(pinned ? QStringLiteral("border:1px solid @{ac34};")
+                        : QString())));
         auto* hl = new QHBoxLayout(card);
         hl->setContentsMargins(12, 12, 12, 12);
         hl->setSpacing(12);
@@ -1293,8 +1294,8 @@ void ProfilePanel::buildCollectionScreen(QWidget* host) {
         col2->setSpacing(2);
         auto* nm = new QLabel(g.value(QStringLiteral("name")).toString(
             GiftArt::name(slug)), card);
-        nm->setStyleSheet(QStringLiteral(
-            "color:#F3F1F8;font-size:14px;font-weight:600;background:transparent;"));
+        nm->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+            "color:@{tp};font-size:14px;font-weight:600;background:transparent;")));
         col2->addWidget(nm);
         // Чип редкости (xp-gift-rar веба): цвет по разряду каталога,
         // серверный признак тиража редкость только поднимает.
@@ -1303,7 +1304,7 @@ void ProfilePanel::buildCollectionScreen(QWidget* host) {
                 if (tier == QLatin1String("legendary")) return QStringLiteral("#F5C518");
                 if (tier == QLatin1String("epic"))      return QStringLiteral("#B78BFA");
                 if (tier == QLatin1String("rare"))      return QStringLiteral("#6FB1FC");
-                return QStringLiteral("#726C82");
+                return QStringLiteral("@{tt}");
             };
             const QString tier = GiftArt::rarityFor(
                 slug, g.value(QStringLiteral("rarity")).toString());
@@ -1315,8 +1316,8 @@ void ProfilePanel::buildCollectionScreen(QWidget* host) {
         }
         if (pinned) {
             auto* pin = new QLabel(QStringLiteral("Закреплён"), card);
-            pin->setStyleSheet(QStringLiteral(
-                "color:#BBA4FF;font-size:11px;background:transparent;"));
+            pin->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                "color:@{acT};font-size:11px;background:transparent;")));
             col2->addWidget(pin);
         }
         // «№ 12345 · от @user · 22 сентября» — как xp-gc__meta; номер
@@ -1332,16 +1333,16 @@ void ProfilePanel::buildCollectionScreen(QWidget* host) {
                     .arg(QString::fromUtf8(kMonths[dt.date().month()]));
         if (!meta.isEmpty()) {
             auto* m = new QLabel(meta.join(QStringLiteral(" · ")), card);
-            m->setStyleSheet(QStringLiteral(
-                "color:#726C82;font-size:12px;background:transparent;"));
+            m->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                "color:@{tt};font-size:12px;background:transparent;")));
             col2->addWidget(m);
         }
         const QString msg = g.value(QStringLiteral("message")).toString();
         if (!msg.isEmpty()) {
             auto* m2 = new QLabel(msg, card);
             m2->setWordWrap(true);
-            m2->setStyleSheet(QStringLiteral(
-                "color:#ACA6BD;font-size:12px;font-style:italic;background:transparent;"));
+            m2->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                "color:@{ts};font-size:12px;font-style:italic;background:transparent;")));
             col2->addWidget(m2);
         }
         hl->addWidget(art);
@@ -1398,8 +1399,8 @@ QWidget* ProfilePanel::makeGifts(const QJsonObject& gifts) {
         hv->setSpacing(8);
         if (allGifts_.isEmpty() && !allGiftsHidden_) {
             auto* loading = new QLabel(QStringLiteral("Загрузка…"), host);
-            loading->setStyleSheet(QStringLiteral(
-                "color:#726C82;font-size:13px;padding:16px;background:transparent;"));
+            loading->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                "color:@{tt};font-size:13px;padding:16px;background:transparent;")));
             hv->addWidget(loading);
             collectionScreen_ = host;
             if (!allGiftsRequested_) { allGiftsRequested_ = true; api_->giftsOfUser(userId_); }
@@ -1428,8 +1429,8 @@ void ProfilePanel::openMediaScreen() {
 
     // Чипы категорий с счётчиками (без category сервер отдаёт counts/total).
     auto* chips = new QWidget(host);
-    chips->setStyleSheet(QStringLiteral(
-        "QWidget{background:#131218;border-bottom:1px solid #221F2C;}"));
+    chips->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+        "QWidget{background:@{s1};border-bottom:1px solid @{s3};}")));
     chips->setAttribute(Qt::WA_StyledBackground, true);
     auto* chl = new QHBoxLayout(chips);
     chl->setContentsMargins(12, 8, 12, 8);
@@ -1439,7 +1440,7 @@ void ProfilePanel::openMediaScreen() {
     auto* gl = new QVBoxLayout(gridHost);
     gl->setContentsMargins(12, 12, 12, 16);
     auto* loading = new QLabel(QStringLiteral("Загрузка…"), gridHost);
-    loading->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+    loading->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tt};font-size:13px;padding:16px;")));
     gl->addWidget(loading);
     auto* body = new QGridLayout();
     body->setContentsMargins(0, 0, 0, 0);
@@ -1454,7 +1455,7 @@ void ProfilePanel::openMediaScreen() {
         }
         if (items.isEmpty()) {
             auto* empty = new QLabel(QStringLiteral("Ничего нет"), gridHost);
-            empty->setStyleSheet(QStringLiteral("color:#726C82;font-size:13px;padding:16px;"));
+            empty->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tt};font-size:13px;padding:16px;")));
             body->addWidget(empty, 0, 0);
             return;
         }
@@ -1464,8 +1465,8 @@ void ProfilePanel::openMediaScreen() {
             const QString type = o.value(QStringLiteral("type")).toString();
             auto* tile = new QWidget(gridHost);
             tile->setObjectName(QStringLiteral("mediaTile"));
-            tile->setStyleSheet(QStringLiteral(
-                "QWidget#mediaTile{background:#221F2C;border-radius:12px;}"));
+            tile->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                "QWidget#mediaTile{background:@{s3};border-radius:12px;}")));
             tile->setAttribute(Qt::WA_StyledBackground, true);
             tile->setFixedSize(96, 96);
             auto* tl = new QVBoxLayout(tile);
@@ -1484,8 +1485,8 @@ void ProfilePanel::openMediaScreen() {
                 o.value(QStringLiteral("title")).toString());
             if (!nm.isEmpty()) {
                 auto* nmL = new QLabel(nm, tile);
-                nmL->setStyleSheet(QStringLiteral(
-                    "color:#ACA6BD;font-size:10px;background:transparent;"));
+                nmL->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                    "color:@{ts};font-size:10px;background:transparent;")));
                 nmL->setWordWrap(true);
                 tl->addWidget(nmL);
             }
@@ -1504,10 +1505,10 @@ void ProfilePanel::openMediaScreen() {
         auto* chip = new QPushButton(QString::fromUtf8(c.label), chips);
         chip->setCursor(Qt::PointingHandCursor);
         chip->setCheckable(true);
-        chip->setStyleSheet(QStringLiteral(
-            "QPushButton{border:1px solid #2B2737;border-radius:999px;padding:6px 14px;"
-            "background:transparent;color:#ACA6BD;font-size:12px;}"
-            "QPushButton:checked{background:#8B5CF6;border-color:#8B5CF6;color:#fff;}"));
+        chip->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+            "QPushButton{border:1px solid @{s4};border-radius:999px;padding:6px 14px;"
+            "background:transparent;color:@{ts};font-size:12px;}"
+            "QPushButton:checked{background:@{ac};border-color:@{ac};color:#fff;}")));
         chl->addWidget(chip);
         chipList.append({QString::fromLatin1(c.key), chip});
     }
@@ -1552,13 +1553,13 @@ QWidget* ProfilePanel::makeMediaEntry(const QJsonObject& p) {
     auto* hl = new QHBoxLayout(sec);
     hl->setContentsMargins(12, 4, 12, 4);
     auto* btn = new QPushButton(QStringLiteral("Общие медиа"), sec);
-    btn->setStyleSheet(QStringLiteral(
-        "QPushButton{background:transparent;border:none;color:#BBA4FF;"
-        "font-size:14px;text-align:left;padding:8px 0;}"));
+    btn->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+        "QPushButton{background:transparent;border:none;color:@{acT};"
+        "font-size:14px;text-align:left;padding:8px 0;}")));
     btn->setCursor(Qt::PointingHandCursor);
     auto* cnt = new QLabel(mediaTotal_ > 0 ? QString::number(mediaTotal_) : QString(), sec);
     cnt->setObjectName(QStringLiteral("profMediaCount"));
-    cnt->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:13px;"));
+    cnt->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{ts};font-size:13px;")));
     hl->addWidget(btn, 1);
     hl->addWidget(cnt, 0, Qt::AlignVCenter);
     connect(btn, &QPushButton::clicked, this, [this]() { openMediaScreen(); });
@@ -1619,7 +1620,7 @@ QWidget* ProfilePanel::makeBottom(const QJsonObject& p, const QJsonObject& rel) 
 
     auto* box = new QFrame();
     box->setObjectName(QStringLiteral("profBottom"));
-    box->setStyleSheet(QStringLiteral("QFrame#profBottom{background:#1A1822;border-radius:20px;}"));
+    box->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("QFrame#profBottom{background:@{s2};border-radius:20px;}")));
     box->setAttribute(Qt::WA_StyledBackground, true);
     auto* v = new QVBoxLayout(box);
     v->setContentsMargins(4, 4, 4, 4);
@@ -1648,7 +1649,7 @@ void ProfilePanel::moreMenu(const QPoint& globalPos) {
     const QString displayName = p.value(QStringLiteral("display_name")).toString();
 
     QMenu m(this);
-    m.setStyleSheet(QLatin1String(kPanelQss));
+    m.setStyleSheet(ThemePreset::applyTokens(QLatin1String(kPanelQss)));
     if (rel.value(QStringLiteral("can_gift")).toBool(false) && !isBot) {
         connect(m.addAction(QStringLiteral("Отправить подарок")), &QAction::triggered,
                 this, [this]() { openGiftDialog(); });
@@ -1740,13 +1741,13 @@ void ProfilePanel::openQr() {
         qrLay->addWidget(img, 0, Qt::AlignHCenter);
     } catch (...) {
         auto* fail = new QLabel(QStringLiteral("Не удалось построить QR-код"), qrBox);
-        fail->setStyleSheet(QStringLiteral("color:#0B0A0E;font-size:13px;"));
+        fail->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{bg};font-size:13px;")));
         qrLay->addWidget(fail, 0, Qt::AlignHCenter);
     }
 
     auto* linkLbl = new QLabel(link, host);
-    linkLbl->setStyleSheet(QStringLiteral(
-        "color:#ACA6BD;font-size:13px;background:transparent;"));
+    linkLbl->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+        "color:@{ts};font-size:13px;background:transparent;")));
     linkLbl->setAlignment(Qt::AlignHCenter);
     linkLbl->setWordWrap(true);
 
@@ -1776,8 +1777,8 @@ void ProfilePanel::pushScreen(const QString& title, QWidget* screen) {
     v->setContentsMargins(0, 0, 0, 0);
     v->setSpacing(0);
     auto* bar = new QWidget();
-    bar->setStyleSheet(QStringLiteral(
-        "QWidget{background:#131218;border-bottom:1px solid #221F2C;}"));
+    bar->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+        "QWidget{background:@{s1};border-bottom:1px solid @{s3};}")));
     bar->setAttribute(Qt::WA_StyledBackground, true);
     auto* bl = new QHBoxLayout(bar);
     bl->setContentsMargins(8, 8, 12, 8);
@@ -1785,13 +1786,13 @@ void ProfilePanel::pushScreen(const QString& title, QWidget* screen) {
     auto* back = new QPushButton(bar);
     back->setIcon(Icons::icon(Icons::ArrowLeft, 18, kText2));
     back->setFixedSize(32, 32);
-    back->setStyleSheet(QStringLiteral(
+    back->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
         "QPushButton{background:transparent;border:none;border-radius:16px;}"
-        "QPushButton:hover{background:#221F2C;}"));
+        "QPushButton:hover{background:@{s3};}")));
     connect(back, &QPushButton::clicked, this, &ProfilePanel::popScreen);
     auto* t = new QLabel(title, bar);
-    t->setStyleSheet(QStringLiteral(
-        "color:#F3F1F8;font-size:15px;font-weight:600;background:transparent;"));
+    t->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+        "color:@{tp};font-size:15px;font-weight:600;background:transparent;")));
     bl->addWidget(back);
     bl->addWidget(t, 1);
     v->addWidget(bar);
@@ -1811,18 +1812,18 @@ void ProfilePanel::popScreen() {
 void ProfilePanel::openGiftDialog() {
     const QString toId = userId_;
     auto* ov = new ModalOverlay(window(), 460);
-    ov->card()->setStyleSheet(QLatin1String(kPanelQss));
+    ov->card()->setStyleSheet(ThemePreset::applyTokens(QLatin1String(kPanelQss)));
     ov->card()->setMinimumHeight(0);
     auto* cl = ov->cardLayout();
     cl->setContentsMargins(16, 16, 16, 16);
     auto* title = new QLabel(QStringLiteral("Отправить подарок"));
-    title->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:17px;font-weight:700;"));
+    title->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tp};font-size:17px;font-weight:700;")));
     cl->addWidget(title);
 
     auto* sa = new QScrollArea(ov->card());
     sa->setWidgetResizable(true);
     sa->setFrameShape(QFrame::NoFrame);
-    sa->setStyleSheet(QLatin1String(kPanelQss));
+    sa->setStyleSheet(ThemePreset::applyTokens(QLatin1String(kPanelQss)));
     auto* gridWrap = new QWidget();
     gridWrap->setStyleSheet(QStringLiteral("background:transparent;"));
     sa->setWidget(gridWrap);
@@ -1833,7 +1834,7 @@ void ProfilePanel::openGiftDialog() {
     cl->addWidget(note);
 
     auto* status = new QLabel(ov->card());
-    status->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+    status->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tt};font-size:12px;")));
     cl->addWidget(status);
 
     connect(api_, &ApiClient::giftsCatalogLoaded, ov,
@@ -1857,10 +1858,10 @@ void ProfilePanel::openGiftDialog() {
             const QJsonObject gif = gifts[i].toObject();
             auto* cardBtn = new QPushButton(gridWrap);
             cardBtn->setObjectName(QStringLiteral("giftCard"));
-            cardBtn->setStyleSheet(QStringLiteral(
-                "QPushButton#giftCard{background:#1A1822;border:1px solid #2B2737;"
+            cardBtn->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                "QPushButton#giftCard{background:@{s2};border:1px solid @{s4};"
                 "border-radius:20px;}"
-                "QPushButton#giftCard:hover{background:#221F2C;border-color:#8B5CF6;}"));
+                "QPushButton#giftCard:hover{background:@{s3};border-color:@{ac};}")));
             cardBtn->setCursor(Qt::PointingHandCursor);
             cardBtn->setFixedSize(100, 116);
             auto* vl = new QVBoxLayout(cardBtn);
@@ -1873,7 +1874,7 @@ void ProfilePanel::openGiftDialog() {
             auto* nm = new QLabel(gif.value(QStringLiteral("name")).toString(
                 gif.value(QStringLiteral("title")).toString(
                     gif.value(QStringLiteral("id")).toString())), cardBtn);
-            nm->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:11px;"));
+            nm->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tp};font-size:11px;")));
             nm->setAlignment(Qt::AlignHCenter);
             nm->setWordWrap(true);
             auto* price = new QLabel(QStringLiteral("⭐ %1").arg(
@@ -1887,7 +1888,7 @@ void ProfilePanel::openGiftDialog() {
             connect(cardBtn, &QPushButton::clicked, ov,
                     [this, ov, note, toId, gid, status]() {
                 status->setText(QStringLiteral("Отправка…"));
-                status->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+                status->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tt};font-size:12px;")));
                 api_->giftSend(gid, toId, note->text().trimmed(), false);
             });
             g->addWidget(cardBtn, i / 4, i % 4);
@@ -1901,7 +1902,7 @@ void ProfilePanel::openGiftDialog() {
             return;
         }
         status->setText(msg.isEmpty() ? QStringLiteral("Не удалось отправить") : msg);
-        status->setStyleSheet(QStringLiteral("color:#E26A63;font-size:12px;"));
+        status->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{danger};font-size:12px;")));
     });
 
     ov->showAnimated();
