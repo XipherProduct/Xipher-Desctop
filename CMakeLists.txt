@@ -212,7 +212,7 @@ set_target_properties(Xipher PROPERTIES
 # реальный ChatPage без сети и сверяет пиксели/геометрию с CSS веб-клиента.
 if(NOT WIN32)
     list(FILTER SOURCES EXCLUDE REGEX "src/main\\.cpp$")
-    qt_add_executable(design-verify ${SOURCES} ${HEADERS} tests/design-verify.cpp)
+    qt_add_executable(design-verify ${SOURCES} ${HEADERS} resources/resources.qrc tests/design-verify.cpp)
     target_include_directories(design-verify PRIVATE src)
     target_link_libraries(design-verify PRIVATE
         Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
@@ -222,7 +222,7 @@ if(NOT WIN32)
 
     # Демо-звонок с звуком: два пира в одном процессе, loopback-сигналинг,
     # реальный RTP-эфир (микрофон → динамик), статистика кадров и мьют.
-    qt_add_executable(call-demo ${SOURCES} ${HEADERS} tests/call-demo.cpp)
+    qt_add_executable(call-demo ${SOURCES} ${HEADERS} resources/resources.qrc tests/call-demo.cpp)
     target_include_directories(call-demo PRIVATE src)
     target_link_libraries(call-demo PRIVATE
         Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)

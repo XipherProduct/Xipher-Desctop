@@ -4866,7 +4866,7 @@ static QString chatQSS() {
 #chatList::item:hover { background:@{s3}; }
 #chatList::item:selected { background:@{soft1}; border-left:3px solid @{ac}; }
 /* ─── Лента ─── */
-#msgArea { background:@{bg}; border:none; }
+#msgArea { background-color:@{bg}; background-image:url(:/chat-pattern.png); background-repeat:repeat; border:none; }
 #msgArea > QWidget > QWidget { background:@{bg}; }
 #msgArea QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
 #msgArea QScrollBar::handle:vertical { background:@{scrol}; border-radius:4px; min-height:36px; }
