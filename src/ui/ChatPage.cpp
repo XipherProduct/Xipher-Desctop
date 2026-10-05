@@ -1100,20 +1100,14 @@ void ChatPage::buildUi() {
     chl->addWidget(peerHeader_);
     chl->addStretch();
 
-    // Действия в шапке (как в Telegram): супер-поиск, поиск, звонок, «ещё».
+    // Действия в шапке (как в Telegram): поиск, звонок, «ещё». Поиск — один.
     const QColor hdrIcon(0xAC, 0xA6, 0xBD);
     auto* superBtn = new QPushButton(convHeader);
     superBtn->setObjectName(QStringLiteral("hdrBtn"));
     superBtn->setCursor(Qt::PointingHandCursor);
     superBtn->setIcon(Icons::icon(Icons::Search, 20, QColor(0x8B, 0x5C, 0xF6)));
     superBtn->setIconSize(QSize(20, 20));
-    superBtn->setToolTip(QStringLiteral("Супер-поиск (Ctrl+Shift+F)"));
-    auto* searchBtn = new QPushButton(convHeader);
-    searchBtn->setObjectName(QStringLiteral("hdrBtn"));
-    searchBtn->setCursor(Qt::PointingHandCursor);
-    searchBtn->setIcon(Icons::icon(Icons::Search, 20, hdrIcon));
-    searchBtn->setIconSize(QSize(20, 20));
-    searchBtn->setToolTip(QStringLiteral("Поиск сообщений"));
+    superBtn->setToolTip(QStringLiteral("Поиск сообщений (Ctrl+Shift+F)"));
     // Звонок — только в ЛС (как в Telegram): для канала/группы/топика кнопки
     // нет. Видимость переключается в openChat/openTopic.
     hdrCallBtn_ = new QPushButton(convHeader);
@@ -1127,13 +1121,11 @@ void ChatPage::buildUi() {
     moreBtn_->setCursor(Qt::PointingHandCursor);
     moreBtn_->setIcon(Icons::icon(Icons::More, 20, hdrIcon));
     moreBtn_->setIconSize(QSize(20, 20));
+    moreBtn_->setToolTip(QStringLiteral("Ещё"));
     chl->addWidget(superBtn);
-    chl->addWidget(searchBtn);
     chl->addWidget(hdrCallBtn_);
     chl->addWidget(moreBtn_);
     connect(superBtn, &QPushButton::clicked, this, &ChatPage::openSuperSearch);
-    // Единый поиск (обычный + супер, в этом чате / во всех чатах) — как в вебе.
-    connect(searchBtn, &QPushButton::clicked, this, &ChatPage::openSuperSearch);
     connect(hdrCallBtn_, &QPushButton::clicked, this, &ChatPage::startCall);
     connect(moreBtn_, &QPushButton::clicked, this, &ChatPage::showChatMenu);
 

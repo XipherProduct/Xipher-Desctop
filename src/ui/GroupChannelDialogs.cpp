@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "ui/GroupChannelDialogs.h"
 #include "ui/AvatarUtil.h"
 #include "net/ApiClient.h"
@@ -21,28 +22,28 @@
 
 namespace {
 const char* kCardQss = R"QSS(
-#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
-QLabel{color:#F3F1F8;}
-#dlgHeader{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6D28D9,stop:0.55 #8B5CF6,stop:1 #B06CF0);
+#modalCard{background:@{s1};border:1px solid @{bDef};border-radius:18px;}
+QLabel{color:@{tp};}
+#dlgHeader{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 @{acD},stop:0.55 @{ac},stop:1 #B06CF0);
   border-top-left-radius:18px;border-top-right-radius:18px;}
 #dlgTitle{font-size:17px;font-weight:800;color:#FFFFFF;}
-#closeBtn{background:rgba(255,255,255,0.16);border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
+#closeBtn{background:@{bStr};border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
 #closeBtn:hover{background:rgba(255,255,255,0.30);}
-#hint{font-size:12px;color:#726C82;}
-QLineEdit,QPlainTextEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:10px;
-  min-height:36px;padding:0 12px;color:#F3F1F8;selection-background-color:#8B5CF6;}
+#hint{font-size:12px;color:@{tt};}
+QLineEdit,QPlainTextEdit{background:@{s1};border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+  min-height:36px;padding:0 12px;color:@{tp};selection-background-color:@{ac};}
 QPlainTextEdit{padding:8px 12px;}
-QLineEdit:focus,QPlainTextEdit:focus{border:1px solid #8B5CF6;}
-#primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #8B5CF6,stop:1 #6D28D9);
+QLineEdit:focus,QPlainTextEdit:focus{border:1px solid @{ac};}
+#primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 @{ac},stop:1 @{acD});
   color:#fff;border:none;border-radius:10px;min-height:40px;padding:0 22px;font-weight:700;}
 #primaryBtn:hover{background:#9B72F8;}
 #joinBtn{background:rgba(139,92,246,0.20);color:#C9B6FF;border:none;border-radius:9px;min-height:30px;padding:0 14px;font-weight:600;}
-#joinBtn:hover{background:rgba(139,92,246,0.34);}
-#itemCard{background:#1A1822;border:1px solid rgba(255,255,255,0.06);border-radius:12px;}
+#joinBtn:hover{background:@{ac34};}
+#itemCard{background:@{s2};border:1px solid @{bSub};border-radius:12px;}
 #err{color:#E5687A;font-size:12px;}
 QScrollArea{background:transparent;border:none;}
 QScrollBar:vertical{background:transparent;width:8px;margin:2px;}
-QScrollBar::handle:vertical{background:rgba(255,255,255,0.12);border-radius:4px;min-height:36px;}
+QScrollBar::handle:vertical{background:@{bStr};border-radius:4px;min-height:36px;}
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
 )QSS";
 
@@ -105,7 +106,7 @@ QWidget* dialogHeader(const QString& title, ModalOverlay* dlg) {
 // ── Создать группу ──────────────────────────────────────────────────────────────
 CreateGroupDialog::CreateGroupDialog(ApiClient* api, QWidget* parent)
     : ModalOverlay(parent, 430), api_(api) {
-    card()->setStyleSheet(QString::fromUtf8(kCardQss));
+    card()->setStyleSheet(ThemePreset::applyTokens(QString::fromUtf8(kCardQss)));
     auto* lay = cardLayout();
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
@@ -152,7 +153,7 @@ CreateGroupDialog::CreateGroupDialog(ApiClient* api, QWidget* parent)
 // ── Создать канал ──────────────────────────────────────────────────────────────
 CreateChannelDialog::CreateChannelDialog(ApiClient* api, QWidget* parent)
     : ModalOverlay(parent, 430), api_(api) {
-    card()->setStyleSheet(QString::fromUtf8(kCardQss));
+    card()->setStyleSheet(ThemePreset::applyTokens(QString::fromUtf8(kCardQss)));
     auto* lay = cardLayout();
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
@@ -227,7 +228,7 @@ CreateChannelDialog::CreateChannelDialog(ApiClient* api, QWidget* parent)
 CatalogDialog::CatalogDialog(ApiClient* api, QWidget* parent)
     : ModalOverlay(parent, 560), api_(api) {
     card()->setFixedHeight(540);
-    card()->setStyleSheet(QString::fromUtf8(kCardQss));
+    card()->setStyleSheet(ThemePreset::applyTokens(QString::fromUtf8(kCardQss)));
     auto* lay = cardLayout();
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
@@ -304,14 +305,14 @@ void CatalogDialog::renderItems(const QList<DirectoryItem>& items) {
         auto* mid = new QVBoxLayout(); mid->setSpacing(2);
         const QString badge = d.type == QStringLiteral("channel") ? QStringLiteral("Канал") : QStringLiteral("Группа");
         auto* title = new QLabel(d.name + (d.verified ? QStringLiteral("  ✓") : QString()));
-        title->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:14px;font-weight:700;"));
+        title->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tp};font-size:14px;font-weight:700;")));
         QString sub = badge + QStringLiteral(" · %1 участн.").arg(d.membersCount);
         if (!d.username.isEmpty()) sub += QStringLiteral("  @") + d.username;
-        auto* subL = new QLabel(sub); subL->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+        auto* subL = new QLabel(sub); subL->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tt};font-size:12px;")));
         mid->addWidget(title); mid->addWidget(subL);
         if (!d.description.isEmpty()) {
             auto* ds = new QLabel(d.description);
-            ds->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:12px;"));
+            ds->setStyleSheet(QStringLiteral("color:@{ts};font-size:12px;"));
             ds->setWordWrap(true);
             mid->addWidget(ds);
         }
@@ -319,7 +320,7 @@ void CatalogDialog::renderItems(const QList<DirectoryItem>& items) {
 
         if (d.isMember) {
             auto* m = new QLabel(QStringLiteral("Вы участник"));
-            m->setStyleSheet(QStringLiteral("color:#46B98A;font-size:12px;"));
+            m->setStyleSheet(QStringLiteral("color:@{ok};font-size:12px;"));
             h->addWidget(m, 0, Qt::AlignVCenter);
         } else {
             auto* join = new QPushButton(d.type == QStringLiteral("channel")

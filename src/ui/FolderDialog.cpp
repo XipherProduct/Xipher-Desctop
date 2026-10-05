@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "ui/FolderDialog.h"
 #include "ui/AvatarUtil.h"
 
@@ -19,34 +20,34 @@ FolderEditorDialog::FolderEditorDialog(const QList<Chat>& chats, const Folder& e
     if (isNew_) folder_.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     for (const QString& k : folder_.chatKeys) selected_.insert(k);
 
-    card()->setStyleSheet(QStringLiteral(R"QSS(
-#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
-QLabel{color:#F3F1F8;}
-#dlgHeader{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6D28D9,stop:0.55 #8B5CF6,stop:1 #B06CF0);
+    card()->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(R"QSS(
+#modalCard{background:@{s1};border:1px solid @{bDef};border-radius:18px;}
+QLabel{color:@{tp};}
+#dlgHeader{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 @{acD},stop:0.55 @{ac},stop:1 #B06CF0);
   border-top-left-radius:18px;border-top-right-radius:18px;}
 #dlgTitle{font-size:17px;font-weight:800;color:#fff;}
-#closeBtn{background:rgba(255,255,255,0.16);border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
+#closeBtn{background:@{bStr};border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
 #closeBtn:hover{background:rgba(255,255,255,0.30);}
-QLineEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:10px;
-  min-height:36px;padding:0 12px;color:#F3F1F8;selection-background-color:#8B5CF6;}
-QLineEdit:focus{border:1px solid #8B5CF6;}
-#rowName{color:#CFC9DC;font-size:13px;}
-#primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #8B5CF6,stop:1 #6D28D9);
+QLineEdit{background:@{s1};border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+  min-height:36px;padding:0 12px;color:@{tp};selection-background-color:@{ac};}
+QLineEdit:focus{border:1px solid @{ac};}
+#rowName{color:@{ts};font-size:13px;}
+#primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 @{ac},stop:1 @{acD});
   color:#fff;border:none;border-radius:10px;min-height:38px;padding:0 22px;font-weight:700;}
 #primaryBtn:hover{background:#9B72F8;}
 #delBtn{background:transparent;color:#E5687A;border:1px solid rgba(229,104,122,0.4);
   border-radius:10px;min-height:36px;padding:0 16px;}
 #delBtn:hover{background:rgba(229,104,122,0.12);}
-#chatRow{background:#1A1822;border-radius:10px;}
-#chatRow:hover{background:#221F2C;}
-QCheckBox{color:#F3F1F8;font-size:14px;spacing:10px;}
+#chatRow{background:@{s2};border-radius:10px;}
+#chatRow:hover{background:@{s3};}
+QCheckBox{color:@{tp};font-size:14px;spacing:10px;}
 QCheckBox::indicator{width:18px;height:18px;border-radius:5px;border:1.5px solid #5A5470;background:transparent;}
-QCheckBox::indicator:checked{background:#8B5CF6;border:1.5px solid #8B5CF6;}
+QCheckBox::indicator:checked{background:@{ac};border:1.5px solid @{ac};}
 QScrollArea{background:transparent;border:none;}
 QScrollBar:vertical{background:transparent;width:8px;margin:2px;}
-QScrollBar::handle:vertical{background:rgba(255,255,255,0.12);border-radius:4px;min-height:36px;}
+QScrollBar::handle:vertical{background:@{bStr};border-radius:4px;min-height:36px;}
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
-)QSS"));
+)QSS")));
 
     auto* lay = cardLayout();
     lay->setContentsMargins(0, 0, 0, 0);
@@ -103,7 +104,7 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
             "font-size:16px;padding:0;}"
             "QPushButton:hover{border:1px solid rgba(139,92,246,0.6);}")
             .arg(sel ? QStringLiteral("rgba(139,92,246,0.9)") : QStringLiteral("transparent"))
-            .arg(sel ? QStringLiteral("rgba(139,92,246,0.16)") : QStringLiteral("transparent")));
+            .arg(sel ? QStringLiteral("@{ac14}") : QStringLiteral("transparent")));
         connect(ib, &QPushButton::clicked, this, [this, ib, key, iconGrid]() {
             folder_.icon = key;
             // Переподсветить выбранную плитку.
@@ -115,7 +116,7 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
                     "QPushButton:hover{border:1px solid rgba(139,92,246,0.6);}"));
             ib->setStyleSheet(QStringLiteral(
                 "QPushButton{border:1px solid rgba(139,92,246,0.9);"
-                "background:rgba(139,92,246,0.16);border-radius:9px;font-size:16px;padding:0;}"
+                "background:@{ac14};border-radius:9px;font-size:16px;padding:0;}"
                 "QPushButton:hover{border:1px solid rgba(139,92,246,0.6);}"));
         });
         iconBtns.append(ib);
@@ -139,17 +140,17 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
         cb->setStyleSheet(QStringLiteral(
             "QPushButton{border-radius:13px;background:%1;"
             "border:2px solid %2;padding:0;}")
-            .arg(col, sel ? QStringLiteral("#F3F1F8") : QStringLiteral("transparent")));
+            .arg(col, sel ? QStringLiteral("@{tp}") : QStringLiteral("transparent")));
         connect(cb, &QPushButton::clicked, this, [this, cb, col, colorRow]() {
             folder_.color = col;
             const auto btns = colorRow->findChildren<QPushButton*>();
             for (QPushButton* b : btns)
                 b->setStyleSheet(b->styleSheet().replace(
-                    QStringLiteral("border:2px solid #F3F1F8;"),
+                    QStringLiteral("border:2px solid @{tp};"),
                     QStringLiteral("border:2px solid transparent;")));
             cb->setStyleSheet(cb->styleSheet().replace(
                 QStringLiteral("border:2px solid transparent;"),
-                QStringLiteral("border:2px solid #F3F1F8;")));
+                QStringLiteral("border:2px solid @{tp};")));
         });
         crl->addWidget(cb);
     }

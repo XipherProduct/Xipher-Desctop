@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "ui/SuperSearchDialog.h"
 #include "net/ApiClient.h"
 #include "net/Models.h"
@@ -157,29 +158,29 @@ SuperSearchDialog::SuperSearchDialog(ApiClient* api, QWidget* parent)
     : QWidget(parent), api_(api) {
     setObjectName(QStringLiteral("superSearchOverlay"));
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet(QStringLiteral(
+    setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
         "#superSearchOverlay { background:rgba(5,4,8,0.55); }"
-        "#ssCard { background:#131218; border:1px solid rgba(255,255,255,0.10);"
+        "#ssCard { background:@{s1}; border:1px solid rgba(255,255,255,0.10);"
         "  border-radius:20px; }"
-        "#ssTitle { font-size:16px; font-weight:700; color:#F3F1F8; }"
-        "#ssInput { background:#1A1822; border:1px solid rgba(255,255,255,0.10);"
-        "  border-radius:12px; min-height:42px; padding:0 14px; color:#F3F1F8; font-size:15px; }"
-        "#ssInput:focus { border:1px solid #8B5CF6; }"
+        "#ssTitle { font-size:16px; font-weight:700; color:@{tp}; }"
+        "#ssInput { background:@{s2}; border:1px solid rgba(255,255,255,0.10);"
+        "  border-radius:12px; min-height:42px; padding:0 14px; color:@{tp}; font-size:15px; }"
+        "#ssInput:focus { border:1px solid @{ac}; }"
         "#ssSegBtn { background:transparent; border:none; border-radius:9px;"
-        "  color:#726C82; font-size:13px; font-weight:600; min-height:30px; padding:0 14px; }"
-        "#ssSegBtn:checked { background:#221F2C; color:#F3F1F8; }"
-        "#ssChip { background:#1A1822; border:1px solid rgba(255,255,255,0.08);"
-        "  border-radius:14px; color:#ACA6BD; font-size:12px; padding:5px 10px; }"
-        "#ssChip:hover { background:rgba(139,92,246,0.16); color:#F3F1F8; }"
-        "#ssChip:checked { background:rgba(139,92,246,0.28); color:#F3F1F8;"
+        "  color:@{tt}; font-size:13px; font-weight:600; min-height:30px; padding:0 14px; }"
+        "#ssSegBtn:checked { background:@{s3}; color:@{tp}; }"
+        "#ssChip { background:@{s2}; border:1px solid @{bDef};"
+        "  border-radius:14px; color:@{ts}; font-size:12px; padding:5px 10px; }"
+        "#ssChip:hover { background:@{ac14}; color:@{tp}; }"
+        "#ssChip:checked { background:rgba(139,92,246,0.28); color:@{tp};"
         "  border-color:rgba(139,92,246,0.6); }"
-        "#ssGroup { color:#9B82C9; font-size:11px; font-weight:800; letter-spacing:1px;"
+        "#ssGroup { color:@{acT}; font-size:11px; font-weight:800; letter-spacing:1px;"
         "  text-transform:uppercase; padding:10px 2px 2px; }"
-        "#ssResult { background:#1A1822; border-radius:12px; }"
-        "#ssResult:hover { background:#221F2C; }"
-        "#ssHint { color:#726C82; font-size:12px; }"
-        "#ssMeta { color:#726C82; font-size:11px; }"
-        "#ssText { color:#F3F1F8; font-size:13px; }"));
+        "#ssResult { background:@{s2}; border-radius:12px; }"
+        "#ssResult:hover { background:@{s3}; }"
+        "#ssHint { color:@{tt}; font-size:12px; }"
+        "#ssMeta { color:@{tt}; font-size:11px; }"
+        "#ssText { color:@{tp}; font-size:13px; }")));
     buildUi();
 
     debounce_ = new QTimer(this);
@@ -219,8 +220,8 @@ void SuperSearchDialog::buildUi() {
     auto* close = new QPushButton(QStringLiteral("✕"));
     close->setFixedSize(28, 28);
     close->setCursor(Qt::PointingHandCursor);
-    close->setStyleSheet(QStringLiteral(
-        "background:transparent;border:none;color:#726C82;font-size:15px;"));
+    close->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+        "background:transparent;border:none;color:@{tt};font-size:15px;")));
     connect(close, &QPushButton::clicked, this, &QWidget::hide);
     head->addWidget(title);
     head->addStretch();
@@ -326,10 +327,10 @@ void SuperSearchDialog::buildUi() {
     sa->setWidgetResizable(true);
     sa->setFrameShape(QFrame::NoFrame);
     sa->setFixedHeight(380);
-    sa->setStyleSheet(QStringLiteral(
+    sa->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
         "QScrollArea{background:transparent;} QScrollBar:vertical{background:transparent;width:8px;margin:2px;}"
-        "QScrollBar::handle:vertical{background:rgba(255,255,255,0.12);border-radius:4px;}"
-        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"));
+        "QScrollBar::handle:vertical{background:@{bStr};border-radius:4px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}")));
     resultsBox_ = new QWidget();
     resultsBox_->setStyleSheet(QStringLiteral("background:transparent;"));
     auto* rl = new QVBoxLayout(resultsBox_);
@@ -608,7 +609,7 @@ void SuperSearchDialog::onResults(const QString& requestId, const QJsonArray& me
         if (filtered.isEmpty()) {
             auto* empty = new QLabel(QStringLiteral("Ничего не найдено"));
             empty->setAlignment(Qt::AlignCenter);
-            empty->setStyleSheet(QStringLiteral("color:#726C82;padding:24px;font-size:14px;"));
+            empty->setStyleSheet(QStringLiteral("color:@{tt};padding:24px;font-size:14px;"));
             lay->insertWidget(lay->count() - 1, empty);
             return;
         }
@@ -632,7 +633,7 @@ void SuperSearchDialog::onResults(const QString& requestId, const QJsonArray& me
     if (acc_.isEmpty()) {
         auto* empty = new QLabel(QStringLiteral("Ничего не найдено"));
         empty->setAlignment(Qt::AlignCenter);
-        empty->setStyleSheet(QStringLiteral("color:#726C82;padding:24px;font-size:14px;"));
+        empty->setStyleSheet(QStringLiteral("color:@{tt};padding:24px;font-size:14px;"));
         lay->insertWidget(lay->count() - 1, empty);
         return;
     }

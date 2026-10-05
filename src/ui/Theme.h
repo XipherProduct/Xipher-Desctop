@@ -350,4 +350,55 @@ inline Tokens current() {
 
 inline void save(const QString& id) { Prefs::setStr(QStringLiteral("xipher_theme"), id); }
 
+// Подстановка @{токен}-плейсхолдеров в QSS-литерал активной темой.
+// Словарь: s1..s4, inset, bg, ac/acH/acP/acD/acT, tp/ts/tt/td,
+// bSub/bDef/bStr, soft1..soft4/ac10..ac34, hovW, scrol/scrolH,
+// gradA/gradB (баббл-out), ok/warn/danger.
+// Соглашение то же, что в ChatPage::chatQSS — один дизайн-язык на всё приложение.
+inline QString applyTokens(const QString& qss) {
+    const Tokens th = current();
+    const bool light = th.isLight;
+    struct Sub { const char* key; QString val; };
+    const Sub subs[] = {
+        {"@{s1}",    th.surface1.name()},
+        {"@{s2}",    th.surface2.name()},
+        {"@{s3}",    th.surface3.name()},
+        {"@{s4}",    th.surface4.name()},
+        {"@{inset}", th.surfaceInset.name()},
+        {"@{bg}",    th.bgBase.name()},
+        {"@{ac}",    th.accent.name()},
+        {"@{acH}",   th.accentHover.name()},
+        {"@{acP}",   th.accentPressed.name()},
+        {"@{acD}",   th.accentDeep.name()},
+        {"@{acT}",   th.accentText.name()},
+        {"@{tp}",    th.textPrimary.name()},
+        {"@{ts}",    th.textSecondary.name()},
+        {"@{tt}",    th.textTertiary.name()},
+        {"@{td}",    th.textDisabled.name()},
+        {"@{bSub}",  th.rgba(th.borderSubtle, 1.0)},
+        {"@{bDef}",  th.rgba(th.borderDefault, 1.0)},
+        {"@{bStr}",  th.rgba(th.borderStrong, 1.0)},
+        {"@{soft1}", th.accentRgba(0.14)},
+        {"@{soft2}", th.accentRgba(0.22)},
+        {"@{soft3}", th.accentRgba(0.10)},
+        {"@{soft4}", th.accentRgba(0.28)},
+        {"@{ac10}",  th.accentRgba(0.10)},
+        {"@{ac14}",  th.accentRgba(0.14)},
+        {"@{ac22}",  th.accentRgba(0.22)},
+        {"@{ac34}",  th.accentRgba(0.34)},
+        {"@{hovW}",  th.rgba(QColor(255, 255, 255), light ? 0.45 : 0.06)},
+        {"@{hovW2}", th.rgba(QColor(255, 255, 255), light ? 0.60 : 0.10)},
+        {"@{scrol}", th.rgba(QColor(255, 255, 255), light ? 0.28 : 0.12)},
+        {"@{scrolH}",th.rgba(QColor(255, 255, 255), light ? 0.50 : 0.22)},
+        {"@{gradA}", th.bubbleOutA.name()},
+        {"@{gradB}", th.bubbleOutB.name()},
+        {"@{ok}",    th.success.name()},
+        {"@{warn}",  th.warning.name()},
+        {"@{danger}",th.danger.name()},
+    };
+    QString out = qss;
+    for (const Sub& s : subs) out.replace(QLatin1String(s.key), s.val);
+    return out;
+}
+
 } // namespace ThemePreset

@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "ui/ChatPickerDialog.h"
 #include "ui/AvatarUtil.h"
 
@@ -13,26 +14,26 @@
 ChatPickerDialog::ChatPickerDialog(const QList<Chat>& chats, const QString& title, QWidget* parent)
     : ModalOverlay(parent, 440), chats_(chats) {
     card()->setFixedHeight(560);
-    card()->setStyleSheet(QStringLiteral(R"QSS(
-#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
-QLabel{color:#F3F1F8;}
-#dlgHeader{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6D28D9,stop:0.55 #8B5CF6,stop:1 #B06CF0);
+    card()->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(R"QSS(
+#modalCard{background:@{s1};border:1px solid @{bDef};border-radius:18px;}
+QLabel{color:@{tp};}
+#dlgHeader{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 @{acD},stop:0.55 @{ac},stop:1 #B06CF0);
   border-top-left-radius:18px;border-top-right-radius:18px;}
 #dlgTitle{font-size:17px;font-weight:800;color:#fff;}
-#closeBtn{background:rgba(255,255,255,0.16);border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
+#closeBtn{background:@{bStr};border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
 #closeBtn:hover{background:rgba(255,255,255,0.30);}
-QLineEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:12px;
-  min-height:38px;padding:0 12px;color:#F3F1F8;selection-background-color:#8B5CF6;}
-QLineEdit:focus{border:1px solid #8B5CF6;}
+QLineEdit{background:@{s1};border:1px solid rgba(255,255,255,0.10);border-radius:12px;
+  min-height:38px;padding:0 12px;color:@{tp};selection-background-color:@{ac};}
+QLineEdit:focus{border:1px solid @{ac};}
 #row{background:transparent;border-radius:10px;}
-#row:hover{background:#1A1822;}
-#nm{color:#F3F1F8;font-size:14px;font-weight:600;}
-#kind{color:#726C82;font-size:12px;}
+#row:hover{background:@{s2};}
+#nm{color:@{tp};font-size:14px;font-weight:600;}
+#kind{color:@{tt};font-size:12px;}
 QScrollArea{background:transparent;border:none;}
 QScrollBar:vertical{background:transparent;width:8px;margin:2px;}
-QScrollBar::handle:vertical{background:rgba(255,255,255,0.12);border-radius:4px;min-height:36px;}
+QScrollBar::handle:vertical{background:@{bStr};border-radius:4px;min-height:36px;}
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
-)QSS"));
+)QSS")));
 
     auto* lay = cardLayout();
     lay->setContentsMargins(0, 0, 0, 0);
