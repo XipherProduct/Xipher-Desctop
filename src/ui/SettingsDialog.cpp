@@ -72,7 +72,7 @@ QWidget* rowLabeled(const QString& label, QWidget* control, QVBoxLayout* body = 
     if (body && body->count() > 0) {
         auto* sep = new QFrame();
         sep->setFrameShape(QFrame::HLine);
-        sep->setStyleSheet(QStringLiteral("background:rgba(255,255,255,0.055);border:none;max-height:1px;"));
+        sep->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("background:@{bSub};border:none;max-height:1px;")));
         body->addWidget(sep);
     }
     auto* w = new QWidget();
@@ -158,86 +158,86 @@ SettingsDialog::SettingsDialog(ApiClient* api, QWidget* parent)
     card()->setFixedHeight(840);
     // Токены 1:1 с .settings-panel веба (--st-* из css/settings.css).
     // Токены 1:1 с .settings-panel веба (--st-* из css/settings.css).
-    card()->setStyleSheet(QStringLiteral(R"QSS(
-#modalCard{background:#0b0a0e;border:1px solid rgba(255,255,255,0.07);border-radius:20px;}
-QLabel{color:#f3f1f8;}
+    card()->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(R"QSS(
+#modalCard{background:@{bg};border:1px solid @{bSub};border-radius:20px;}
+QLabel{color:@{tp};}
 /* ── Topbar ── */
-#stTopbar{background:#0b0a0e;border-bottom:1px solid rgba(255,255,255,0.07);}
-#stTitle{font-size:19px;font-weight:700;color:#f3f1f8;letter-spacing:0.2px;}
-#stIconBtn{border:none;background:transparent;border-radius:19px;color:#aca6bd;font-size:17px;padding:0;}
-#stIconBtn:hover{background:rgba(255,255,255,0.05);color:#f3f1f8;}
+#stTopbar{background:@{bg};border-bottom:1px solid @{bSub};}
+#stTitle{font-size:19px;font-weight:700;color:@{tp};letter-spacing:0.2px;}
+#stIconBtn{border:none;background:transparent;border-radius:19px;color:@{ts};font-size:17px;padding:0;}
+#stIconBtn:hover{background:rgba(255,255,255,0.05);color:@{tp};}
 /* ── Nav ── */
-#stNav{background:#08070b;border-right:1px solid rgba(255,255,255,0.07);}
+#stNav{background:#08070b;border-right:1px solid @{bSub};}
 #stNavScroll,#stNavScroll>QWidget{background:transparent;border:none;}
-#stNavGroup{color:#726c82;font-size:11px;font-weight:700;letter-spacing:1px;padding:12px 10px 4px;}
-#stNavItem{text-align:left;padding:8px 10px;border:none;border-radius:10px;background:transparent;color:#aca6bd;font-size:13px;font-weight:500;}
-#stNavItem:hover{background:rgba(255,255,255,0.05);color:#f3f1f8;}
-#stNavItem:checked{background:rgba(139,92,246,0.14);color:#8b5cf6;font-weight:600;}
+#stNavGroup{color:@{tt};font-size:11px;font-weight:700;letter-spacing:1px;padding:12px 10px 4px;}
+#stNavItem{text-align:left;padding:8px 10px;border:none;border-radius:10px;background:transparent;color:@{ts};font-size:13px;font-weight:500;}
+#stNavItem:hover{background:rgba(255,255,255,0.05);color:@{tp};}
+#stNavItem:checked{background:@{ac14};color:@{ac};font-weight:600;}
 /* ── Аккаунт: hero + tiles ── */
-#acctHero{background:#16141d;border:1px solid rgba(255,255,255,0.07);border-radius:20px;}
-#acctName{font-size:17px;font-weight:700;color:#f3f1f8;}
-#acctUname{color:#8b5cf6;font-size:13px;font-weight:600;}
-#acctCam{background:rgba(11,10,14,0.75);border:1px solid rgba(255,255,255,0.16);border-radius:14px;color:#f3f1f8;font-size:13px;padding:0;}
-#acctCam:hover{background:#8b5cf6;border-color:#8b5cf6;}
-#acctTile{text-align:left;background:#16141d;border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:2px 4px;}
-#acctTile:hover{background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.12);}
-#acctTileLbl{color:#aca6bd;font-size:12px;}
-#acctTileVal{color:#f3f1f8;font-size:13px;font-weight:600;}
-#acctGrouptitle{color:#726c82;font-size:11px;font-weight:700;letter-spacing:1px;}
+#acctHero{background:#16141d;border:1px solid @{bSub};border-radius:20px;}
+#acctName{font-size:17px;font-weight:700;color:@{tp};}
+#acctUname{color:@{ac};font-size:13px;font-weight:600;}
+#acctCam{background:rgba(11,10,14,0.75);border:1px solid @{bStr};border-radius:14px;color:@{tp};font-size:13px;padding:0;}
+#acctCam:hover{background:@{ac};border-color:@{ac};}
+#acctTile{text-align:left;background:#16141d;border:1px solid @{bSub};border-radius:14px;padding:2px 4px;}
+#acctTile:hover{background:rgba(255,255,255,0.05);border-color:@{bStr};}
+#acctTileLbl{color:@{ts};font-size:12px;}
+#acctTileVal{color:@{tp};font-size:13px;font-weight:600;}
+#acctGrouptitle{color:@{tt};font-size:11px;font-weight:700;letter-spacing:1px;}
 /* ── Карточки/поля/кнопки ── */
-#card{background:#16141d;border:1px solid rgba(255,255,255,0.07);border-radius:16px;}
-#cardTitle{font-size:11px;font-weight:700;color:#726c82;letter-spacing:0.8px;}
-#heroName{font-size:17px;font-weight:700;color:#f3f1f8;}
-#rowLabel{font-size:14px;color:#f3f1f8;}
-#hint{font-size:12px;color:#726c82;}
+#card{background:#16141d;border:1px solid @{bSub};border-radius:16px;}
+#cardTitle{font-size:11px;font-weight:700;color:@{tt};letter-spacing:0.8px;}
+#heroName{font-size:17px;font-weight:700;color:@{tp};}
+#rowLabel{font-size:14px;color:@{tp};}
+#hint{font-size:12px;color:@{tt};}
 QLineEdit,QPlainTextEdit,QComboBox,QSpinBox,QTimeEdit{
-  background:#1a1822;border:1px solid rgba(255,255,255,0.07);border-radius:10px;
-  min-height:36px;padding:0 12px;color:#f3f1f8;selection-background-color:#8b5cf6;}
+  background:@{s2};border:1px solid @{bSub};border-radius:10px;
+  min-height:36px;padding:0 12px;color:@{tp};selection-background-color:@{ac};}
 QPlainTextEdit{padding:8px 12px;}
 QLineEdit:focus,QPlainTextEdit:focus,QComboBox:focus,QSpinBox:focus,QTimeEdit:focus{
-  border:1px solid #8b5cf6;}
-QLineEdit:disabled{color:#726c82;}
+  border:1px solid @{ac};}
+QLineEdit:disabled{color:@{tt};}
 QComboBox::drop-down{border:none;width:22px;}
-QComboBox QAbstractItemView{background:#1a1822;border:1px solid rgba(255,255,255,0.12);
-  color:#f3f1f8;selection-background-color:rgba(139,92,246,0.30);outline:none;}
+QComboBox QAbstractItemView{background:@{s2};border:1px solid @{bStr};
+  color:@{tp};selection-background-color:rgba(139,92,246,0.30);outline:none;}
 QSpinBox::up-button,QSpinBox::down-button{width:0;border:none;}
-#primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #8b5cf6,stop:1 #7a4ae6);
+#primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 @{ac},stop:1 #7a4ae6);
   color:#fff;border:none;border-radius:10px;min-height:38px;padding:0 22px;font-weight:700;}
-#primaryBtn:hover{background:#9B72F8;}
-#ghostBtn{background:#1a1822;color:#f3f1f8;border:1px solid rgba(255,255,255,0.07);
+#primaryBtn:hover{background:@{acH};}
+#ghostBtn{background:@{s2};color:@{tp};border:1px solid @{bSub};
   border-radius:10px;min-height:34px;padding:0 16px;}
 #ghostBtn:hover{background:rgba(255,255,255,0.05);}
-#dangerBtn{background:transparent;color:#E26A63;border:1px solid rgba(226,106,99,0.4);
+#dangerBtn{background:transparent;color:@{danger};border:1px solid rgba(226,106,99,0.4);
   border-radius:10px;min-height:34px;padding:0 16px;}
 #dangerBtn:hover{background:rgba(226,106,99,0.12);}
-#statusOk{color:#46B98A;font-size:12px;}
-#pill{background:rgba(139,92,246,0.14);color:#BBA4FF;border-radius:10px;padding:3px 10px;font-size:12px;font-weight:700;}
+#statusOk{color:@{ok};font-size:12px;}
+#pill{background:@{ac14};color:@{acT};border-radius:10px;padding:3px 10px;font-size:12px;font-weight:700;}
 QScrollArea{background:transparent;border:none;}
 QScrollBar:vertical{background:transparent;width:8px;margin:2px;}
-QScrollBar::handle:vertical{background:rgba(255,255,255,0.12);border-radius:4px;min-height:36px;}
+QScrollBar::handle:vertical{background:@{bStr};border-radius:4px;min-height:36px;}
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
 /* ── Xipher Pulse ── */
-#pulseChip{background:rgba(139,92,246,0.22);border:1px solid rgba(139,92,246,0.34);
-  border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:#F3F1F8;}
-#pulseChipGhost{background:#100F15;border:1px solid rgba(255,255,255,0.10);
-  border-radius:10px;padding:4px 11px;font-size:12px;color:#ACA6BD;}
+#pulseChip{background:@{ac22};border:1px solid @{ac34};
+  border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:@{tp};}
+#pulseChipGhost{background:@{inset};border:1px solid rgba(255,255,255,0.10);
+  border-radius:10px;padding:4px 11px;font-size:12px;color:@{ts};}
 #pulseChipWait{background:rgba(217,160,91,0.14);border:1px solid #D9A05B;
-  border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:#F3F1F8;}
+  border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:@{tp};}
 #pulseCta{border:none;border-radius:14px;color:#fff;font-size:19px;font-weight:700;
-  background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #7A4AE6,stop:1 #6D28D9);}
+  background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #7A4AE6,stop:1 @{acD});}
 #pulseCta:hover{filter:brightness(1.06);}
-#pulseCta:disabled{background:#2B2737;color:#726C82;}
-#pulseCtaGhost{background:transparent;border:1px solid rgba(255,255,255,0.16);
-  border-radius:14px;color:#ACA6BD;font-size:15px;padding:0 22px;}
-#pulseCtaGhost:hover{border-color:#E26A63;color:#E26A63;}
-#pulseMeter{background:#100F15;border:1px solid rgba(255,255,255,0.055);border-radius:14px;}
-#pulseMeterAccent{background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.34);border-radius:14px;}
-#pulsePerk{background:#131218;border:1px solid rgba(255,255,255,0.055);border-radius:16px;}
-#pulsePerk:hover{border-color:rgba(139,92,246,0.34);}
-#themeTile{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:14px;padding:4px;}
+#pulseCta:disabled{background:@{s4};color:@{tt};}
+#pulseCtaGhost{background:transparent;border:1px solid @{bStr};
+  border-radius:14px;color:@{ts};font-size:15px;padding:0 22px;}
+#pulseCtaGhost:hover{border-color:@{danger};color:@{danger};}
+#pulseMeter{background:@{inset};border:1px solid @{bSub};border-radius:14px;}
+#pulseMeterAccent{background:@{ac14};border:1px solid @{ac34};border-radius:14px;}
+#pulsePerk{background:@{s1};border:1px solid @{bSub};border-radius:16px;}
+#pulsePerk:hover{border-color:@{ac34};}
+#themeTile{background:@{s1};border:1px solid rgba(255,255,255,0.10);border-radius:14px;padding:4px;}
 #themeTile:hover{border-color:rgba(139,92,246,0.4);}
-#themeTile:disabled{background:#100F15;}
-)QSS"));
+#themeTile:disabled{background:@{inset};}
+)QSS")));
 
     buildChrome();
 
@@ -580,8 +580,8 @@ QWidget* SettingsDialog::buildAccountPage() {
         auto* ic = new QLabel(emoji, t);
         ic->setFixedSize(34, 34);
         ic->setAlignment(Qt::AlignCenter);
-        ic->setStyleSheet(QStringLiteral(
-            "background:rgba(139,92,246,0.14);border-radius:10px;font-size:16px;"));
+        ic->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+            "background:@{ac14};border-radius:10px;font-size:16px;")));
         tl->addWidget(ic);
         auto* col = new QVBoxLayout();
         col->setSpacing(1);
@@ -654,7 +654,7 @@ QWidget* SettingsDialog::buildAccountPage() {
         status->setText(QStringLiteral("Сохраняем…"));
     });
     connect(api_, &ApiClient::profileUpdated, this, [status](bool ok, const QString& m) {
-        status->setStyleSheet(ok ? QString() : QStringLiteral("color:#E26A63;font-size:12px;"));
+        status->setStyleSheet(ThemePreset::applyTokens(ok ? QString() : QStringLiteral("color:@{danger};font-size:12px;")));
         status->setText(ok ? QStringLiteral("Сохранено ✓")
                            : (QStringLiteral("Ошибка: ") + m));
     });
@@ -910,7 +910,7 @@ QWidget* SettingsDialog::buildPrivacyPage() {
         status->setText(QStringLiteral("Сохраняем…"));
     });
     connect(api_, &ApiClient::privacyUpdated, this, [status](bool ok){
-        status->setStyleSheet(ok ? QString() : QStringLiteral("color:#E26A63;font-size:12px;"));
+        status->setStyleSheet(ThemePreset::applyTokens(ok ? QString() : QStringLiteral("color:@{danger};font-size:12px;")));
         status->setText(ok ? QStringLiteral("Сохранено ✓") : QStringLiteral("Ошибка сохранения"));
     });
     // подтянуть текущие значения из профиля
@@ -1059,10 +1059,10 @@ QWidget* SettingsDialog::buildSessionsPage() {
             auto* h = new QHBoxLayout(row);
             h->setContentsMargins(2, 8, 2, 8);
             h->setSpacing(10);
-            auto* info = new QLabel(QStringLiteral("<b>%1</b><br><span style='color:#726C82;font-size:11px;'>%2</span>")
+            auto* info = new QLabel(QStringLiteral("<b>%1</b><br><span style='color:@{tt};font-size:11px;'>%2</span>")
                                     .arg(dev.toHtmlEscaped(), si.lastSeen.left(16).toHtmlEscaped()));
             info->setTextFormat(Qt::RichText);
-            info->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:13px;"));
+            info->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tp};font-size:13px;")));
             h->addWidget(info, 1);
             if (si.current) {
                 currentSessionBox_->addWidget(row);
@@ -1115,7 +1115,7 @@ QWidget* SettingsDialog::buildBlockedPage() {
             auto* h = new QHBoxLayout(row); h->setContentsMargins(0,0,0,0);
             auto* nm = new QLabel(o.value(QStringLiteral("name")).toString(
                 o.value(QStringLiteral("username")).toString(QStringLiteral("Пользователь"))));
-            nm->setStyleSheet(QStringLiteral("color:#CFC9DC;font-size:13px;"));
+            nm->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{ts};font-size:13px;")));
             h->addWidget(nm, 1);
             b->addWidget(row);
         }
@@ -1170,7 +1170,7 @@ QWidget* SettingsDialog::buildEmailPage() {
         status->setText(QStringLiteral("Сохраняем…"));
     });
     connect(api_, &ApiClient::recoveryEmailSaved, this, [status](bool ok, const QString& m){
-        status->setStyleSheet(ok ? QString() : QStringLiteral("color:#E5687A;font-size:12px;"));
+        status->setStyleSheet(ThemePreset::applyTokens(ok ? QString() : QStringLiteral("color:@{danger};font-size:12px;")));
         status->setText(ok ? QStringLiteral("Сохранено ✓") : (QStringLiteral("Ошибка: ") + m));
     });
     connect(api_, &ApiClient::recoveryEmailLoaded, this, [this](const QString& e){ if (email_) email_->setText(e); });
@@ -1276,25 +1276,25 @@ QWidget* SettingsDialog::buildAppearancePage() {
             auto* sw = new QLabel(tile);
             sw->setFixedSize(26, 26);
             sw->setAlignment(Qt::AlignCenter);
-            sw->setStyleSheet(QStringLiteral(
-                "background:%1;border:1px solid rgba(255,255,255,0.18);border-radius:7px;")
-                .arg(c.name()));
+            sw->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+                "background:%1;border:1px solid @{hovW2};border-radius:7px;")
+                .arg(c.name())));
             swRow->addWidget(sw);
         }
         swRow->addStretch();
         if (t.id == currentId) {
             auto* chk = new QLabel(QStringLiteral("✓"), tile);
-            chk->setStyleSheet(QStringLiteral("color:#46B98A;font-size:16px;font-weight:700;"));
+            chk->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{ok};font-size:16px;font-weight:700;")));
             swRow->addWidget(chk);
         }
         tv->addLayout(swRow);
         auto* nm = new QLabel(t.name, tile);
-        nm->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:13px;font-weight:600;"));
+        nm->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tp};font-size:13px;font-weight:600;")));
         tv->addWidget(nm);
         if (!t.available) {
             tile->setToolTip(QStringLiteral("Скоро"));
             nm->setText(t.name + QStringLiteral("  ·  скоро"));
-            nm->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+            nm->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tt};font-size:12px;")));
         }
         const QString id = t.id;
         connect(tile, &QPushButton::clicked, this, [this, id]() {
@@ -1465,14 +1465,14 @@ public:
             "color:%1;font-size:10px;font-weight:700;letter-spacing:1px;").arg(tagColor));
         v->addWidget(tagL);
         auto* priceL = new QLabel(price, this);
-        priceL->setStyleSheet(QStringLiteral("font-size:24px;font-weight:800;color:#F3F1F8;"));
+        priceL->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("font-size:24px;font-weight:800;color:@{tp};")));
         v->addWidget(priceL);
         auto* periodL = new QLabel(period, this);
-        periodL->setStyleSheet(QStringLiteral("font-size:13px;color:#ACA6BD;"));
+        periodL->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("font-size:13px;color:@{ts};")));
         v->addWidget(periodL);
         auto* noteL = new QLabel(note, this);
         noteL->setWordWrap(true);
-        noteL->setStyleSheet(QStringLiteral("font-size:12px;color:#ACA6BD;"));
+        noteL->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("font-size:12px;color:@{ts};")));
         v->addWidget(noteL);
         connect(this, &QPushButton::toggled, this, [this](bool) { update(); });
     }
@@ -1528,8 +1528,8 @@ QWidget* SettingsDialog::buildPremiumPage() {
     auto* mark = new QLabel(hero);
     mark->setFixedSize(60, 34);
     mark->setAlignment(Qt::AlignCenter);
-    mark->setStyleSheet(QStringLiteral(
-        "background:rgba(139,92,246,0.14);border:1px solid rgba(139,92,246,0.34);border-radius:12px;"));
+    mark->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
+        "background:@{ac14};border:1px solid @{ac34};border-radius:12px;")));
     {
         const QColor c = QColor(th.accent).lighter(125);
         QPixmap pm(80, 44);
@@ -1549,12 +1549,12 @@ QWidget* SettingsDialog::buildPremiumPage() {
     hv->addWidget(mark);
 
     auto* title = new QLabel(QStringLiteral("Xipher Pulse"), hero);
-    title->setStyleSheet(QStringLiteral("font-size:30px;font-weight:800;color:#F3F1F8;letter-spacing:-0.4px;"));
+    title->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("font-size:30px;font-weight:800;color:@{tp};letter-spacing:-0.4px;")));
     hv->addWidget(title);
     auto* sub = new QLabel(QStringLiteral(
         "Мессенджер, который держит ваш ритм: больше папок, чище звонки, свои боты."), hero);
     sub->setWordWrap(true);
-    sub->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:14px;"));
+    sub->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{ts};font-size:14px;")));
     hv->addWidget(sub);
 
     auto* chips = new QHBoxLayout();
@@ -1577,10 +1577,10 @@ QWidget* SettingsDialog::buildPremiumPage() {
         const auto th = ThemePreset::current();
         const bool act = Session::instance().isPremium;
         statusChip_->setText(act ? QStringLiteral("Pulse активен") : QStringLiteral("Бесплатный план"));
-        statusChip_->setStyleSheet(QStringLiteral(
+        statusChip_->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
             "background:rgba(%1,%2,%3,0.22);border:1px solid rgba(%1,%2,%3,0.34);"
-            "border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:#F3F1F8;")
-            .arg(th.accent.red()).arg(th.accent.green()).arg(th.accent.blue()));
+            "border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:@{tp};")
+            .arg(th.accent.red()).arg(th.accent.green()).arg(th.accent.blue())));
         const QString exp = Session::instance().premiumExpiresAt;
         if (act && !exp.isEmpty()) {
             expiryChip_->setText(QStringLiteral("До ") + exp.left(10));
@@ -1596,7 +1596,7 @@ QWidget* SettingsDialog::buildPremiumPage() {
     auto* planTrial = new PulsePlanButton(QStringLiteral("Попробовать"), th.accent.name(),
         QStringLiteral("9 ₽"), QStringLiteral("за 7 дней"),
         QStringLiteral("Все возможности на неделю"), page);
-    auto* planYear  = new PulsePlanButton(QStringLiteral("Выгодно · −58%"), QStringLiteral("#46B98A"),
+    auto* planYear  = new PulsePlanButton(QStringLiteral("Выгодно · −58%"), QStringLiteral("@{ok}"),
         QStringLiteral("499 ₽"), QStringLiteral("за год"),
         QStringLiteral("42 ₽ в месяц"), page);
     auto* planMonth = new PulsePlanButton(QStringLiteral("Гибко"), th.accent.name(),
@@ -1643,7 +1643,7 @@ QWidget* SettingsDialog::buildPremiumPage() {
         "Оплата на защищённой странице провайдера. Подписка не продлевается "
         "автоматически — вы продлеваете её сами."), page);
     fine->setWordWrap(true);
-    fine->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:12px;"));
+    fine->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{ts};font-size:12px;")));
     v->addWidget(fine);
 
     // ── Счётчики папок (реальные: лимит 3/20, использовано из сервера) ──
@@ -1658,10 +1658,10 @@ QWidget* SettingsDialog::buildPremiumPage() {
         mv->setSpacing(1);
         auto* val = new QLabel(QStringLiteral("0"), m);
         val->setAlignment(Qt::AlignCenter);
-        val->setStyleSheet(QStringLiteral("font-size:22px;font-weight:800;color:#F3F1F8;"));
+        val->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("font-size:22px;font-weight:800;color:@{tp};")));
         auto* lab = new QLabel(label, m);
         lab->setAlignment(Qt::AlignCenter);
-        lab->setStyleSheet(QStringLiteral("font-size:12px;color:#ACA6BD;"));
+        lab->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("font-size:12px;color:@{ts};")));
         mv->addWidget(val);
         mv->addWidget(lab);
         if (label == QStringLiteral("Лимит папок")) meterLimit_ = val;
@@ -1711,11 +1711,11 @@ QWidget* SettingsDialog::buildPremiumPage() {
         ic->setPixmap(pulsePerkIcon(perks[i].icon, th));
         pv->addWidget(ic);
         auto* h3 = new QLabel(perks[i].title, perk);
-        h3->setStyleSheet(QStringLiteral("font-size:15px;font-weight:700;color:#F3F1F8;"));
+        h3->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("font-size:15px;font-weight:700;color:@{tp};")));
         pv->addWidget(h3);
         auto* txt = new QLabel(perks[i].text, perk);
         txt->setWordWrap(true);
-        txt->setStyleSheet(QStringLiteral("font-size:13px;color:#ACA6BD;"));
+        txt->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("font-size:13px;color:@{ts};")));
         pv->addWidget(txt);
         perksGrid->addWidget(perk, i / 2, i % 2);
     }
@@ -1806,9 +1806,9 @@ void SettingsDialog::refreshPulseMeters() {
 void SettingsDialog::showPulsePending() {
     if (!paymentChip_) return;
     paymentChip_->setText(QStringLiteral("●  Ожидание оплаты"));
-    paymentChip_->setStyleSheet(QStringLiteral(
+    paymentChip_->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
         "#pulseChipWait{background:rgba(217,160,91,0.14);border:1px solid #D9A05B;"
-        "border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:#F3F1F8;}"));
+        "border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:@{tp};}")));
     paymentChip_->show();
     if (blinkTimer_) return;
     blinkTimer_ = new QTimer(this);
@@ -1847,7 +1847,7 @@ void SettingsDialog::openPulsePayment() {
     vl->setContentsMargins(20, 18, 20, 18);
     vl->setSpacing(12);
     auto* t = new QLabel(QStringLiteral("Оплата Xipher Pulse"));
-    t->setStyleSheet(QStringLiteral("font-size:17px;font-weight:800;color:#F3F1F8;"));
+    t->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("font-size:17px;font-weight:800;color:@{tp};")));
     vl->addWidget(t);
     vl->addWidget(settingsNote(QStringLiteral("План: ") + (planSel_ == QLatin1String("year")
         ? QStringLiteral("год · 499 ₽") : planSel_ == QLatin1String("trial")
@@ -1885,7 +1885,7 @@ QWidget* SettingsDialog::buildAboutPage() {
     QVBoxLayout* fb = nullptr;
     auto* faq = sectionCard(QStringLiteral("FAQ"), fb);
     auto addQA = [&](const QString& q, const QString& a) {
-        auto* qq = new QLabel(q); qq->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:13px;font-weight:700;"));
+        auto* qq = new QLabel(q); qq->setStyleSheet(ThemePreset::applyTokens(QStringLiteral("color:@{tp};font-size:13px;font-weight:700;")));
         auto* aa = new QLabel(a); aa->setObjectName(QStringLiteral("hint")); aa->setWordWrap(true);
         fb->addWidget(qq); fb->addWidget(aa);
     };
