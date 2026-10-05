@@ -1369,6 +1369,7 @@ void ChatPage::buildUi() {
     // Страница 0 — обычный ввод, всё внутри одной пилюли (как .tg-input-bar):
     // [⏱][📎][текст][😀][🎤/➤]
     auto* normal = new QWidget();
+    inputBar_ = normal;
     normal->setObjectName(QStringLiteral("tgInputBar"));
     auto* cbl = new QHBoxLayout(normal);
     cbl->setContentsMargins(8, 4, 4, 4);
@@ -1732,6 +1733,9 @@ void ChatPage::buildUi() {
     connect(recorder_, &VoiceRecorder::inputLevel, recBar_, &RecordingBar::pushLevel);
     connect(recBar_, &RecordingBar::cancelClicked, this, &ChatPage::cancelRecording);
     connect(recBar_, &RecordingBar::sendClicked, this, &ChatPage::stopAndSendVoice);
+    // Фокус-обводка пилюли (аналог :focus-within): динамическое свойство
+    // #tgInputBar[focused=true] в chatQSS; события — через eventFilter.
+    composer_->installEventFilter(this);
     connect(emojiBtn_, &QPushButton::clicked, this, &ChatPage::onEmojiClicked);
     connect(attachBtn_, &QPushButton::clicked, this, &ChatPage::onAttachClicked);
     connect(timerBtn_, &QPushButton::clicked, this, &ChatPage::onTimerClicked);
@@ -3158,6 +3162,13 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
         emojiPicker_->hide();
         return true;
     }
+    // Фокус композера → обводка пилюли (#tgInputBar[focused=true]).
+    if (obj == composer_ && (e->type() == QEvent::FocusIn
+                             || e->type() == QEvent::FocusOut) && inputBar_) {
+        inputBar_->setProperty("focused", e->type() == QEvent::FocusIn);
+        inputBar_->style()->unpolish(inputBar_);
+        inputBar_->style()->polish(inputBar_);
+    }
     if (obj == appMenuScrim_ && e->type() == QEvent::MouseButtonPress) {
         closeAppMenu();
         return true;
@@ -4127,14 +4138,17 @@ void ChatPage::addReactionChips(QWidget* bubble, QVBoxLayout* bl, const ChatMess
         chip->setCursor(Qt::PointingHandCursor);
         chip->setText(QStringLiteral("%1  %2").arg(r.emoji).arg(r.count));
         chip->setProperty("mine", r.mine);
-        chip->setStyleSheet(QStringLiteral(
-            "QPushButton{border:1px solid %1;background:%2;border-radius:11px;"
-            "padding:2px 10px;color:%3;font-size:13px;}"
-            "QPushButton:hover{background:%4;}")
-            .arg(r.mine ? QStringLiteral("#8B5CF6") : QStringLiteral("rgba(255,255,255,0.10)"),
-                 r.mine ? QStringLiteral("rgba(139,92,246,0.22)") : QStringLiteral("#221F2C"),
-                 QStringLiteral("#F3F1F8"),
-                 r.mine ? QStringLiteral("rgba(139,92,246,0.34)") : QStringLiteral("#2B2737")));
+        {
+            const auto th = ThemePreset::current();
+            chip->setStyleSheet(QStringLiteral(
+                "QPushButton{border:1px solid %1;background:%2;border-radius:11px;"
+                "padding:2px 10px;color:%3;font-size:13px;}"
+                "QPushButton:hover{background:%4;}")
+                .arg(r.mine ? th.accentRgba(0.34) : th.rgba(th.borderDefault, 1.0),
+                     r.mine ? th.accentRgba(0.22) : th.surface3.name(),
+                     th.textPrimary.name(),
+                     r.mine ? th.accentRgba(0.34) : th.surface4.name()));
+        }
         const QString emoji = r.emoji;
         connect(chip, &QPushButton::clicked, this, [this, mid, emoji]() {
             toggleReaction(mid, emoji);
@@ -4875,6 +4889,7 @@ static QString chatQSS() {
 /* ─── Композер: пилюля surface-2 ─── */
 #composerBar { background:@{s1}; border-top:1px solid @{bSub}; }
 #tgInputBar { background:@{s2}; border:1px solid @{bSub}; border-radius:22px; }
+#tgInputBar[focused="true"] { border:1px solid @{aBord}; }
 #composer { background:transparent; border:none; color:@{tp}; font-size:15px; padding:0 4px; }
 #composer QScrollBar:vertical { background:transparent; width:7px; margin:4px 2px; }
 #composer QScrollBar::handle:vertical { background:@{scrolH}; border-radius:3px; }
@@ -4965,6 +4980,9 @@ QMenu::separator { height:1px; background:@{bSub}; margin:6px 8px; }
 
 void ChatPage::applyTheme() {
     setStyleSheet(chatQSS());
+    // Эмодзи-панель несёт цвета старой темы — пересоздастся при следующем
+    // открытии.
+    if (emojiPicker_) { emojiPicker_->deleteLater(); emojiPicker_ = nullptr; }
 
     // Инлайн-фоны сообщений/пустой страницы/тем форума.
     const auto th = ThemePreset::current();

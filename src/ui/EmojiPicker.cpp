@@ -4,6 +4,7 @@
 #include "ui/Icons.h"
 #include "net/ApiClient.h"
 #include "net/Prefs.h"
+#include "ui/Theme.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -90,30 +91,37 @@ EmojiPicker::EmojiPicker(QWidget* parent) : QFrame(parent) {
     // Не Qt::Popup: панель — часть страницы у композера (как .tg-emoji-panel
     // веба), остаётся открытой при вводе текста и не крадёт фокус.
     setObjectName(QStringLiteral("emojiPicker"));
+    const auto thT = ThemePreset::current();
     setStyleSheet(QStringLiteral(R"QSS(
-#emojiPicker { background:#1A1822; border:1px solid rgba(255,255,255,0.10); border-radius:12px; }
-QLineEdit { background:#131218; border:1px solid rgba(255,255,255,0.10); border-radius:14px;
-  min-height:28px; max-width:150px; padding:0 10px; color:#F3F1F8; font-size:12px; }
-QLineEdit:focus { border:1px solid #8B5CF6; max-width:180px; }
-QPushButton.tab { border:none; background:transparent; color:#ACA6BD; font-size:12px;
+#emojiPicker { background:%1; border:1px solid %2; border-radius:16px; }
+QLineEdit { background:%3; border:1px solid %2; border-radius:14px;
+  min-height:28px; max-width:150px; padding:0 10px; color:%4; font-size:12px; }
+QLineEdit:focus { border:1px solid %5; max-width:180px; }
+QPushButton.tab { border:none; background:transparent; color:%6; font-size:12px;
   font-weight:600; padding:0 12px; border-radius:6px; }
-QPushButton.tab:hover { color:#F3F1F8; }
-QPushButton.tab:checked { color:#8B5CF6; }
+QPushButton.tab:hover { color:%4; }
+QPushButton.tab:checked { color:%5; }
 QPushButton.cat {
     border:none; background:transparent; font-size:17px; padding:4px; border-radius:8px;
     font-family:"Segoe UI Emoji","Noto Color Emoji",sans-serif;
 }
-QPushButton.cat:hover { background:rgba(255,255,255,0.08); }
-QPushButton.cat:checked { background:rgba(139,92,246,0.22); }
-QPushButton.del { border:none; background:transparent; color:#726C82; font-size:14px;
+QPushButton.cat:hover { background:%7; }
+QPushButton.cat:checked { background:%8; }
+QPushButton.del { border:none; background:transparent; color:%9; font-size:14px;
   border-radius:8px; min-width:30px; min-height:30px; }
-QPushButton.del:hover { background:rgba(255,255,255,0.08); color:#F3F1F8; }
+QPushButton.del:hover { background:%7; color:%4; }
 QScrollArea { background:transparent; border:none; }
 QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
-QScrollBar::handle:vertical { background:rgba(255,255,255,0.14); border-radius:4px; min-height:30px; }
+QScrollBar::handle:vertical { background:%10; border-radius:4px; min-height:30px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
 QLabel { background:transparent; }
-)QSS"));
+)QSS")
+        .arg(thT.surface2.name(), thT.rgba(thT.borderDefault, 1.0),
+             thT.surface1.name(), thT.textPrimary.name(), thT.accent.name(),
+             thT.textSecondary.name(),
+             thT.rgba(QColor(255, 255, 255), thT.isLight ? 0.45 : 0.08),
+             thT.accentRgba(0.22), thT.textTertiary.name(),
+             thT.rgba(QColor(255, 255, 255), thT.isLight ? 0.30 : 0.14)));
 
     buildCategories();
     loadRecents();
@@ -126,8 +134,9 @@ QLabel { background:transparent; }
     auto* tabs = new QWidget(this);
     tabs->setFixedHeight(42);
     tabs->setStyleSheet(QStringLiteral(
-        "background:#16161E; border-bottom:1px solid rgba(255,255,255,0.06);"
-        "border-top-left-radius:12px; border-top-right-radius:12px;"));
+        "background:%1; border-bottom:1px solid %2;"
+        "border-top-left-radius:15px; border-top-right-radius:15px;")
+        .arg(thT.surfaceInset.name(), thT.rgba(thT.borderSubtle, 1.0)));
     tabs->setAttribute(Qt::WA_StyledBackground, true);
     auto* tl = new QHBoxLayout(tabs);
     tl->setContentsMargins(6, 0, 6, 0);

@@ -204,8 +204,8 @@ int main(int argc, char** argv) {
                     return c->styleSheet();
             return QString();
         }();
-        check(chipQss.contains(QStringLiteral("#8B5CF6")),
-              QStringLiteral("своя реакция — фиолетовая рамка"));
+        check(chipQss.contains(QStringLiteral("rgba(139,92,246")),
+              QStringLiteral("своя реакция — фиолетовая рамка (accent-rgba)"));
     }
     {
         bool editedMark = false;

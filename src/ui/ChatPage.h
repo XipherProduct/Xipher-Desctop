@@ -337,6 +337,7 @@ private:
     bool         programmaticScroll_ = false;   // служебная прокрутка (не пользователь)
     QStackedWidget* composerStack_ = nullptr;  // 0 — ввод, 1 — запись
     QWidget*      composerBar_ = nullptr;      // для привязки эмодзи-панели справа
+    QWidget*      inputBar_   = nullptr;      // пилюля ввода (фокус-обводка)
     QWidget*      botKeyboardBar_ = nullptr;   // reply-клавиатура бота (над вводом)
     QVBoxLayout*  botKeyboardLayout_ = nullptr;
     QJsonObject   currentReplyKeyboard_;       // активная reply-клавиатура бота
