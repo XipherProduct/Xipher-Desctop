@@ -2658,7 +2658,10 @@ void ChatPage::createTopicDialog() {
 static QWidget* buildContactRow(const QString& url, const QString& avatarText,
                                 const QString& title, const QString& subtitle,
                                 const QString& time, int unread, bool pinned = false,
-                                int streamerIdx = 0) {
+                                int streamerIdx = 0, bool muted = false) {
+    // Цвета — из активной темы (tokens.css), не хардкод: строка живёт во всех
+    // восьми пресетах, включая светлую и мокко.
+    const auto th = ThemePreset::current();
     auto* row = new QWidget();
     row->setStyleSheet(QStringLiteral("background:transparent;"));
     auto* rl = new QHBoxLayout(row);
@@ -2679,37 +2682,49 @@ static QWidget* buildContactRow(const QString& url, const QString& avatarText,
     auto* topRow = new QHBoxLayout();
     topRow->setSpacing(6);
     auto* name = new QLabel(row);
-    name->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:15px;font-weight:600;"));
+    name->setStyleSheet(QStringLiteral("color:%1;font-size:15px;font-weight:600;")
+                            .arg(th.textPrimary.name()));
     name->setText(elide(streamerIdx > 0 ? streamerSafeName(title, streamerIdx, false) : title,
                         name->font(), 200));
     topRow->addWidget(name);
     topRow->addStretch();
+    if (muted) {
+        // Mute-иконка у времени (как 🔇 в TG Desktop).
+        auto* muteIco = new QLabel(QStringLiteral("🔇"), row);
+        muteIco->setStyleSheet(QStringLiteral("font-size:12px;"));
+        topRow->addWidget(muteIco);
+    }
     if (pinned) {
         // Индикатор закрепления (как .chat-pin-indicator веба): 📌 у времени.
         auto* pinIco = new QLabel(QStringLiteral("📌"), row);
-        pinIco->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+        pinIco->setStyleSheet(QStringLiteral("font-size:12px;"));
         topRow->addWidget(pinIco);
     }
     if (!time.isEmpty()) {
         auto* t = new QLabel(time, row);
-        t->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+        t->setStyleSheet(QStringLiteral("color:%1;font-size:12px;")
+                            .arg(th.textTertiary.name()));
         topRow->addWidget(t);
     }
 
     auto* botRow = new QHBoxLayout();
     botRow->setSpacing(6);
     auto* last = new QLabel(row);
-    last->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:14px;"));
+    last->setStyleSheet(QStringLiteral("color:%1;font-size:13px;")
+                            .arg(th.textSecondary.name()));
     last->setText(elide(subtitle, last->font(), 210));
     botRow->addWidget(last);
     botRow->addStretch();
     if (unread > 0) {
-        // Бейдж 1:1 с .chat-unread: accent, r12, min-width 20.
+        // Бейдж 1:1 с .chat-unread: accent, r12, min-width 20; у беззвучных —
+        // приглушённый (TG: muted-чаты не кричат цифрой).
         auto* badge = new QLabel(QString::number(unread), row);
         badge->setAlignment(Qt::AlignCenter);
         badge->setStyleSheet(QStringLiteral(
-            "background:#8B5CF6;color:#fff;font-size:12px;font-weight:600;"
-            "border-radius:12px;min-width:20px;padding:2px 8px;"));
+            "background:%1;color:%2;font-size:12px;font-weight:600;"
+            "border-radius:12px;min-width:20px;padding:2px 8px;")
+            .arg(muted ? th.textTertiary.name() : th.accent.name(),
+                 QStringLiteral("#fff")));
         botRow->addWidget(badge);
     }
     mid->addLayout(topRow);
@@ -2756,9 +2771,12 @@ void ChatPage::rebuildChatList() {
                                   : (c.avatarText.isEmpty() ? c.displayName : c.avatarText);
         const QString time = c.time == QStringLiteral("Нет сообщений") ? QString() : c.time;
         const int sIdx = streamerModeOn() && !c.isSaved ? ++streamerCounter : 0;
+        const bool rowMuted = !c.isSaved
+            && Prefs::getStr(QStringLiteral("xipher_muted_chats"))
+                   .contains(QStringLiteral("chat:") + c.id + QStringLiteral(","));
         auto* row = buildContactRow(c.isSaved ? QString() : c.avatarUrl,
                                     avatarText, c.displayName, chatPreview(c.lastMessage), time,
-                                    c.unread, pinnedChats_.contains(chatKeyFor(c)), sIdx);
+                                    c.unread, pinnedChats_.contains(chatKeyFor(c)), sIdx, rowMuted);
 
         auto* item = new QListWidgetItem(chatList_);
         item->setSizeHint(QSize(0, 72));
@@ -2786,12 +2804,14 @@ void ChatPage::rebuildChatList() {
             auto* hl = new QHBoxLayout(head);
             hl->setContentsMargins(16, 8, 16, 8);
             hl->setSpacing(8);
+            const auto thT = ThemePreset::current();
             auto* arrow = new QLabel(archiveOpen_ ? QStringLiteral("▾") : QStringLiteral("▸"), head);
-            arrow->setStyleSheet(QStringLiteral("color:#726C82;font-size:12px;"));
+            arrow->setStyleSheet(QStringLiteral("color:%1;font-size:12px;").arg(thT.textTertiary.name()));
             auto* title = new QLabel(
                 QStringLiteral("Архив (%1)").arg(archived.size()), head);
-            title->setStyleSheet(QStringLiteral("color:#ACA6BD;font-size:13px;"
-                                                "font-weight:700;text-transform:uppercase;"));
+            title->setStyleSheet(QStringLiteral("color:%1;font-size:13px;"
+                                                "font-weight:700;text-transform:uppercase;")
+                                     .arg(thT.textSecondary.name()));
             hl->addWidget(arrow);
             hl->addWidget(title);
             hl->addStretch();
@@ -2833,8 +2853,9 @@ void ChatPage::rebuildChatList() {
                 h->setFlags(Qt::NoItemFlags);
                 h->setSizeHint(QSize(0, 28));
                 auto* hl = new QLabel(QStringLiteral("  Люди"));
-                hl->setStyleSheet(QStringLiteral("color:#726C82;font-size:11px;font-weight:700;"
-                                                 "text-transform:uppercase;padding:6px 4px;"));
+                hl->setStyleSheet(QStringLiteral("color:%1;font-size:11px;font-weight:700;"
+                                                 "text-transform:uppercase;padding:6px 4px;")
+                                      .arg(ThemePreset::current().textTertiary.name()));
                 chatList_->addItem(h);
                 chatList_->setItemWidget(h, hl);
                 headerAdded = true;
@@ -2863,8 +2884,9 @@ void ChatPage::rebuildChatList() {
                 h->setFlags(Qt::NoItemFlags);
                 h->setSizeHint(QSize(0, 28));
                 auto* hl = new QLabel(QStringLiteral("  Каналы и группы"));
-                hl->setStyleSheet(QStringLiteral("color:#726C82;font-size:11px;font-weight:700;"
-                                                 "text-transform:uppercase;padding:6px 4px;"));
+                hl->setStyleSheet(QStringLiteral("color:%1;font-size:11px;font-weight:700;"
+                                                 "text-transform:uppercase;padding:6px 4px;")
+                                      .arg(ThemePreset::current().textTertiary.name()));
                 chatList_->addItem(h);
                 chatList_->setItemWidget(h, hl);
                 headerAdded = true;
