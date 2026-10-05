@@ -24,10 +24,12 @@ if(PkgConfig_FOUND)
 endif()
 if(RNNOISE_FOUND)
     message(STATUS "Xipher: rnnoise ${RNNOISE_VERSION} — шумоподавление вкл")
-    add_compile_definitions(XIPHER_RNNOISE=1 XIPHER_VERSION="${PROJECT_VERSION}")
+    add_compile_definitions(XIPHER_RNNOISE=1)
 else()
     message(STATUS "Xipher: rnnoise НЕ найден — шумоподавление выключено")
 endif()
+
+add_compile_definitions(XIPHER_VERSION="${PROJECT_VERSION}")
 
 set(SOURCES
     src/main.cpp
