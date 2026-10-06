@@ -28,7 +28,7 @@ ChecklistWidget::ChecklistWidget(const QJsonObject& payload, bool outgoing, bool
         .arg(outgoing_ ? QStringLiteral("#F0ECFA") : QStringLiteral("#F3F1F8")));
     progress_ = new QLabel(this);
     progress_->setStyleSheet(QString("font-size:12px;color:%1;")
-        .arg(outgoing_ ? QStringLiteral("rgba(240,236,250,0.7)") : QStringLiteral("#ACA6BD")));
+        .arg(outgoing_ ? QStringLiteral("rgba(240,236,250,70%)") : QStringLiteral("#ACA6BD")));
     head->addWidget(title);
     head->addStretch();
     head->addWidget(progress_);
@@ -63,7 +63,7 @@ void ChecklistWidget::rebuild() {
         cb->setStyleSheet(QString(
             "QCheckBox{font-size:14px;color:%1;spacing:8px;}"
             "QCheckBox::indicator{width:18px;height:18px;border-radius:6px;"
-            "border:2px solid rgba(255,255,255,0.35);background:transparent;}"
+            "border:2px solid rgba(255,255,255,35%);background:transparent;}"
             "QCheckBox::indicator:checked{background:#8B5CF6;border-color:#8B5CF6;}")
             .arg(textColor));
         boxes_.insert(id, cb);
@@ -130,18 +130,18 @@ ChecklistEditor::ChecklistEditor(QWidget* parent) : QWidget(parent) {
     setStyleSheet(QStringLiteral(R"QSS(
 QLabel { color:#F3F1F8; }
 #title { font-size:18px;font-weight:800; }
-QLineEdit { background:#1A1822;border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+QLineEdit { background:#1A1822;border:1px solid rgba(255,255,255,10%);border-radius:10px;
             min-height:38px;padding:0 12px;color:#F3F1F8;font-size:14px; }
 QLineEdit:focus { border:1px solid #8B5CF6; }
 QCheckBox { color:#ACA6BD;font-size:13px;spacing:8px; }
-QCheckBox::indicator{width:16px;height:16px;border-radius:5px;border:2px solid rgba(255,255,255,0.3);}
+QCheckBox::indicator{width:16px;height:16px;border-radius:5px;border:2px solid rgba(255,255,255,30%);}
 QCheckBox::indicator:checked{background:#8B5CF6;border-color:#8B5CF6;}
 QPushButton.primary{border:none;border-radius:10px;padding:9px 18px;font-weight:700;color:#fff;
   background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #8B5CF6,stop:1 #6D28D9);}
 QPushButton.primary:hover{background:#9B72F8;}
-QPushButton.ghost{border:1px solid rgba(255,255,255,0.14);border-radius:10px;padding:9px 14px;
+QPushButton.ghost{border:1px solid rgba(255,255,255,14%);border-radius:10px;padding:9px 14px;
   color:#ACA6BD;background:transparent;}
-QPushButton.add{border:1px dashed rgba(255,255,255,0.2);border-radius:10px;padding:8px;color:#ACA6BD;background:transparent;}
+QPushButton.add{border:1px dashed rgba(255,255,255,20%);border-radius:10px;padding:8px;color:#ACA6BD;background:transparent;}
 QPushButton.add:hover{color:#F3F1F8;border-color:#8B5CF6;}
 )QSS"));
 
@@ -165,7 +165,7 @@ QPushButton.add:hover{color:#F3F1F8;border-color:#8B5CF6;}
     itemsScroll_->setStyleSheet(QStringLiteral(
         "QScrollArea{border:none;background:transparent;}"
         "QScrollBar:vertical{background:transparent;width:8px;margin:2px;}"
-        "QScrollBar::handle:vertical{background:rgba(255,255,255,0.14);border-radius:4px;min-height:30px;}"
+        "QScrollBar::handle:vertical{background:rgba(255,255,255,14%);border-radius:4px;min-height:30px;}"
         "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"));
     auto* itemsHost = new QWidget();
     itemsHost->setStyleSheet(QStringLiteral("background:transparent;"));

@@ -27,17 +27,17 @@ QLabel{color:@{tp};}
   border-top-left-radius:18px;border-top-right-radius:18px;}
 #dlgTitle{font-size:17px;font-weight:800;color:#fff;}
 #closeBtn{background:@{bStr};border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
-#closeBtn:hover{background:rgba(255,255,255,0.30);}
-QLineEdit{background:@{s1};border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+#closeBtn:hover{background:rgba(255,255,255,30%);}
+QLineEdit{background:@{s1};border:1px solid rgba(255,255,255,10%);border-radius:10px;
   min-height:36px;padding:0 12px;color:@{tp};selection-background-color:@{ac};}
 QLineEdit:focus{border:1px solid @{ac};}
 #rowName{color:@{ts};font-size:13px;}
 #primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 @{ac},stop:1 @{acD});
   color:#fff;border:none;border-radius:10px;min-height:38px;padding:0 22px;font-weight:700;}
 #primaryBtn:hover{background:#9B72F8;}
-#delBtn{background:transparent;color:#E5687A;border:1px solid rgba(229,104,122,0.4);
+#delBtn{background:transparent;color:#E5687A;border:1px solid rgba(229,104,122,40%);
   border-radius:10px;min-height:36px;padding:0 16px;}
-#delBtn:hover{background:rgba(229,104,122,0.12);}
+#delBtn:hover{background:rgba(229,104,122,12%);}
 #chatRow{background:@{s2};border-radius:10px;}
 #chatRow:hover{background:@{s3};}
 QCheckBox{color:@{tp};font-size:14px;spacing:10px;}
@@ -102,8 +102,8 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
         ib->setStyleSheet(QStringLiteral(
             "QPushButton{border:1px solid %1;background:%2;border-radius:9px;"
             "font-size:16px;padding:0;}"
-            "QPushButton:hover{border:1px solid rgba(139,92,246,0.6);}")
-            .arg(sel ? QStringLiteral("rgba(139,92,246,0.9)") : QStringLiteral("transparent"))
+            "QPushButton:hover{border:1px solid rgba(139,92,246,60%);}")
+            .arg(sel ? QStringLiteral("rgba(139,92,246,90%)") : QStringLiteral("transparent"))
             .arg(sel ? QStringLiteral("@{ac14}") : QStringLiteral("transparent")));
         connect(ib, &QPushButton::clicked, this, [this, ib, key, iconGrid]() {
             folder_.icon = key;
@@ -113,11 +113,11 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
                 b->setStyleSheet(QStringLiteral(
                     "QPushButton{border:1px solid transparent;background:transparent;"
                     "border-radius:9px;font-size:16px;padding:0;}"
-                    "QPushButton:hover{border:1px solid rgba(139,92,246,0.6);}"));
+                    "QPushButton:hover{border:1px solid rgba(139,92,246,60%);}"));
             ib->setStyleSheet(QStringLiteral(
-                "QPushButton{border:1px solid rgba(139,92,246,0.9);"
+                "QPushButton{border:1px solid rgba(139,92,246,90%);"
                 "background:@{ac14};border-radius:9px;font-size:16px;padding:0;}"
-                "QPushButton:hover{border:1px solid rgba(139,92,246,0.6);}"));
+                "QPushButton:hover{border:1px solid rgba(139,92,246,60%);}"));
         });
         iconBtns.append(ib);
         igl->addWidget(ib, i / 8, i % 8);

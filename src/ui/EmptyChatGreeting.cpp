@@ -17,7 +17,7 @@ EmptyChatGreeting::EmptyChatGreeting(QWidget* parent) : QWidget(parent) {
     auto* card = new QFrame(this);
     card->setObjectName(QStringLiteral("greetCard"));
     card->setStyleSheet(QStringLiteral(
-        "#greetCard{background:rgba(26,24,34,0.9);border:1px solid rgba(255,255,255,0.07);"
+        "#greetCard{background:rgba(26,24,34,90%);border:1px solid rgba(255,255,255,7%);"
         "border-radius:18px;}"));
     card->setMaximumWidth(320);
     auto* shadow = new QGraphicsDropShadowEffect(card);

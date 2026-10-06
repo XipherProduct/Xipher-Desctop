@@ -34,7 +34,7 @@ QString blockTitle(RichBlock::Type t) {
 RichEditorDialog::RichEditorDialog(QWidget* parent)
     : ModalOverlay(parent, 560) {
     card()->setStyleSheet(QStringLiteral(R"QSS(
-#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
+#modalCard{background:#17151E;border:1px solid rgba(255,255,255,8%);border-radius:18px;}
 QLabel{color:#F3F1F8;}
 #richTitle{font-size:17px;font-weight:800;}
 #richTb{background:transparent;border:none;border-radius:9px;color:#ACA6BD;
@@ -43,7 +43,7 @@ QLabel{color:#F3F1F8;}
 #richSend{background:#8B5CF6;border:none;border-radius:10px;color:#fff;
   font-size:14px;font-weight:600;min-height:36px;padding:0 18px;}
 #richSend:hover{background:#9B72F8;}
-QPlainTextEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);
+QPlainTextEdit{background:#131218;border:1px solid rgba(255,255,255,10%);
   border-radius:10px;color:#F3F1F8;font-size:14px;padding:8px 10px;}
 QPlainTextEdit:focus{border:1px solid #8B5CF6;}
 #richBlockHead{color:#726C82;font-size:11px;font-weight:700;text-transform:uppercase;}
@@ -196,7 +196,7 @@ void RichEditorDialog::insertBlockForTest(RichBlock::Type t) {
 void RichEditorDialog::showSlashMenu(QPlainTextEdit* ed, int blockIdx) {
     QMenu menu(this);
     menu.setStyleSheet(QStringLiteral(
-        "QMenu{background:#1A1822;border:1px solid rgba(255,255,255,0.12);"
+        "QMenu{background:#1A1822;border:1px solid rgba(255,255,255,12%);"
         "border-radius:10px;color:#F3F1F8;} QMenu::item{padding:7px 16px;}"));
     const QList<QPair<QString, RichBlock::Type>> defs = {
         {QStringLiteral("Заголовок 1"), RichBlock::Type::H1},

@@ -24,7 +24,7 @@ QLabel{color:@{tp};}
 #qsTitle{font-size:17px;font-weight:800;color:#fff;}
 #qsKbd{background:@{bStr};border-radius:8px;color:#fff;font-size:12px;
   font-weight:600;padding:3px 8px;}
-QLineEdit{background:@{s1};border:1px solid rgba(255,255,255,0.10);border-radius:12px;
+QLineEdit{background:@{s1};border:1px solid rgba(255,255,255,10%);border-radius:12px;
   min-height:40px;padding:0 14px;color:@{tp};font-size:15px;
   selection-background-color:@{ac};}
 QLineEdit:focus{border:1px solid @{ac};}

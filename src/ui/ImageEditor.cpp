@@ -37,17 +37,17 @@ ImageEditorDialog::ImageEditorDialog(const QByteArray& bytes, QWidget* parent)
     setModal(true);
     setStyleSheet(QStringLiteral(
         "QDialog{background:#131218;} QLabel{color:#ACA6BD;font-size:12px;}"
-        "QToolButton{background:#1A1822;border:1px solid rgba(255,255,255,0.10);"
+        "QToolButton{background:#1A1822;border:1px solid rgba(255,255,255,10%);"
         "border-radius:9px;color:#ACA6BD;font-size:12px;padding:5px 9px;}"
         "QToolButton:hover{background:#221F2C;color:#F3F1F8;}"
-        "QToolButton:checked{background:rgba(139,92,246,0.30);color:#F3F1F8;"
-        "border-color:rgba(139,92,246,0.6);}"
-        "QComboBox,QLineEdit{background:#1A1822;border:1px solid rgba(255,255,255,0.10);"
+        "QToolButton:checked{background:rgba(139,92,246,30%);color:#F3F1F8;"
+        "border-color:rgba(139,92,246,60%);}"
+        "QComboBox,QLineEdit{background:#1A1822;border:1px solid rgba(255,255,255,10%);"
         "border-radius:9px;color:#F3F1F8;font-size:12px;padding:5px 8px;min-width:60px;}"
         "QPushButton{border-radius:9px;font-size:13px;padding:7px 14px;}"
         "#okBtn{background:#8B5CF6;color:#fff;font-weight:600;}"
         "#okBtn:hover{background:#9B72F8;}"
-        "#undoBtn,#cancelBtn{background:transparent;border:1px solid rgba(255,255,255,0.14);color:#ACA6BD;}"));
+        "#undoBtn,#cancelBtn{background:transparent;border:1px solid rgba(255,255,255,14%);color:#ACA6BD;}"));
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(12, 12, 12, 12);
@@ -83,7 +83,7 @@ ImageEditorDialog::ImageEditorDialog(const QByteArray& bytes, QWidget* parent)
         auto* b = new QToolButton(this);
         b->setFixedSize(22, 22);
         b->setStyleSheet(QStringLiteral(
-            "QToolButton{background:%1;border:1px solid rgba(255,255,255,0.25);"
+            "QToolButton{background:%1;border:1px solid rgba(255,255,255,25%);"
             "border-radius:11px;} QToolButton:hover{border:2px solid #F3F1F8;}")
             .arg(c.name()));
         connect(b, &QToolButton::clicked, this, [this, c]() { color_ = c; });

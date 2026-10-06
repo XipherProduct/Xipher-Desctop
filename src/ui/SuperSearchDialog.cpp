@@ -159,11 +159,11 @@ SuperSearchDialog::SuperSearchDialog(ApiClient* api, QWidget* parent)
     setObjectName(QStringLiteral("superSearchOverlay"));
     setAttribute(Qt::WA_StyledBackground, true);
     setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
-        "#superSearchOverlay { background:rgba(5,4,8,0.55); }"
-        "#ssCard { background:@{s1}; border:1px solid rgba(255,255,255,0.10);"
+        "#superSearchOverlay { background:rgba(5,4,8,55%); }"
+        "#ssCard { background:@{s1}; border:1px solid rgba(255,255,255,10%);"
         "  border-radius:20px; }"
         "#ssTitle { font-size:16px; font-weight:700; color:@{tp}; }"
-        "#ssInput { background:@{s2}; border:1px solid rgba(255,255,255,0.10);"
+        "#ssInput { background:@{s2}; border:1px solid rgba(255,255,255,10%);"
         "  border-radius:12px; min-height:42px; padding:0 14px; color:@{tp}; font-size:15px; }"
         "#ssInput:focus { border:1px solid @{ac}; }"
         "#ssSegBtn { background:transparent; border:none; border-radius:9px;"
@@ -172,8 +172,8 @@ SuperSearchDialog::SuperSearchDialog(ApiClient* api, QWidget* parent)
         "#ssChip { background:@{s2}; border:1px solid @{bDef};"
         "  border-radius:14px; color:@{ts}; font-size:12px; padding:5px 10px; }"
         "#ssChip:hover { background:@{ac14}; color:@{tp}; }"
-        "#ssChip:checked { background:rgba(139,92,246,0.28); color:@{tp};"
-        "  border-color:rgba(139,92,246,0.6); }"
+        "#ssChip:checked { background:rgba(139,92,246,28%); color:@{tp};"
+        "  border-color:rgba(139,92,246,60%); }"
         "#ssGroup { color:@{acT}; font-size:11px; font-weight:800; letter-spacing:1px;"
         "  text-transform:uppercase; padding:10px 2px 2px; }"
         "#ssResult { background:@{s2}; border-radius:12px; }"
@@ -572,7 +572,7 @@ void SuperSearchDialog::addResultRow(const QJsonObject& m) {
         const int at = txt->text().toLower().indexOf(kw.toLower());
         if (at >= 0) {
             const QString esc = txt->text();
-            txt->setText(QStringLiteral("%1<span style=\"background:rgba(139,92,246,0.45);\">%2</span>%3")
+            txt->setText(QStringLiteral("%1<span style=\"background:rgba(139,92,246,45%);\">%2</span>%3")
                 .arg(esc.left(at).toHtmlEscaped(), esc.mid(at, kw.size()).toHtmlEscaped(),
                      esc.mid(at + kw.size()).toHtmlEscaped()));
             txt->setTextFormat(Qt::RichText);

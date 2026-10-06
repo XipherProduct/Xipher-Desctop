@@ -27,9 +27,9 @@ const QColor kText1(0xFA, 0xFA, 0xFA);
 const QColor kText2(0xA1, 0xA1, 0xAA);
 
 const char* kToggleQss = R"QSS(
-QPushButton { border:1px solid rgba(255,255,255,0.12); border-radius:28px;
-              background:rgba(24,24,36,0.9); }
-QPushButton:hover { background:rgba(36,36,52,0.95); }
+QPushButton { border:1px solid rgba(255,255,255,12%); border-radius:28px;
+              background:rgba(24,24,36,90%); }
+QPushButton:hover { background:rgba(36,36,52,95%); }
 )QSS";
 const char* kToggleActiveQss = R"QSS(
 QPushButton { border:1px solid #9B72F8; border-radius:28px;
@@ -44,7 +44,7 @@ CallMinimizedBar::CallMinimizedBar(QWidget* parent) : QWidget(parent) {
     setFixedSize(308, 68);
     setAttribute(Qt::WA_StyledBackground, true);
     setStyleSheet(QStringLiteral(
-        "background:rgba(10,10,15,0.97); border:1px solid rgba(255,255,255,0.12);"
+        "background:rgba(10,10,15,97%); border:1px solid rgba(255,255,255,12%);"
         "border-radius:24px;"));
 
     auto* lay = new QHBoxLayout(this);
@@ -74,8 +74,8 @@ CallMinimizedBar::CallMinimizedBar(QWidget* parent) : QWidget(parent) {
         b->setIcon(Icons::icon(kind, 16, color));
         b->setIconSize(QSize(16, 16));
         b->setStyleSheet(QStringLiteral(
-            "QPushButton{border:none;border-radius:16px;background:rgba(255,255,255,0.06);}"
-            "QPushButton:hover{background:rgba(255,255,255,0.12);}"));
+            "QPushButton{border:none;border-radius:16px;background:rgba(255,255,255,6%);}"
+            "QPushButton:hover{background:rgba(255,255,255,12%);}"));
         return b;
     };
     auto* restore = mk(Icons::ChevronRight, kText1);
@@ -137,9 +137,9 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
     minimizeBtn_->setIconSize(QSize(16, 16));
     minimizeBtn_->setToolTip(QStringLiteral("Свернуть"));
     minimizeBtn_->setStyleSheet(QStringLiteral(
-        "QPushButton{border:1px solid rgba(255,255,255,0.12);border-radius:18px;"
-        "background:rgba(24,24,36,0.9);}"
-        "QPushButton:hover{background:rgba(36,36,52,0.95);}"));
+        "QPushButton{border:1px solid rgba(255,255,255,12%);border-radius:18px;"
+        "background:rgba(24,24,36,90%);}"
+        "QPushButton:hover{background:rgba(36,36,52,95%);}"));
     connect(minimizeBtn_, &QPushButton::clicked, this, &CallOverlay::minimizeRequested);
     hl->addWidget(minimizeBtn_);
     lay->addWidget(header);

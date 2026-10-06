@@ -165,22 +165,22 @@ QLabel{color:@{tp};}
 #stTopbar{background:@{bg};border-bottom:1px solid @{bSub};}
 #stTitle{font-size:19px;font-weight:700;color:@{tp};letter-spacing:0.2px;}
 #stIconBtn{border:none;background:transparent;border-radius:19px;color:@{ts};font-size:17px;padding:0;}
-#stIconBtn:hover{background:rgba(255,255,255,0.05);color:@{tp};}
+#stIconBtn:hover{background:rgba(255,255,255,5%);color:@{tp};}
 /* ── Nav ── */
 #stNav{background:#08070b;border-right:1px solid @{bSub};}
 #stNavScroll,#stNavScroll>QWidget{background:transparent;border:none;}
 #stNavGroup{color:@{tt};font-size:11px;font-weight:700;letter-spacing:1px;padding:12px 10px 4px;}
 #stNavItem{text-align:left;padding:8px 10px;border:none;border-radius:10px;background:transparent;color:@{ts};font-size:13px;font-weight:500;}
-#stNavItem:hover{background:rgba(255,255,255,0.05);color:@{tp};}
+#stNavItem:hover{background:rgba(255,255,255,5%);color:@{tp};}
 #stNavItem:checked{background:@{ac14};color:@{ac};font-weight:600;}
 /* ── Аккаунт: hero + tiles ── */
 #acctHero{background:#16141d;border:1px solid @{bSub};border-radius:20px;}
 #acctName{font-size:17px;font-weight:700;color:@{tp};}
 #acctUname{color:@{ac};font-size:13px;font-weight:600;}
-#acctCam{background:rgba(11,10,14,0.75);border:1px solid @{bStr};border-radius:14px;color:@{tp};font-size:13px;padding:0;}
+#acctCam{background:rgba(11,10,14,75%);border:1px solid @{bStr};border-radius:14px;color:@{tp};font-size:13px;padding:0;}
 #acctCam:hover{background:@{ac};border-color:@{ac};}
 #acctTile{text-align:left;background:#16141d;border:1px solid @{bSub};border-radius:14px;padding:2px 4px;}
-#acctTile:hover{background:rgba(255,255,255,0.05);border-color:@{bStr};}
+#acctTile:hover{background:rgba(255,255,255,5%);border-color:@{bStr};}
 #acctTileLbl{color:@{ts};font-size:12px;}
 #acctTileVal{color:@{tp};font-size:13px;font-weight:600;}
 #acctGrouptitle{color:@{tt};font-size:11px;font-weight:700;letter-spacing:1px;}
@@ -199,17 +199,17 @@ QLineEdit:focus,QPlainTextEdit:focus,QComboBox:focus,QSpinBox:focus,QTimeEdit:fo
 QLineEdit:disabled{color:@{tt};}
 QComboBox::drop-down{border:none;width:22px;}
 QComboBox QAbstractItemView{background:@{s2};border:1px solid @{bStr};
-  color:@{tp};selection-background-color:rgba(139,92,246,0.30);outline:none;}
+  color:@{tp};selection-background-color:rgba(139,92,246,30%);outline:none;}
 QSpinBox::up-button,QSpinBox::down-button{width:0;border:none;}
 #primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 @{ac},stop:1 #7a4ae6);
   color:#fff;border:none;border-radius:10px;min-height:38px;padding:0 22px;font-weight:700;}
 #primaryBtn:hover{background:@{acH};}
 #ghostBtn{background:@{s2};color:@{tp};border:1px solid @{bSub};
   border-radius:10px;min-height:34px;padding:0 16px;}
-#ghostBtn:hover{background:rgba(255,255,255,0.05);}
-#dangerBtn{background:transparent;color:@{danger};border:1px solid rgba(226,106,99,0.4);
+#ghostBtn:hover{background:rgba(255,255,255,5%);}
+#dangerBtn{background:transparent;color:@{danger};border:1px solid rgba(226,106,99,40%);
   border-radius:10px;min-height:34px;padding:0 16px;}
-#dangerBtn:hover{background:rgba(226,106,99,0.12);}
+#dangerBtn:hover{background:rgba(226,106,99,12%);}
 #statusOk{color:@{ok};font-size:12px;}
 #pill{background:@{ac14};color:@{acT};border-radius:10px;padding:3px 10px;font-size:12px;font-weight:700;}
 QScrollArea{background:transparent;border:none;}
@@ -219,9 +219,9 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
 /* ── Xipher Pulse ── */
 #pulseChip{background:@{ac22};border:1px solid @{ac34};
   border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:@{tp};}
-#pulseChipGhost{background:@{inset};border:1px solid rgba(255,255,255,0.10);
+#pulseChipGhost{background:@{inset};border:1px solid rgba(255,255,255,10%);
   border-radius:10px;padding:4px 11px;font-size:12px;color:@{ts};}
-#pulseChipWait{background:rgba(217,160,91,0.14);border:1px solid #D9A05B;
+#pulseChipWait{background:rgba(217,160,91,14%);border:1px solid #D9A05B;
   border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:@{tp};}
 #pulseCta{border:none;border-radius:14px;color:#fff;font-size:19px;font-weight:700;
   background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #7A4AE6,stop:1 @{acD});}
@@ -234,8 +234,8 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
 #pulseMeterAccent{background:@{ac14};border:1px solid @{ac34};border-radius:14px;}
 #pulsePerk{background:@{s1};border:1px solid @{bSub};border-radius:16px;}
 #pulsePerk:hover{border-color:@{ac34};}
-#themeTile{background:@{s1};border:1px solid rgba(255,255,255,0.10);border-radius:14px;padding:4px;}
-#themeTile:hover{border-color:rgba(139,92,246,0.4);}
+#themeTile{background:@{s1};border:1px solid rgba(255,255,255,10%);border-radius:14px;padding:4px;}
+#themeTile:hover{border-color:rgba(139,92,246,40%);}
 #themeTile:disabled{background:@{inset};}
 )QSS")));
 
@@ -1807,7 +1807,7 @@ void SettingsDialog::showPulsePending() {
     if (!paymentChip_) return;
     paymentChip_->setText(QStringLiteral("●  Ожидание оплаты"));
     paymentChip_->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
-        "#pulseChipWait{background:rgba(217,160,91,0.14);border:1px solid #D9A05B;"
+        "#pulseChipWait{background:rgba(217,160,91,14%);border:1px solid #D9A05B;"
         "border-radius:10px;padding:4px 11px;font-size:12px;font-weight:600;color:@{tp};}")));
     paymentChip_->show();
     if (blinkTimer_) return;

@@ -28,16 +28,16 @@ QLabel{color:@{tp};}
   border-top-left-radius:18px;border-top-right-radius:18px;}
 #dlgTitle{font-size:17px;font-weight:800;color:#FFFFFF;}
 #closeBtn{background:@{bStr};border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
-#closeBtn:hover{background:rgba(255,255,255,0.30);}
+#closeBtn:hover{background:rgba(255,255,255,30%);}
 #hint{font-size:12px;color:@{tt};}
-QLineEdit,QPlainTextEdit{background:@{s1};border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+QLineEdit,QPlainTextEdit{background:@{s1};border:1px solid rgba(255,255,255,10%);border-radius:10px;
   min-height:36px;padding:0 12px;color:@{tp};selection-background-color:@{ac};}
 QPlainTextEdit{padding:8px 12px;}
 QLineEdit:focus,QPlainTextEdit:focus{border:1px solid @{ac};}
 #primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 @{ac},stop:1 @{acD});
   color:#fff;border:none;border-radius:10px;min-height:40px;padding:0 22px;font-weight:700;}
 #primaryBtn:hover{background:#9B72F8;}
-#joinBtn{background:rgba(139,92,246,0.20);color:#C9B6FF;border:none;border-radius:9px;min-height:30px;padding:0 14px;font-weight:600;}
+#joinBtn{background:rgba(139,92,246,20%);color:#C9B6FF;border:none;border-radius:9px;min-height:30px;padding:0 14px;font-weight:600;}
 #joinBtn:hover{background:@{ac34};}
 #itemCard{background:@{s2};border:1px solid @{bSub};border-radius:12px;}
 #err{color:#E5687A;font-size:12px;}
@@ -73,7 +73,7 @@ void makeAvatarClickable(QLabel* avatar, int size, ModalOverlay* parent,
     hit->setFixedSize(size, size);
     hit->setStyleSheet(QStringLiteral(
         "QPushButton{background:transparent;border:none;border-radius:%1px;}"
-        "QPushButton:hover{background:rgba(0,0,0,0.30);}").arg(size / 2));
+        "QPushButton:hover{background:rgba(0,0,0,30%);}").arg(size / 2));
     QObject::connect(hit, &QPushButton::clicked, parent, [avatar, size, parent, onPick]() {
         const QString fn = QFileDialog::getOpenFileName(parent, QStringLiteral("Выберите фото"),
             QString(), QStringLiteral("Изображения (*.jpg *.jpeg *.png *.gif)"));

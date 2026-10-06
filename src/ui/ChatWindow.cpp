@@ -25,10 +25,10 @@ ChatWindow::ChatWindow(ApiClient* api, WsClient* ws, const QString& peerId,
     setStyleSheet(QStringLiteral(
         "ChatWindow{background:#131218;}"
         "QLabel{color:#F3F1F8;}"
-        "#cwHeader{background:#131218;border-bottom:1px solid rgba(255,255,255,0.10);}"
+        "#cwHeader{background:#131218;border-bottom:1px solid rgba(255,255,255,10%);}"
         "#cwName{font-size:16px;font-weight:700;color:#F3F1F8;}"
         "#cwStatus{font-size:12px;color:#726C82;}"
-        "QPlainTextEdit{background:#1A1822;border:1px solid rgba(255,255,255,0.10);"
+        "QPlainTextEdit{background:#1A1822;border:1px solid rgba(255,255,255,10%);"
         "border-radius:14px;color:#F3F1F8;font-size:14px;padding:8px 12px;"
         "selection-background-color:#8B5CF6;}"
         "#cwSend{background:#8B5CF6;border:none;border-radius:16px;color:#fff;"

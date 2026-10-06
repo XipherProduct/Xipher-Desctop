@@ -58,11 +58,11 @@ QLabel { color:#F3F1F8; }
 #reqTitle { font-size:13px; font-weight:700; color:#ACA6BD; }
 #status { color:#726C82; font-size:12px; }
 QLineEdit {
-    background:#1A1822; border:1px solid rgba(255,255,255,0.10); border-radius:12px;
+    background:#1A1822; border:1px solid rgba(255,255,255,10%); border-radius:12px;
     min-height:40px; padding:0 14px; color:#F3F1F8; font-size:14px;
 }
 QLineEdit:focus { border:1px solid #8B5CF6; }
-QListWidget { background:#0F0E14; border:1px solid rgba(255,255,255,0.07); border-radius:12px; outline:none; }
+QListWidget { background:#0F0E14; border:1px solid rgba(255,255,255,7%); border-radius:12px; outline:none; }
 QListWidget::item { border:none; }
 QListWidget::item:hover { background:#1A1822; }
 QPushButton.act {
@@ -71,7 +71,7 @@ QPushButton.act {
 }
 QPushButton.act:hover { background:#9B72F8; }
 QPushButton.ghost {
-    border:1px solid rgba(255,255,255,0.14); border-radius:10px; padding:6px 12px;
+    border:1px solid rgba(255,255,255,14%); border-radius:10px; padding:6px 12px;
     font-size:12px; font-weight:600; color:#ACA6BD; background:transparent;
 }
 QPushButton.ghost:hover { color:#F3F1F8; border-color:#8B5CF6; }

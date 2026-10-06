@@ -74,7 +74,7 @@ AnimatedEmojiLabel::AnimatedEmojiLabel(const QString& codepoints, int size, bool
     if (!autoplay_) {
         setCursor(Qt::PointingHandCursor);
         setStyleSheet(QStringLiteral(
-            "QLabel{border-radius:8px;} QLabel:hover{background:rgba(255,255,255,0.10);}"));
+            "QLabel{border-radius:8px;} QLabel:hover{background:rgba(255,255,255,10%);}"));
     }
     QFont f(QStringLiteral("Segoe UI Emoji"));
     f.setPixelSize(int(size_ * (autoplay_ ? 0.95 : 0.82)));

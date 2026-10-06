@@ -64,9 +64,9 @@ void VideoMessageWidget::buildUi() {
     playBtn_->setFixedSize(56, 56);
     playBtn_->setText(QStringLiteral("▶"));
     playBtn_->setStyleSheet(QStringLiteral(
-        "QPushButton{background:rgba(0,0,0,0.55);border:2px solid rgba(255,255,255,0.75);"
+        "QPushButton{background:rgba(0,0,0,55%);border:2px solid rgba(255,255,255,75%);"
         "border-radius:28px;color:#fff;font-size:20px;padding-left:4px;}"
-        "QPushButton:hover{background:rgba(139,92,246,0.8);}"));
+        "QPushButton:hover{background:rgba(139,92,246,80%);}"));
     playBtn_->installEventFilter(this);
     playBtn_->move(circular_ ? 82 : 132, circular_ ? 82 : 60);
     connect(playBtn_, &QPushButton::clicked, this, &VideoMessageWidget::togglePlay);
@@ -78,9 +78,9 @@ void VideoMessageWidget::buildUi() {
         sl->setContentsMargins(0, 0, 0, 0);
         sl->setSpacing(6);
         const QString stepQss = QStringLiteral(
-            "QPushButton{border:none;border-radius:12px;background:rgba(255,255,255,0.10);"
+            "QPushButton{border:none;border-radius:12px;background:rgba(255,255,255,10%);"
             "color:#F3F1F8;font-size:14px;min-width:26px;min-height:24px;}"
-            "QPushButton:hover{background:rgba(139,92,246,0.4);}");
+            "QPushButton:hover{background:rgba(139,92,246,40%);}");
         auto* back = new QPushButton(QStringLiteral("‹"), steps);
         back->setCursor(Qt::PointingHandCursor);
         back->setToolTip(QStringLiteral("Кадр назад"));
@@ -112,7 +112,7 @@ void VideoMessageWidget::buildUi() {
         progress_->setRange(0, 100);
         progress_->setValue(0);
         progress_->setStyleSheet(QStringLiteral(
-            "QProgressBar{background:rgba(255,255,255,0.12);border:none;border-radius:2px;}"
+            "QProgressBar{background:rgba(255,255,255,12%);border:none;border-radius:2px;}"
             "QProgressBar::chunk{background:#8B5CF6;border-radius:2px;}"));
         root->addWidget(progress_);
     }

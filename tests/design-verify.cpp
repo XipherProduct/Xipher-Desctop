@@ -377,7 +377,8 @@ int main(int argc, char** argv) {
         check(pixelNear(img, c.x(), c.y(), 0x1A1822),
               QStringLiteral("поле поиска #1A1822 (.search-input): ") + px(img, c.x(), c.y()));
     }
-    // Бабблы: входящий #1A1822 (+ hairline-бордер), исходящий градиент 4A3A72→3A2D5C.
+    // Бабблы: входящий #1A1822 (+ бордер bDef 10%), исходящий — яркий
+    // --grad-brand веба (.message.sent: var(--gradient-purple)) #8B5CF6→#6D28D9.
     // Точки привязываем к КОНКРЕТНЫМ бабблам (фиксированные координаты могут
     // попадать на спойлер-блок/фон между сообщениями).
     // Только ЖИВЫЕ строки (layout), а не deleteLater-призраки из children().
@@ -406,10 +407,12 @@ int main(int argc, char** argv) {
         const auto* b = outB.last();
         const QPoint c = b->mapTo(&page, QPoint(b->width() / 2, b->height() / 2));
         const QColor got = img.pixelColor(c.x(), c.y());
-        const bool inGrad = got.red() >= 0x3A - 4 && got.red() <= 0x4A + 4
-                         && got.green() >= 0x2D - 4 && got.green() <= 0x3A + 4
-                         && got.blue() >= 0x5C - 4 && got.blue() <= 0x72 + 4;
-        check(inGrad, QStringLiteral("исходящий баббл в градиенте #4A3A72→#3A2D5C: ") + got.name());
+        // Градиент #8B5CF6→#6D28D9: середина баббла — интерполяция между
+        // стопами (сэмпл ~#7C42E8); допускаем весь диапазон между ними.
+        const bool inGrad = got.red() >= 0x6D - 6 && got.red() <= 0x8B + 6
+                         && got.green() >= 0x28 - 6 && got.green() <= 0x5C + 6
+                         && got.blue() >= 0xD9 - 6 && got.blue() <= 0xF6 + 6;
+        check(inGrad, QStringLiteral("исходящий баббл в градиенте #8B5CF6→#6D28D9 (--grad-brand): ") + got.name());
     }
     // Бейдж непрочитанных (у «Боба», 3): акцент #8B5CF6. Сэмплируем угол
     // плашки — в центре белая цифра.

@@ -91,7 +91,7 @@ LinkPreviewBar::LinkPreviewBar(ApiClient* api, QWidget* parent)
     card_ = new QWidget(this);
     card_->setObjectName(QStringLiteral("lpCard"));
     card_->setStyleSheet(QStringLiteral(
-        "#lpCard { background:#1A1822; border:1px solid rgba(255,255,255,0.10);"
+        "#lpCard { background:#1A1822; border:1px solid rgba(255,255,255,10%);"
         "  border-left:3px solid #8B5CF6; border-radius:14px; }"
         "#lpSite { color:#8B5CF6; font-size:11px; font-weight:700; }"
         "#lpTitle { color:#F3F1F8; font-size:13px; font-weight:600; }"
@@ -107,7 +107,7 @@ LinkPreviewBar::LinkPreviewBar(ApiClient* api, QWidget* parent)
     thumb_->setFixedSize(56, 56);
     thumb_->setAlignment(Qt::AlignCenter);
     thumb_->setStyleSheet(QStringLiteral(
-        "background:rgba(255,255,255,0.05);border-radius:8px;color:#726C82;font-size:20px;"));
+        "background:rgba(255,255,255,5%);border-radius:8px;color:#726C82;font-size:20px;"));
     thumb_->setText(QStringLiteral("🔗"));
     cl->addWidget(thumb_);
 

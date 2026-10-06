@@ -150,7 +150,7 @@ QString RichDoc::toHtml() const {
         "blockquote{border-left:3px solid #8B5CF6;margin:8px 0;padding:4px 12px;"
         "color:#ACA6BD}pre{background:#0B0A0E;border-radius:8px;padding:10px;"
         "overflow:auto}h2,h3,h4{margin:16px 0 8px}hr{border:none;"
-        "border-top:1px solid rgba(255,255,255,0.15)}</style>"
+        "border-top:1px solid rgba(255,255,255,15%)}</style>"
         "</head><body>%1</body></html>").arg(body);
 }
 

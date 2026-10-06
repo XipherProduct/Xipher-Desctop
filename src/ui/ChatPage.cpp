@@ -326,9 +326,22 @@ protected:
         }
         QLabel::resizeEvent(e);
     }
+    // Естественная ширина текста БЕЗ переносов (idealWidth): баббл получает
+    // детерминированный sizeHint — короткое сообщение даёт компактный пузырь,
+    // длинное упирается в кап ширины. Дефолтный sizeHint QLabel с wordWrap
+    // отдаёт ~95px — ленты сжимались в вертикальные столбцы.
+    QSize sizeHint() const override {
+        doc_.setTextWidth(-1);
+        const int ideal = qCeil(doc_.idealWidth()) + 2;
+        const int w = qBound(24, lastW_ > 0 ? lastW_ : ideal, qMin(ideal, 720));
+        doc_.setTextWidth(w);
+        const QSize s(qMin(ideal, 720), qCeil(doc_.size().height()) + 2);
+        doc_.setTextWidth(lastW_ > 0 ? qMax(1, lastW_) : -1);
+        return s;
+    }
 
 private:
-    QTextDocument doc_;
+    mutable QTextDocument doc_;   // sizeHint() const мутит ширину для замера
     int lastW_ = -1;
 };
 
@@ -393,7 +406,7 @@ QString formatMessageHtml(const QString& raw, const QString& highlight) {
         const QRegularExpression re(QRegularExpression::escape(highlight),
                                     QRegularExpression::CaseInsensitiveOption);
         s.replace(re, QStringLiteral(
-            "<span style=\"background:rgba(139,92,246,0.45);border-radius:3px;\">\\0</span>"));
+            "<span style=\"background:rgba(139,92,246,45%);border-radius:3px;\">\\0</span>"));
     }
 
     // Многострочные код-блоки ```…``` — раньше остальных форматов:
@@ -465,14 +478,14 @@ QString formatMessageHtml(const QString& raw, const QString& highlight) {
         str = out;
     };
     wrap(s, QStringLiteral("\x02S\x02"),
-         QStringLiteral("<span style=\"background-color:rgba(255,255,255,0.13);color:rgba(255,255,255,0.13);"
+         QStringLiteral("<span style=\"background-color:rgba(255,255,255,13%);color:rgba(255,255,255,13%);"
                         "border-radius:3px;\" title=\"Спойлер — выделите, чтобы прочитать\">"),
          QStringLiteral("</span>"));
     wrap(s, QStringLiteral("\x02B\x02"), QStringLiteral("<b>"), QStringLiteral("</b>"));
     wrap(s, QStringLiteral("\x02U\x02"), QStringLiteral("<u>"), QStringLiteral("</u>"));
     wrap(s, QStringLiteral("\x02K\x02"), QStringLiteral("<s>"), QStringLiteral("</s>"));
     wrap(s, QStringLiteral("\x02M\x02"),
-         QStringLiteral("<span style=\"font-family:'JetBrains Mono','Consolas',monospace;background:rgba(255,255,255,0.07);border-radius:4px;\">"),
+         QStringLiteral("<span style=\"font-family:'JetBrains Mono','Consolas',monospace;background:rgba(255,255,255,7%);border-radius:4px;\">"),
          QStringLiteral("</span>"));
 
     // Вернуть ссылки и код-блоки уже тегами.
@@ -574,7 +587,7 @@ void ChatPage::openAttachmentRich(const QString& path) {
     dlg.resize(720, 760);
     dlg.setStyleSheet(QStringLiteral(
         "QDialog{background:#131218;} QLabel{color:#726C82;font-size:12px;}"
-        "QPushButton{background:transparent;border:1px solid rgba(255,255,255,0.14);"
+        "QPushButton{background:transparent;border:1px solid rgba(255,255,255,14%);"
         "border-radius:9px;color:#ACA6BD;font-size:12px;padding:6px 12px;}"));
     auto* v = new QVBoxLayout(&dlg);
     v->setContentsMargins(0, 0, 0, 8);
@@ -621,9 +634,13 @@ static QString bubbleOutQss() {
 }
 static QString bubbleInQss() {
     const auto th = ThemePreset::current();
+    // Бордер — var(--border-default) веба: тёмные темы rgba(255,255,255,.10),
+    // светлая rgba(20,16,40,.10). Именно он отделяет пузырь от фона; прежний
+    // hairline #2D2D32 был невидим — лента читалась как «текст без пузырей».
+    const QColor edge = th.isLight ? QColor(20, 16, 40) : QColor(255, 255, 255);
     return QStringLiteral(
         "#bubbleIn{background:%1;border:1px solid %2;border-radius:14px;}")
-        .arg(th.bubbleIn.name(), th.rgba(th.borderSubtle, 1.0));
+        .arg(th.bubbleIn.name(), th.rgba(edge, 0.10));
 }
 
 // «Клюв» TG: у последнего сообщения серии нижний угол со стороны автора
@@ -641,7 +658,7 @@ static void setBubbleTail(QFrame* b, bool out, bool tail) {
 }
 
 // Вертикальный зазор между сериями разных авторов (layout spacing при этом 2px).
-static QWidget* makeSeriesGap(int h = 8) {
+static QWidget* makeSeriesGap(int h = 10) {
     auto* g = new QWidget();
     g->setFixedHeight(h);
     g->setStyleSheet(QStringLiteral("background:transparent;"));
@@ -1143,7 +1160,9 @@ void ChatPage::buildUi() {
     msgLayout_ = new QVBoxLayout(msgContainer_);
     msgLayout_->setContentsMargins(18, 14, 18, 14);
     msgLayout_->setSpacing(2);   // плотность серий TG; зазор между сериями — makeSeriesGap
-    msgLayout_->addStretch();   // прижимаем сообщения к низу
+    // Как в вебе (.chat-messages{justify-content:flex-start}): сообщения
+    // идут ОТ ВЕРХА области, пустота остаётся снизу. Прижатие к низу
+    // (ночной stretch) выглядело как «сообщения уплывают вниз» — откат.
     msgScroll_->setWidget(msgContainer_);
 
     // Якорь низа. Раскладка (wordwrap, картинки, новый чат после очистки)
@@ -1262,7 +1281,7 @@ void ChatPage::buildUi() {
         const QString btnQss = QStringLiteral(
             "QPushButton{background:transparent;border:none;border-radius:14px;"
             "color:#ACA6BD;font-size:14px;min-width:28px;min-height:28px;}"
-            "QPushButton:hover{background:rgba(255,255,255,0.06);color:#F3F1F8;}"
+            "QPushButton:hover{background:rgba(255,255,255,6%);color:#F3F1F8;}"
             "QPushButton:checked{color:#8B5CF6;}");
         auto mk = [&](const QString& t, const char* tip) {
             auto* b = new QPushButton(t, audioBar_);
@@ -1335,19 +1354,19 @@ void ChatPage::buildUi() {
             return b;
         };
         const QString act = QStringLiteral(
-            "QPushButton{background:rgba(139,92,246,0.18);border:none;border-radius:10px;"
+            "QPushButton{background:rgba(139,92,246,18%);border:none;border-radius:10px;"
             "color:#F3F1F8;font-size:13px;font-weight:600;padding:7px 14px;}"
-            "QPushButton:hover{background:rgba(139,92,246,0.32);}");
+            "QPushButton:hover{background:rgba(139,92,246,32%);}");
         const QString danger = QStringLiteral(
-            "QPushButton{background:rgba(239,68,68,0.16);border:none;border-radius:10px;"
+            "QPushButton{background:rgba(239,68,68,16%);border:none;border-radius:10px;"
             "color:#F87171;font-size:13px;font-weight:600;padding:7px 14px;}"
-            "QPushButton:hover{background:rgba(239,68,68,0.30);}");
+            "QPushButton:hover{background:rgba(239,68,68,30%);}");
         mk(QStringLiteral("↪ Переслать"), &ChatPage::forwardSelected, act);
         mk(QStringLiteral("⧉ Копировать"), &ChatPage::copySelected, act);
         mk(QStringLiteral("🗑 Удалить"), &ChatPage::deleteSelected, danger);
         auto* cancel = mk(QStringLiteral("Отмена"), &ChatPage::exitSelectionMode,
                           QStringLiteral(
-            "QPushButton{background:transparent;border:1px solid rgba(255,255,255,0.14);"
+            "QPushButton{background:transparent;border:1px solid rgba(255,255,255,14%);"
             "border-radius:10px;color:#ACA6BD;font-size:13px;padding:6px 12px;}"
             "QPushButton:hover{color:#F3F1F8;}"));
         cancel->setToolTip(QStringLiteral("Esc"));
@@ -1418,7 +1437,7 @@ void ChatPage::buildUi() {
     sendBtn_ = new QPushButton(normal);
     sendBtn_->setObjectName(QStringLiteral("sendBtn"));
     sendBtn_->setCursor(Qt::PointingHandCursor);
-    sendBtn_->setIcon(Icons::icon(Icons::Send, 20, QColor(0x8B, 0x5C, 0xF6)));
+    sendBtn_->setIcon(Icons::icon(Icons::Send, 20, QColor(0xFF, 0xFF, 0xFF)));
     sendBtn_->setIconSize(QSize(20, 20));
     sendBtn_->setVisible(false);   // как в вебе: ➤ появляется при вводе текста, 🎤 уходит
 
@@ -2276,13 +2295,17 @@ void ChatPage::smoothScrollTo(int target) {
 }
 
 void ChatPage::clampBubbleWidths() {
-    if (!msgContainer_) return;
-    const int maxW = qBound(260, msgContainer_->width() * 72 / 100, 480);
+    if (!msgContainer_ || !msgScroll_) return;
+    // 1:1 с вебом: max-width:min(72%, calc(100% - 52px)) + абсолютный кап 720.
+    // Источник — ВЬЮПОРТ скролла: ширина контейнера отстаёт от укладки
+    // (в узком окне давала 112px — «узкие столбцы-простыни»).
+    const int vw = msgScroll_->viewport()->width();
+    const int maxW = vw > 100 ? qMin(qMin(vw * 72 / 100, vw - 52), 720) : 480;
     const auto bubbles = msgContainer_->findChildren<QFrame*>();
     for (QFrame* b : bubbles)
         if (b->objectName() == QStringLiteral("bubbleIn")
             || b->objectName() == QStringLiteral("bubbleOut"))
-            b->setMaximumWidth(maxW);
+            if (b->maximumWidth() != maxW) b->setMaximumWidth(maxW);
 }
 
 void ChatPage::keyPressEvent(QKeyEvent* e) {
@@ -2658,8 +2681,8 @@ void ChatPage::createTopicDialog() {
     if (currentPeerId_.isEmpty()) return;
     auto* ov = new ModalOverlay(window(), 380);
     ov->card()->setStyleSheet(QStringLiteral(
-        "#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:16px;}"
-        "QLabel{color:#F3F1F8;} QLineEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);"
+        "#modalCard{background:#17151E;border:1px solid rgba(255,255,255,8%);border-radius:16px;}"
+        "QLabel{color:#F3F1F8;} QLineEdit{background:#131218;border:1px solid rgba(255,255,255,10%);"
         "border-radius:10px;min-height:38px;padding:0 12px;color:#F3F1F8;}"
         "QLineEdit:focus{border:1px solid #8B5CF6;}"
         "#primaryBtn{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #8B5CF6,stop:1 #6D28D9);"
@@ -3115,7 +3138,7 @@ void ChatPage::clearMessages() {
         if (it->widget()) it->widget()->deleteLater();
         delete it;
     }
-    msgLayout_->addStretch();
+    // Контент от верха (как flex-start веба) — растяжку-якорь не возвращаем.
     shownIds_.clear();
     checklistWidgets_.clear();
     pollWidgets_.clear();   // карточки опросов умирают вместе с бабблами (MSG-06)
@@ -3221,6 +3244,9 @@ bool ChatPage::eventFilter(QObject* obj, QEvent* e) {
     }
     if (greeting_ && obj == msgScroll_->viewport() && e->type() == QEvent::Resize) {
         if (greeting_->isVisible()) greeting_->setGeometry(msgScroll_->viewport()->rect());
+        // Кап ширины бабблов (72% как в вебе) пересчитывается на каждом
+        // ресайзе вьюпорта — сплиттер/узкое окно меняют его без ResizeEvent страницы.
+        clampBubbleWidths();
     }
     // Клик по картинке-сообщению → просмотр на весь экран.
     if (e->type() == QEvent::MouseButtonRelease
@@ -3529,7 +3555,7 @@ void ChatPage::prependOlderBatch(int floorFrom, int batch) {
             const QString day = m.createdAt.left(10);
             if (day != lastDay) {
                 const QString lbl = dateLabel(m.createdAt);
-                if (!lbl.isEmpty()) msgLayout_->insertWidget(1, makeDateSeparator(lbl));
+                if (!lbl.isEmpty()) msgLayout_->insertWidget(0, makeDateSeparator(lbl));
                 lastDay = day;
                 lastPrependAuthorKey_.clear();   // новый день — новая серия
             }
@@ -3608,8 +3634,14 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
 
     auto* bubble = new QFrame(row);
     bubble->setObjectName(out ? QStringLiteral("bubbleOut") : QStringLiteral("bubbleIn"));
-    // Максимум 480px, но не более 72% ширины области сообщений (узкое окно).
-    bubble->setMaximumWidth(qBound(260, msgContainer_->width() * 72 / 100, 480));
+    // Ширина — 1:1 с вебом (.message-bubble: max-width:min(72%, calc(100% - 52px)))
+    // плюс абсолютный кап 720px (комфортная строка текста на широких экранах).
+    // Меряем от ВЬЮПОРТА скролла: ширина контейнера на момент создания баббла
+    // ещё не отложилась (0/sizeHint) — старый расчёт давал кап 260 и узкие
+    // столбцы-«простыни».
+    const int vw = msgScroll_->viewport()->width();
+    const int cap = vw > 100 ? qMin(qMin(vw * 72 / 100, vw - 52), 720) : 480;
+    bubble->setMaximumWidth(cap);
     // Чистое медиа без текста — без фона баббла (.is-media-only веба).
     const bool mediaOnly = (msg.messageType == QStringLiteral("image")
         || msg.messageType == QStringLiteral("photo")
@@ -3623,7 +3655,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     else
         bubble->setStyleSheet(out ? bubbleOutQss() : bubbleInQss());
     auto* bl = new QVBoxLayout(bubble);
-    bl->setContentsMargins(14, 8, 14, 6);
+    bl->setContentsMargins(14, 10, 14, 8);
     bl->setSpacing(2);
     if (mediaOnly) bl->setContentsMargins(0, 0, 0, 2);   // медиа без полей баббла
 
@@ -3778,7 +3810,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         auto* img = new QLabel(bubble);
         img->setAlignment(Qt::AlignCenter);
         img->setMinimumSize(180, 120);
-        img->setStyleSheet(QStringLiteral("background:rgba(255,255,255,0.05);border-radius:10px;color:#ACA6BD;"));
+        img->setStyleSheet(QStringLiteral("background:rgba(255,255,255,5%);border-radius:10px;color:#ACA6BD;"));
         img->setText(QStringLiteral("Фото…"));
         img->setCursor(Qt::PointingHandCursor);
         img->installEventFilter(this);   // клик → просмотр на весь экран
@@ -3974,7 +4006,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
             out ? QColor(0xF0,0xEC,0xFA) : QColor(0xAC,0xA6,0xBD)));
         auto* ttlLbl = new QLabel(bubble);
         ttlLbl->setStyleSheet(QString("color:%1;font-size:11px;font-weight:600;")
-            .arg(out ? QStringLiteral("rgba(240,236,250,0.8)") : QStringLiteral("#ACA6BD")));
+            .arg(out ? QStringLiteral("rgba(240,236,250,80%)") : QStringLiteral("#ACA6BD")));
 
         const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + qint64(msg.ttlSeconds) * 1000;
         auto fmt = [](qint64 sec) -> QString {
@@ -4002,8 +4034,10 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     }
 
     auto* meta = new QLabel(metaText, bubble);
+    // Время: на исходящем — светлый на градиенте, на входящем — text-secondary
+    // (web --bubble-out-meta / tertiary читаются, #726C82 на s2 тонуло).
     meta->setStyleSheet(QString("color:%1;font-size:11px;")
-        .arg(out ? QStringLiteral("rgba(240,236,250,0.65)") : QStringLiteral("#726C82")));
+        .arg(out ? QStringLiteral("rgba(240,236,250,75%)") : QStringLiteral("#ACA6BD")));
     metaRow->addWidget(meta);
     bl->addLayout(metaRow);
 
@@ -4048,9 +4082,9 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     else     { rl->addWidget(bubble); rl->addStretch(); }
 
     if (prepend) {
-        msgLayout_->insertWidget(1, row);   // после stretch, ПЕРЕД существующими
+        msgLayout_->insertWidget(0, row);   // ВВЕРХ ленты, ПЕРЕД существующими
         if (!sameSeries && !lastPrependAuthorKey_.isEmpty())
-            msgLayout_->insertWidget(2, makeSeriesGap());   // зазор ПОД новой серией
+            msgLayout_->insertWidget(1, makeSeriesGap());   // зазор ПОД новой серией
         setBubbleTail(bubble, out, !sameSeries);
         if (avatarLabel) avatarLabel->setVisible(!sameSeries);
         lastPrependAuthorKey_ = authorKey;
@@ -4070,7 +4104,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         lastSeriesBubble_ = bubble;
         lastSeriesOut_ = out;
         lastSeriesAvatar_ = avatarLabel;   // nullptr вне групп — сброс не нужен
-        msgLayout_->addWidget(row);        // после стартового stretch → прижато к низу
+        msgLayout_->addWidget(row);        // контент растёт вниз (flex-start веба)
     }
 
     // Появление нового сообщения — плавное (fade), как в Telegram/Discord.
@@ -4355,13 +4389,13 @@ void ChatPage::showMessageMenu(QWidget* bubble, const QPoint& pos) {
             b->setCursor(Qt::PointingHandCursor);
             b->setStyleSheet(QStringLiteral(
                 "QPushButton{border:none;border-radius:8px;font-size:18px;padding:4px 6px;}"
-                "QPushButton:hover{background:rgba(139,92,246,0.25);}"));
+                "QPushButton:hover{background:rgba(139,92,246,25%);}"));
             // ПКМ по эмодзи — «в избранное» (STK-02): стрип начнётся с него.
             b->setContextMenuPolicy(Qt::CustomContextMenu);
             connect(b, &QPushButton::customContextMenuRequested, this, [this, e, b](const QPoint& p) {
                 QMenu m(this);
                 m.setStyleSheet(QStringLiteral(
-                    "QMenu{background:#1A1822;border:1px solid rgba(255,255,255,0.12);"
+                    "QMenu{background:#1A1822;border:1px solid rgba(255,255,255,12%);"
                     "border-radius:10px;color:#F3F1F8;} QMenu::item{padding:6px 18px;}"));
                 QStringList favs = Prefs::getStr(QStringLiteral("xipher_favorite_reactions"))
                                       .split(QLatin1Char(','), Qt::SkipEmptyParts);
@@ -4475,7 +4509,7 @@ void ChatPage::forwardMessageFull(const ChatMessage& msg) {
     hideBox->setStyleSheet(QStringLiteral(
         "QCheckBox{color:#ACA6BD;font-size:13px;padding:6px 14px 10px 14px;}"
         "QCheckBox::indicator{width:16px;height:16px;border-radius:4px;"
-        "border:1px solid rgba(255,255,255,0.25);background:#131218;}"
+        "border:1px solid rgba(255,255,255,25%);background:#131218;}"
         "QCheckBox::indicator:checked{background:#8B5CF6;border-color:#8B5CF6;}"));
     picker->cardLayout()->addWidget(hideBox);
     connect(picker, &ChatPickerDialog::picked, this, [this, msg, hideBox](const Chat& c) {
@@ -4866,7 +4900,10 @@ static QString chatQSS() {
 #chatList::item:hover { background:@{s3}; }
 #chatList::item:selected { background:@{soft1}; border-left:3px solid @{ac}; }
 /* ─── Лента ─── */
-#msgArea { background-color:@{bg}; background-image:url(:/chat-pattern.png); background-repeat:repeat; border:none; }
+/* Фон — чистый bg-base, как в вебе (.chat-messages background:transparent
+   поверх canvas). Паттерн-тайл убран: фиолетовые кружки замыливали контраст
+   пузырей — лента выглядела плоской «простынёй». */
+#msgArea { background-color:@{bg}; border:none; }
 #msgArea > QWidget > QWidget { background:@{bg}; }
 #msgArea QScrollBar:vertical { background:transparent; width:8px; margin:2px; }
 #msgArea QScrollBar::handle:vertical { background:@{scrol}; border-radius:4px; min-height:36px; }
@@ -5027,7 +5064,7 @@ void ChatPage::closeAppMenu() {
 void ChatPage::buildAppMenu() {
     appMenuScrim_ = new QWidget(this);
     appMenuScrim_->setObjectName(QStringLiteral("appMenuScrim"));
-    appMenuScrim_->setStyleSheet(QStringLiteral("background:rgba(4,3,8,0.35);"));
+    appMenuScrim_->setStyleSheet(QStringLiteral("background:rgba(4,3,8,35%);"));
     appMenuScrim_->installEventFilter(this);
     appMenuScrim_->hide();
 
@@ -5035,14 +5072,14 @@ void ChatPage::buildAppMenu() {
     appMenu_->setObjectName(QStringLiteral("appMenu"));
     appMenu_->setStyleSheet(QStringLiteral(R"QSS(
 #appMenu { background:#131218; }
-#appMenuHeader { border-bottom:1px solid rgba(255,255,255,0.06); }
+#appMenuHeader { border-bottom:1px solid rgba(255,255,255,6%); }
 #appMenuName { color:#F3F1F8; font-size:15px; font-weight:600; }
 #appMenuStatus { color:#726C82; font-size:12px; }
 #appMenuClose { border:none; background:transparent; color:#ACA6BD; font-size:16px; padding:0; border-radius:8px; }
-#appMenuClose:hover { background:rgba(255,255,255,0.05); color:#F3F1F8; }
+#appMenuClose:hover { background:rgba(255,255,255,5%); color:#F3F1F8; }
 #appMenuItem { text-align:left; border:none; background:transparent; color:#F3F1F8;
     font-size:15px; font-weight:400; padding:10px 12px; border-radius:10px; }
-#appMenuItem:hover { background:rgba(255,255,255,0.05); }
+#appMenuItem:hover { background:rgba(255,255,255,5%); }
 )QSS"));
     auto* root = new QVBoxLayout(appMenu_);
     root->setContentsMargins(10, 10, 10, 14);
@@ -5822,7 +5859,7 @@ void ChatPage::maybeOfferFileForLongText() {
     bl->addWidget(lbl, 1);
     auto* yes = new QPushButton(QStringLiteral("Файлом"), bar);
     yes->setStyleSheet(QStringLiteral(
-        "QPushButton{background:rgba(139,92,246,0.2);border:none;border-radius:9px;"
+        "QPushButton{background:rgba(139,92,246,20%);border:none;border-radius:9px;"
         "color:#F3F1F8;font-size:12px;padding:5px 10px;}"));
     connect(yes, &QPushButton::clicked, this, [this, bar, text]() {
         const QByteArray bytes = text.toUtf8();
@@ -6022,7 +6059,7 @@ void ChatPage::onPollLoaded(const QString& messageId, const QJsonObject& poll, b
         auto* barRow = new QWidget(row);
         barRow->setFixedHeight(30);
         auto* barFill = new QWidget(barRow);
-        barFill->setStyleSheet(QStringLiteral("background:rgba(139,92,246,0.30);"
+        barFill->setStyleSheet(QStringLiteral("background:rgba(139,92,246,30%);"
                                               "border-radius:6px;"));
         barFill->setGeometry(0, 0, 0, 30);
         auto* lbl = new QLabel(barRow);
@@ -6058,9 +6095,9 @@ void ChatPage::openPollDialog() {
     if (currentPeerId_.isEmpty()) return;
     auto* ov = new ModalOverlay(window(), 440);
     ov->card()->setStyleSheet(QStringLiteral(R"QSS(
-#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
+#modalCard{background:#17151E;border:1px solid rgba(255,255,255,8%);border-radius:18px;}
 QLabel{color:#F3F1F8;}
-QLineEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+QLineEdit{background:#131218;border:1px solid rgba(255,255,255,10%);border-radius:10px;
   min-height:34px;padding:0 10px;color:#F3F1F8;font-size:14px;}
 QLineEdit:focus{border:1px solid #8B5CF6;}
 QCheckBox{color:#ACA6BD;font-size:13px;}
@@ -6134,13 +6171,13 @@ void ChatPage::openScheduleDialog() {
     }
     auto* ov = new ModalOverlay(window(), 420);
     ov->card()->setStyleSheet(QStringLiteral(R"QSS(
-#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
+#modalCard{background:#17151E;border:1px solid rgba(255,255,255,8%);border-radius:18px;}
 QLabel{color:#F3F1F8;}
 #schTitle{font-size:16px;font-weight:800;}
-QDateTimeEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+QDateTimeEdit{background:#131218;border:1px solid rgba(255,255,255,10%);border-radius:10px;
   min-height:34px;padding:0 10px;color:#F3F1F8;font-size:14px;}
 QDateTimeEdit:focus{border:1px solid #8B5CF6;}
-QComboBox{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:10px;
+QComboBox{background:#131218;border:1px solid rgba(255,255,255,10%);border-radius:10px;
   min-height:34px;padding:0 10px;color:#F3F1F8;font-size:14px;}
 #schGo{background:#8B5CF6;border:none;border-radius:10px;color:#fff;
   font-size:14px;font-weight:600;min-height:36px;}
@@ -6654,7 +6691,7 @@ void ChatPage::openRenameDialog() {
     t->setStyleSheet(QStringLiteral("color:#F3F1F8;font-size:17px;font-weight:800;"));
     auto* edit = new QLineEdit(currentPeerName_, ov->card());
     edit->setStyleSheet(QStringLiteral(
-        "QLineEdit{background:#1A1822;border:1px solid rgba(255,255,255,0.10);border-radius:10px;"
+        "QLineEdit{background:#1A1822;border:1px solid rgba(255,255,255,10%);border-radius:10px;"
         "min-height:40px;padding:0 12px;color:#F3F1F8;font-size:14px;}"
         "QLineEdit:focus{border:1px solid #8B5CF6;}"));
     auto* row = new QHBoxLayout();
@@ -6662,7 +6699,7 @@ void ChatPage::openRenameDialog() {
     auto* cancel = new QPushButton(QStringLiteral("Отмена"), ov->card());
     cancel->setCursor(Qt::PointingHandCursor);
     cancel->setStyleSheet(QStringLiteral(
-        "QPushButton{border:1px solid rgba(255,255,255,0.14);border-radius:10px;padding:9px 14px;color:#ACA6BD;background:transparent;}"
+        "QPushButton{border:1px solid rgba(255,255,255,14%);border-radius:10px;padding:9px 14px;color:#ACA6BD;background:transparent;}"
         "QPushButton:hover{color:#F3F1F8;border-color:#8B5CF6;}"));
     auto* save = new QPushButton(QStringLiteral("Сохранить"), ov->card());
     save->setCursor(Qt::PointingHandCursor);
@@ -6782,7 +6819,7 @@ void ChatPage::sendVoiceFile(const QString& path, const QString& mimeType, int s
 void ChatPage::openVoiceTrimDialog(const QString& m4aPath, const QByteArray& pcm, int durMs) {
     auto* ov = new ModalOverlay(window(), 460);
     ov->card()->setStyleSheet(QStringLiteral(R"QSS(
-#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
+#modalCard{background:#17151E;border:1px solid rgba(255,255,255,8%);border-radius:18px;}
 QLabel{color:#F3F1F8;}
 #vtTitle{font-size:16px;font-weight:800;}
 #vtTime{color:#ACA6BD;font-size:13px;}
@@ -6792,7 +6829,7 @@ QSlider::handle:horizontal{background:#F3F1F8;width:14px;margin:-6px 0;border-ra
 #vtSend{background:#8B5CF6;border:none;border-radius:10px;color:#fff;
   font-size:14px;font-weight:600;min-height:36px;padding:0 16px;}
 #vtSend:hover{background:#9B72F8;}
-#vtGhost{background:transparent;border:1px solid rgba(255,255,255,0.14);border-radius:10px;
+#vtGhost{background:transparent;border:1px solid rgba(255,255,255,14%);border-radius:10px;
   color:#ACA6BD;font-size:13px;min-height:34px;padding:0 12px;}
 )QSS"));
     auto* lay = ov->cardLayout();

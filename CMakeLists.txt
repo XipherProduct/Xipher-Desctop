@@ -220,6 +220,15 @@ if(NOT WIN32)
         OUTPUT_NAME "design-verify"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+    # Живой рендер ленты из реального кэша пользователя (диагностика вёрстки).
+    qt_add_executable(feed-repro ${SOURCES} ${HEADERS} resources/resources.qrc tests/feed-repro.cpp)
+    target_include_directories(feed-repro PRIVATE src)
+    target_link_libraries(feed-repro PRIVATE
+        Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::Multimedia Qt6::MultimediaWidgets)
+    set_target_properties(feed-repro PROPERTIES
+        OUTPUT_NAME "feed-repro"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
     # Демо-звонок с звуком: два пира в одном процессе, loopback-сигналинг,
     # реальный RTP-эфир (микрофон → динамик), статистика кадров и мьют.
     qt_add_executable(call-demo ${SOURCES} ${HEADERS} resources/resources.qrc tests/call-demo.cpp)
@@ -298,7 +307,7 @@ if(NOT WIN32)
 
     # Звонковая сборка у инструментов та же, что у приложения.
     if(RNNOISE_FOUND)
-        foreach(t Xipher design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro)
+        foreach(t Xipher design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro feed-repro)
             target_include_directories(${t} PRIVATE ${RNNOISE_INCLUDE_DIRS})
             target_link_libraries(${t} PRIVATE ${RNNOISE_LIBRARIES})
         endforeach()
@@ -309,7 +318,7 @@ if(NOT WIN32)
     find_package(X11 QUIET)
     if(X11_FOUND)
         target_link_libraries(Xipher PRIVATE X11::X11)
-        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro)
+        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro feed-repro)
             target_link_libraries(${t} PRIVATE X11::X11)
         endforeach()
     endif()
@@ -319,7 +328,7 @@ if(NOT WIN32)
         message(STATUS "Xipher: Qt6Svg — векторные подарки (GiftArt)")
         add_compile_definitions(XIPHER_QT_SVG=1)
         target_link_libraries(Xipher PRIVATE Qt6::Svg)
-        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro gift-grab)
+        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro feed-repro gift-grab)
             target_link_libraries(${t} PRIVATE Qt6::Svg)
         endforeach()
     else()
@@ -329,7 +338,7 @@ if(NOT WIN32)
     find_package(Qt6DBus QUIET)
     if(Qt6DBus_FOUND)
         target_link_libraries(Xipher PRIVATE Qt6::DBus)
-        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro)
+        foreach(t design-verify profile-live call-live call-demo viewer-grab bench-live dv-asan scroll-repro feed-repro)
             target_link_libraries(${t} PRIVATE Qt6::DBus)
         endforeach()
     endif()

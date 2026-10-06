@@ -18,14 +18,14 @@ ContactsPanel::ContactsPanel(ApiClient* api, QWidget* parent)
     : ModalOverlay(parent, 460), api_(api) {
     card()->setFixedHeight(580);
     card()->setStyleSheet(QStringLiteral(R"QSS(
-#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}
+#modalCard{background:#17151E;border:1px solid rgba(255,255,255,8%);border-radius:18px;}
 QLabel{color:#F3F1F8;}
 #dlgHeader{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6D28D9,stop:0.55 #8B5CF6,stop:1 #B06CF0);
   border-top-left-radius:18px;border-top-right-radius:18px;}
 #dlgTitle{font-size:17px;font-weight:800;color:#fff;}
-#closeBtn{background:rgba(255,255,255,0.16);border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
-#closeBtn:hover{background:rgba(255,255,255,0.30);}
-QLineEdit{background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:12px;
+#closeBtn{background:rgba(255,255,255,16%);border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
+#closeBtn:hover{background:rgba(255,255,255,30%);}
+QLineEdit{background:#131218;border:1px solid rgba(255,255,255,10%);border-radius:12px;
   min-height:38px;padding:0 12px;color:#F3F1F8;selection-background-color:#8B5CF6;}
 QLineEdit:focus{border:1px solid #8B5CF6;}
 #secLabel{color:#8B5CF6;font-size:12px;font-weight:800;letter-spacing:1px;}
@@ -34,16 +34,16 @@ QLineEdit:focus{border:1px solid #8B5CF6;}
 #name{color:#F3F1F8;font-size:14px;font-weight:600;}
 #sub{color:#726C82;font-size:12px;}
 #online{color:#46B98A;font-size:12px;}
-#addBtn{background:rgba(139,92,246,0.20);color:#C9B6FF;border:none;border-radius:9px;min-height:30px;padding:0 14px;font-weight:600;}
-#addBtn:hover{background:rgba(139,92,246,0.34);}
-#okBtn{background:rgba(70,185,138,0.18);color:#7FE0B6;border:none;border-radius:8px;min-width:32px;min-height:30px;font-weight:700;}
-#okBtn:hover{background:rgba(70,185,138,0.30);}
-#noBtn{background:rgba(229,104,122,0.16);color:#F0909C;border:none;border-radius:8px;min-width:32px;min-height:30px;font-weight:700;}
-#noBtn:hover{background:rgba(229,104,122,0.28);}
+#addBtn{background:rgba(139,92,246,20%);color:#C9B6FF;border:none;border-radius:9px;min-height:30px;padding:0 14px;font-weight:600;}
+#addBtn:hover{background:rgba(139,92,246,34%);}
+#okBtn{background:rgba(70,185,138,18%);color:#7FE0B6;border:none;border-radius:8px;min-width:32px;min-height:30px;font-weight:700;}
+#okBtn:hover{background:rgba(70,185,138,30%);}
+#noBtn{background:rgba(229,104,122,16%);color:#F0909C;border:none;border-radius:8px;min-width:32px;min-height:30px;font-weight:700;}
+#noBtn:hover{background:rgba(229,104,122,28%);}
 #empty{color:#726C82;font-size:13px;}
 QScrollArea{background:transparent;border:none;}
 QScrollBar:vertical{background:transparent;width:8px;margin:2px;}
-QScrollBar::handle:vertical{background:rgba(255,255,255,0.12);border-radius:4px;min-height:36px;}
+QScrollBar::handle:vertical{background:rgba(255,255,255,12%);border-radius:4px;min-height:36px;}
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}
 )QSS"));
 

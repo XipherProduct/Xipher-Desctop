@@ -21,8 +21,8 @@ QLabel{color:@{tp};}
   border-top-left-radius:18px;border-top-right-radius:18px;}
 #dlgTitle{font-size:17px;font-weight:800;color:#fff;}
 #closeBtn{background:@{bStr};border:none;border-radius:16px;color:#fff;font-size:16px;font-weight:700;}
-#closeBtn:hover{background:rgba(255,255,255,0.30);}
-QLineEdit{background:@{s1};border:1px solid rgba(255,255,255,0.10);border-radius:12px;
+#closeBtn:hover{background:rgba(255,255,255,30%);}
+QLineEdit{background:@{s1};border:1px solid rgba(255,255,255,10%);border-radius:12px;
   min-height:38px;padding:0 12px;color:@{tp};selection-background-color:@{ac};}
 QLineEdit:focus{border:1px solid @{ac};}
 #row{background:transparent;border-radius:10px;}

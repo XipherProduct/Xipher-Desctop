@@ -34,9 +34,9 @@ ImageViewer::ImageViewer(QWidget* parent, const QStringList& paths, int index,
     winBtn_->setToolTip(QStringLiteral("В отдельное окно, поверх всех"));
     winBtn_->setCursor(Qt::PointingHandCursor);
     winBtn_->setStyleSheet(QStringLiteral(
-        "QPushButton{background:rgba(255,255,255,0.14);border:none;border-radius:16px;"
+        "QPushButton{background:rgba(255,255,255,14%);border:none;border-radius:16px;"
         "color:#fff;font-size:15px;min-width:32px;min-height:32px;}"
-        "QPushButton:hover{background:rgba(255,255,255,0.28);}"));
+        "QPushButton:hover{background:rgba(255,255,255,28%);}"));
     connect(winBtn_, &QPushButton::clicked, this, [this]() {
         setWindowFlag(Qt::Window, true);
         setWindowFlag(Qt::WindowStaysOnTopHint, true);

@@ -33,9 +33,9 @@ HomePage::HomePage(QWidget* parent) : QWidget(parent) {
     auto* logout = new QPushButton(QStringLiteral("Выйти"), this);
     logout->setCursor(Qt::PointingHandCursor);
     logout->setStyleSheet(QStringLiteral(
-        "QPushButton{min-height:44px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);"
-        "background:rgba(255,255,255,0.04);color:#f8fafc;font-weight:600;padding:0 24px;}"
-        "QPushButton:hover{background:rgba(255,255,255,0.08);}"));
+        "QPushButton{min-height:44px;border-radius:12px;border:1px solid rgba(255,255,255,12%);"
+        "background:rgba(255,255,255,4%);color:#f8fafc;font-weight:600;padding:0 24px;}"
+        "QPushButton:hover{background:rgba(255,255,255,8%);}"));
 
     lay->addWidget(title);
     lay->addSpacing(8);

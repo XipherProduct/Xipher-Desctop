@@ -19,7 +19,7 @@ ModalOverlay::ModalOverlay(QWidget* parent, int cardWidth)
     card_->setObjectName(QStringLiteral("modalCard"));
     card_->setFixedWidth(cardWidth_);
     card_->setStyleSheet(QStringLiteral(
-        "#modalCard{background:#17151E;border:1px solid rgba(255,255,255,0.08);border-radius:18px;}"));
+        "#modalCard{background:#17151E;border:1px solid rgba(255,255,255,8%);border-radius:18px;}"));
     auto* shadow = new QGraphicsDropShadowEffect(card_);
     shadow->setBlurRadius(60);
     shadow->setOffset(0, 18);

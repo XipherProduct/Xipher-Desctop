@@ -256,9 +256,9 @@ QScrollBar::handle:vertical:hover { background:@{hovW2}; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
 
 /* Кнопка-крестик на обложке: полупрозрачный чёрный круг (на баннере). */
-#profClose { background:rgba(0,0,0,0.38); border:none; border-radius:14px;
+#profClose { background:rgba(0,0,0,38%); border:none; border-radius:14px;
              color:#FFFFFF; font-size:17px; font-weight:600; }
-#profClose:hover { background:rgba(0,0,0,0.55); }
+#profClose:hover { background:rgba(0,0,0,55%); }
 
 /* Действия: тёмная плитка 64px, иконка + подпись (.xp-act). */
 #profAct { background:@{s2}; border:1px solid @{bSub};
@@ -870,7 +870,7 @@ void ProfilePanel::renderProfile(const QJsonObject& data) {
         auto* n = new QLabel(notice.value(QStringLiteral("text")).toString());
         n->setWordWrap(true);
         n->setStyleSheet(ThemePreset::applyTokens(QStringLiteral(
-            "color:@{tp};font-size:13px;background:rgba(217,160,91,0.14);"
+            "color:@{tp};font-size:13px;background:rgba(217,160,91,14%);"
             "border:1px solid #D9A05B;border-radius:14px;padding:12px 16px;")));
         auto* wrap = new QWidget();
         auto* wl = new QHBoxLayout(wrap);
@@ -1042,7 +1042,7 @@ QWidget* ProfilePanel::makeChannelRow(const QJsonObject& ch) {
     chip->setFixedSize(34, 34);
     chip->setAlignment(Qt::AlignCenter);
     chip->setStyleSheet(QStringLiteral(
-        "background:rgba(124,108,255,0.16);border-radius:10px;"));
+        "background:rgba(124,108,255,16%);border-radius:10px;"));
     chip->setPixmap(Icons::pixmap(Icons::Megaphone, 20, kLinkAccent));
     lay->addWidget(chip);
     auto* col = new QVBoxLayout();

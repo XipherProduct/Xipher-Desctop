@@ -18,7 +18,7 @@ QString human(qint64 b) {
 DownloadBar::DownloadBar(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("downloadBar"));
     setStyleSheet(QStringLiteral(
-        "#downloadBar{background:#16141D;border-top:1px solid rgba(255,255,255,0.07);}"
+        "#downloadBar{background:#16141D;border-top:1px solid rgba(255,255,255,7%);}"
         "#dlIcon{color:#8B5CF6;font-size:14px;}"
         "#dlText{color:#F3F1F8;font-size:12px;}"
         "#dlCancel{background:transparent;border:none;color:#726C82;font-size:13px;padding:0 6px;}"

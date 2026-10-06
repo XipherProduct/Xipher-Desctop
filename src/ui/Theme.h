@@ -38,8 +38,8 @@ QWidget {
 
 /* ─── Карточка входа/регистрации (login.css .login-card) ─── */
 #authCard {
-    background: rgba(16,18,30,0.85);
-    border: 1px solid rgba(255,255,255,0.06);
+    background: rgba(16,18,30,85%);
+    border: 1px solid rgba(255,255,255,6%);
     border-radius: 26px;
 }
 
@@ -85,8 +85,8 @@ QWidget {
 
 /* ─── Поля ввода (login.css .login-input) ─── */
 QLineEdit.loginInput {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,4%);
+    border: 1px solid rgba(255,255,255,8%);
     border-radius: 14px;
     min-height: 54px;
     padding: 0 16px;
@@ -95,7 +95,7 @@ QLineEdit.loginInput {
     selection-background-color: #8B5CF6;
 }
 QLineEdit.loginInput:focus {
-    background: rgba(255,255,255,0.08);
+    background: rgba(255,255,255,8%);
     border: 1px solid #8b5cf6;
 }
 QLineEdit.loginInput::placeholder {
@@ -118,8 +118,8 @@ QPushButton#submitBtn:hover {
         stop:0 #2f6bf0, stop:0.35 #4b8bf7, stop:0.75 #9b6dff, stop:1 #7c34e8);
 }
 QPushButton#submitBtn:disabled {
-    color: rgba(255,255,255,0.55);
-    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,55%);
+    background: rgba(255,255,255,6%);
 }
 
 /* ─── Ссылки ─── */
@@ -199,7 +199,7 @@ struct Tokens {
     QColor  bubbleOutB;    // градиент end   (#3A2D5C)
     QColor  bubbleOutSolid;// #41336A
     QColor  bubbleOutText; // #F0ECFA
-    QColor  bubbleOutMeta; // rgba(240,236,250,0.8)
+    QColor  bubbleOutMeta; // rgba(240,236,250,80%)
 
     // Семантика
     QColor  success;       // #46B98A
@@ -209,14 +209,17 @@ struct Tokens {
     bool    available;
     bool    isLight = false;   // светлая тема: текст тёмный, тени мягче
 
-    // rgba-строка от акцента: «rgba(139,92,246,0.14)» — для QSS-подстановок.
+    // rgba-строка от акцента: «rgba(139,92,246,14%)» — для QSS-подстановок.
+    // Альфа — ПРОЦЕНТЫ: дробная альфа (CSS-синтаксис 0.14) невалидна в QSS,
+    // Qt молча роняет ВСЁ правило стиля («Could not parse stylesheet»).
     QString accentRgba(qreal alpha) const {
-        return QStringLiteral("rgba(%1,%2,%3,%4)")
-            .arg(accent.red()).arg(accent.green()).arg(accent.blue()).arg(alpha);
+        return QStringLiteral("rgba(%1,%2,%3,%4%)")
+            .arg(accent.red()).arg(accent.green()).arg(accent.blue())
+            .arg(qRound(alpha * 100));
     }
     QString rgba(const QColor& c, qreal alpha) const {
-        return QStringLiteral("rgba(%1,%2,%3,%4)")
-            .arg(c.red()).arg(c.green()).arg(c.blue()).arg(alpha);
+        return QStringLiteral("rgba(%1,%2,%3,%4%)")
+            .arg(c.red()).arg(c.green()).arg(c.blue()).arg(qRound(alpha * 100));
     }
 };
 
@@ -228,17 +231,20 @@ inline QList<Tokens> all() {
     gray.bgBase = {0x0B,0x0A,0x0E}; gray.surface1 = {0x13,0x12,0x18};
     gray.surface2 = {0x1A,0x18,0x22}; gray.surface3 = {0x22,0x1F,0x2C};
     gray.surface4 = {0x2B,0x27,0x37}; gray.surfaceInset = {0x10,0x0F,0x15};
-    gray.borderSubtle  = {45, 45, 50, 14};   // ≈ rgba(255,255,255,0.055)
-    gray.borderDefault = {45, 45, 50, 26};   // ≈ rgba(255,255,255,0.10)
-    gray.borderStrong  = {45, 45, 50, 41};   // ≈ rgba(255,255,255,0.16)
+    gray.borderSubtle  = {45, 45, 50, 14};   // ≈ rgba(255,255,255,6%)
+    gray.borderDefault = {45, 45, 50, 26};   // ≈ rgba(255,255,255,10%)
+    gray.borderStrong  = {45, 45, 50, 41};   // ≈ rgba(255,255,255,16%)
     gray.textPrimary = {0xF3,0xF1,0xF8}; gray.textSecondary = {0xAC,0xA6,0xBD};
     gray.textTertiary = {0x72,0x6C,0x82}; gray.textDisabled = {0x4A,0x46,0x56};
     gray.accent = {0x8B,0x5C,0xF6}; gray.accentHover = {0x9B,0x72,0xF8};
     gray.accentPressed = {0x7A,0x4A,0xE6}; gray.accentDeep = {0x6D,0x28,0xD9};
     gray.accentText = {0xBB,0xA4,0xFF};
     gray.bubbleIn = gray.surface2;
-    gray.bubbleOutA = {0x4A,0x3A,0x72}; gray.bubbleOutB = {0x3A,0x2D,0x5C};
-    gray.bubbleOutSolid = {0x41,0x33,0x6A}; gray.bubbleOutText = {0xF0,0xEC,0xFA};
+    // Sent-баббл = --grad-brand (как .message.sent в вебе: var(--gradient-purple)),
+    // НЕ приглушённый --bubble-out из tokens: в живом вебе исходящие — яркий
+    // акцентный градиент, и десктоп обязан совпадать 1:1.
+    gray.bubbleOutA = gray.accent;        gray.bubbleOutB = gray.accentDeep;
+    gray.bubbleOutSolid = gray.accentPressed; gray.bubbleOutText = {0xF0,0xEC,0xFA};
     gray.bubbleOutMeta = {240, 236, 250, 204};
     gray.success = {0x46,0xB9,0x8A}; gray.warning = {0xD9,0xA0,0x5B};
     gray.danger = {0xE2,0x6A,0x63};
@@ -272,8 +278,8 @@ inline QList<Tokens> all() {
     purple.accentPressed = {0x8B,0x5C,0xF6}; purple.accentDeep = {0x7C,0x3A,0xED};
     purple.accentText = {0xD6,0xC8,0xFF};
     purple.bubbleIn = purple.surface2;
-    purple.bubbleOutA = {0x5B,0x3F,0xA0}; purple.bubbleOutB = {0x46,0x32,0x7F};
-    purple.bubbleOutSolid = {0x4F,0x39,0x90}; purple.bubbleOutText = {0xF2,0xEC,0xFF};
+    purple.bubbleOutA = purple.accent;  purple.bubbleOutB = purple.accentDeep;
+    purple.bubbleOutSolid = purple.accentPressed; purple.bubbleOutText = {0xF2,0xEC,0xFF};
     purple.bubbleOutMeta = {242, 236, 255, 204};
 
     // blue — серый dark base + синий акцент
@@ -281,8 +287,8 @@ inline QList<Tokens> all() {
     blue.accent = {0x3B,0x82,0xF6}; blue.accentHover = {0x60,0xA5,0xFA};
     blue.accentPressed = {0x25,0x63,0xEB}; blue.accentDeep = {0x1D,0x4E,0xD8};
     blue.accentText = {0x93,0xC5,0xFD};
-    blue.bubbleOutA = {0x27,0x40,0x6E}; blue.bubbleOutB = {0x1E,0x33,0x58};
-    blue.bubbleOutSolid = {0x24,0x3B,0x63}; blue.bubbleOutText = {0xEA,0xF2,0xFF};
+    blue.bubbleOutA = blue.accent;  blue.bubbleOutB = blue.accentDeep;
+    blue.bubbleOutSolid = blue.accentPressed; blue.bubbleOutText = {0xEA,0xF2,0xFF};
     blue.bubbleOutMeta = {234, 242, 255, 204};
 
     // green — изумрудный акцент
@@ -290,8 +296,8 @@ inline QList<Tokens> all() {
     green.accent = {0x10,0xB9,0x81}; green.accentHover = {0x34,0xD3,0x99};
     green.accentPressed = {0x05,0x96,0x69}; green.accentDeep = {0x04,0x78,0x57};
     green.accentText = {0x6E,0xE7,0xB7};
-    green.bubbleOutA = {0x17,0x53,0x3F}; green.bubbleOutB = {0x11,0x43,0x34};
-    green.bubbleOutSolid = {0x16,0x4E,0x3C}; green.bubbleOutText = {0xE8,0xFB,0xF3};
+    green.bubbleOutA = green.accent;  green.bubbleOutB = green.accentDeep;
+    green.bubbleOutSolid = green.accentPressed; green.bubbleOutText = {0xE8,0xFB,0xF3};
     green.bubbleOutMeta = {232, 251, 243, 204};
 
     // mocha — тёплая «нюд/беж» с песочно-золотым акцентом
@@ -307,8 +313,9 @@ inline QList<Tokens> all() {
     mocha.accentPressed = {0xC2,0x92,0x4E}; mocha.accentDeep = {0xA8,0x79,0x38};
     mocha.accentText = {0xF0,0xD6,0xAC};
     mocha.bubbleIn = mocha.surface2;
-    mocha.bubbleOutA = {0x5C,0x45,0x28}; mocha.bubbleOutB = {0x47,0x34,0x20};
-    mocha.bubbleOutSolid = {0x52,0x3E,0x26}; mocha.bubbleOutText = {0xF8,0xEE,0xDF};
+    // mocha: grad-brand #D9A865→#A87938; текст на золоте — тёмный (--text-on-accent)
+    mocha.bubbleOutA = mocha.accent;  mocha.bubbleOutB = mocha.accentDeep;
+    mocha.bubbleOutSolid = mocha.accentPressed; mocha.bubbleOutText = {0x2A,0x1E,0x0E};
     mocha.bubbleOutMeta = {248, 238, 223, 204};
 
     // light — единственная светлая

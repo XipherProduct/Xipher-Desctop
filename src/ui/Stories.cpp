@@ -149,9 +149,9 @@ QWidget* StoriesBar::makeTile(const StoryUserGroup& g, int index) {
 
     auto* ring = new QWidget(col);
     ring->setFixedSize(56, 56);
-    const QString ringColor = g.stories.isEmpty() ? QStringLiteral("rgba(255,255,255,0.14)")
+    const QString ringColor = g.stories.isEmpty() ? QStringLiteral("rgba(255,255,255,14%)")
                             : (g.hasUnread ? QStringLiteral("#8B5CF6")
-                                           : QStringLiteral("rgba(255,255,255,0.22)"));
+                                           : QStringLiteral("rgba(255,255,255,22%)"));
     ring->setStyleSheet(QStringLiteral(
         "border:2px solid %1;border-radius:30px;background:#1A1822;")
         .arg(ringColor));
@@ -207,7 +207,7 @@ StoriesViewer::StoriesViewer(ApiClient* api, QWidget* parent)
     : QWidget(parent), api_(api) {
     setObjectName(QStringLiteral("storiesViewer"));
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet(QStringLiteral("#storiesViewer { background:rgba(4,3,8,0.94); }"));
+    setStyleSheet(QStringLiteral("#storiesViewer { background:rgba(4,3,8,94%); }"));
     buildUi();
     hide();
 }
@@ -219,7 +219,7 @@ void StoriesViewer::buildUi() {
     card_ = new QWidget(this);
     card_->setObjectName(QStringLiteral("storyCard"));
     card_->setStyleSheet(QStringLiteral(
-        "#storyCard { background:#0B0A0E; border:1px solid rgba(255,255,255,0.10);"
+        "#storyCard { background:#0B0A0E; border:1px solid rgba(255,255,255,10%);"
         "  border-radius:22px; }"));
     card_->setFixedSize(420, 700);
     auto* cl = new QVBoxLayout(card_);
@@ -255,7 +255,7 @@ void StoriesViewer::buildUi() {
     replyEdit_ = new QLineEdit(card_);
     replyEdit_->setPlaceholderText(QStringLiteral("Ответить…"));
     replyEdit_->setStyleSheet(QStringLiteral(
-        "background:#1A1822;border:1px solid rgba(255,255,255,0.10);border-radius:18px;"
+        "background:#1A1822;border:1px solid rgba(255,255,255,10%);border-radius:18px;"
         "min-height:36px;padding:0 14px;color:#F3F1F8;"));
     connect(replyEdit_, &QLineEdit::returnPressed, this, [this]() { reactOrReply(false); });
     auto* like = new QPushButton(QStringLiteral("❤️"), card_);
@@ -270,7 +270,7 @@ void StoriesViewer::buildUi() {
     close->setCursor(Qt::PointingHandCursor);
     close->setFixedSize(30, 30);
     close->setStyleSheet(QStringLiteral(
-        "background:rgba(255,255,255,0.08);border:none;border-radius:15px;color:#F3F1F8;"));
+        "background:rgba(255,255,255,8%);border:none;border-radius:15px;color:#F3F1F8;"));
     connect(close, &QPushButton::clicked, this, &QWidget::hide);
     close->move(card_->width() - 42, 10);
     close->raise();
@@ -327,9 +327,9 @@ void StoriesViewer::showCurrent() {
         seg->setFixedHeight(3);
         seg->setStyleSheet(QStringLiteral(
             "background:%1;border-radius:1px;")
-            .arg(i < storyIdx_ ? QStringLiteral("rgba(255,255,255,0.55)")
+            .arg(i < storyIdx_ ? QStringLiteral("rgba(255,255,255,55%)")
                  : i == storyIdx_ ? QStringLiteral("#8B5CF6")
-                                  : QStringLiteral("rgba(255,255,255,0.14)")));
+                                  : QStringLiteral("rgba(255,255,255,14%)")));
         progressRow_->layout()->addWidget(seg);
         progressBars_.append(seg);
     }
@@ -396,7 +396,7 @@ StoryCreatorDialog::StoryCreatorDialog(ApiClient* api, QWidget* parent)
     : QWidget(parent), api_(api) {
     setObjectName(QStringLiteral("storyCreator"));
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet(QStringLiteral("#storyCreator { background:rgba(4,3,8,0.9); }"));
+    setStyleSheet(QStringLiteral("#storyCreator { background:rgba(4,3,8,90%); }"));
     buildUi();
     hide();
 }
@@ -404,7 +404,7 @@ StoryCreatorDialog::StoryCreatorDialog(ApiClient* api, QWidget* parent)
 void StoryCreatorDialog::buildUi() {
     auto* card = new QWidget(this);
     card->setStyleSheet(QStringLiteral(
-        "background:#131218;border:1px solid rgba(255,255,255,0.10);border-radius:20px;"));
+        "background:#131218;border:1px solid rgba(255,255,255,10%);border-radius:20px;"));
     card->setFixedWidth(420);
     auto* cl = new QVBoxLayout(card);
     cl->setContentsMargins(16, 16, 16, 16);
@@ -418,7 +418,7 @@ void StoryCreatorDialog::buildUi() {
     preview_->setAlignment(Qt::AlignCenter);
     preview_->setFixedHeight(300);
     preview_->setStyleSheet(QStringLiteral(
-        "background:#1A1822;border:1px dashed rgba(255,255,255,0.16);border-radius:14px;"
+        "background:#1A1822;border:1px dashed rgba(255,255,255,16%);border-radius:14px;"
         "color:#726C82;font-size:14px;"));
     preview_->setCursor(Qt::PointingHandCursor);
     preview_->installEventFilter(new SuperSearchClickFilter([this]() { pickFile(); }, preview_));
@@ -427,7 +427,7 @@ void StoryCreatorDialog::buildUi() {
     captionEdit_ = new QLineEdit();
     captionEdit_->setPlaceholderText(QStringLiteral("Подпись…"));
     captionEdit_->setStyleSheet(QStringLiteral(
-        "background:#1A1822;border:1px solid rgba(255,255,255,0.10);border-radius:12px;"
+        "background:#1A1822;border:1px solid rgba(255,255,255,10%);border-radius:12px;"
         "min-height:38px;padding:0 12px;color:#F3F1F8;"));
     cl->addWidget(captionEdit_);
 
@@ -436,16 +436,16 @@ void StoryCreatorDialog::buildUi() {
     privacy_->addItem(QStringLiteral("👥 Контакты"), QStringLiteral("contacts"));
     privacy_->addItem(QStringLiteral("🔒 Близкие"), QStringLiteral("close"));
     privacy_->setStyleSheet(QStringLiteral(
-        "QComboBox{background:#1A1822;border:1px solid rgba(255,255,255,0.10);"
+        "QComboBox{background:#1A1822;border:1px solid rgba(255,255,255,10%);"
         "border-radius:12px;min-height:36px;color:#F3F1F8;padding:0 10px;}"
         "QComboBox QAbstractItemView{background:#1A1822;color:#F3F1F8;"
-        "selection-background-color:rgba(139,92,246,0.3);}"));
+        "selection-background-color:rgba(139,92,246,30%);}"));
     cl->addWidget(privacy_);
 
     auto* row = new QHBoxLayout();
     auto* cancel = new QPushButton(QStringLiteral("Отмена"));
     cancel->setStyleSheet(QStringLiteral(
-        "background:transparent;border:1px solid rgba(255,255,255,0.14);border-radius:10px;"
+        "background:transparent;border:1px solid rgba(255,255,255,14%);border-radius:10px;"
         "min-height:36px;padding:0 16px;color:#ACA6BD;"));
     connect(cancel, &QPushButton::clicked, this, &QWidget::hide);
     postBtn_ = new QPushButton(QStringLiteral("Опубликовать"));
