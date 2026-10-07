@@ -14,6 +14,7 @@
 #include <QDebug>
 #include <cstdio>
 #include "ui/Icons.h"
+#include "ui/Theme.h"
 
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
@@ -21,12 +22,30 @@
 #include "net/Session.h"
 #include "ui/ChatPage.h"
 #include <QColor>
+#include <QLabel>
+#include <QImage>
 
 static void colorSanity() {
     const QColor pct(QStringLiteral("rgba(139,92,246,45%)"));
     const QColor flt(QStringLiteral("rgba(139,92,246,0.45)"));
     fprintf(stderr, "QColor percent-alpha: valid=%d a=%d\n", pct.isValid(), pct.alpha());
     fprintf(stderr, "QColor float-alpha:   valid=%d a=%d\n", flt.isValid(), flt.alpha());
+    // QSS: принимает ли стайл-парсер дробную альфу? Считаем варнинги парсера.
+    static int parseWarns = 0;
+    QtMessageHandler prev = qInstallMessageHandler(
+        [](QtMsgType t, const QMessageLogContext&, const QString& msg) {
+            if (t == QtWarningMsg && msg.contains(QStringLiteral("parse"))) ++parseWarns;
+        });
+    QLabel probe1; probe1.resize(40, 40);
+    probe1.setStyleSheet(QStringLiteral("background:rgba(139,92,246,0.18);border-radius:5px;"));
+    const QImage p1 = probe1.grab().toImage();
+    QLabel probe2; probe2.resize(40, 40);
+    probe2.setStyleSheet(QStringLiteral("background:rgba(139,92,246,18%);border-radius:5px;"));
+    const QImage p2 = probe2.grab().toImage();
+    qInstallMessageHandler(prev);
+    fprintf(stderr, "QSS float-alpha: warn=%d pixel=%s | percent-alpha: pixel=%s\n",
+            parseWarns, p1.pixelColor(20, 20).name().toUtf8().constData(),
+            p2.pixelColor(20, 20).name().toUtf8().constData());
 }
 
 static int msgContainerW(ChatPage& page) {
@@ -35,12 +54,46 @@ static int msgContainerW(ChatPage& page) {
     return -1;
 }
 
+// Бисекция «Could not parse stylesheet»: какое правило валит парсер.
+static int g_warnCount = 0;
+static void probeQss(const QString& qss) {
+    g_warnCount = 0;
+    QtMessageHandler prev = qInstallMessageHandler(
+        [](QtMsgType t, const QMessageLogContext&, const QString& msg) {
+            if (t == QtWarningMsg && msg.contains(QStringLiteral("parse"))) ++g_warnCount;
+        });
+    QWidget probe;
+    probe.setStyleSheet(qss);
+    probe.ensurePolished();
+    qInstallMessageHandler(prev);
+}
+
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("XipherDesignTest"));
     QCoreApplication::setApplicationName(QStringLiteral("FeedRepro"));
     if (argc < 3) { qWarning("usage: feed-repro <cache.bin> <out-prefix> [user|channel] [w] [h]"); return 2; }
     colorSanity();
+
+    // Глобальный стиль приложения (Theme::styleSheet) — не падает ли парсер?
+    {
+        const QString appQss = Theme::styleSheet();
+        probeQss(appQss);
+        fprintf(stderr, "Theme::styleSheet parse warns: %d (len=%d)\n", g_warnCount, appQss.size());
+        if (g_warnCount > 0) {
+            const QStringList chunks = appQss.split(QLatin1Char('}'));
+            QString acc;
+            for (int i = 0; i < chunks.size(); ++i) {
+                acc += chunks[i] + QLatin1Char('}');
+                probeQss(acc);
+                if (g_warnCount > 0) {
+                    fprintf(stderr, "FIRST FAILING RULE at chunk %d: %s\n",
+                            i, chunks[i].left(200).toUtf8().constData());
+                    break;
+                }
+            }
+        }
+    }
 
     const QString cachePath = QString::fromUtf8(argv[1]);
     const QString outPrefix = QString::fromUtf8(argv[2]);
@@ -76,7 +129,57 @@ int main(int argc, char** argv) {
 
     ApiClient api;
     WsClient ws;
+    // Сценарий приложения: глобальный стиль на QApplication ДО окна (main.cpp),
+    // базовый шрифт Inter/Segoe — как в main. Считаем parse-варнинги ChatPage.
+    g_warnCount = 0;
+    QtMessageHandler hPrev = qInstallMessageHandler(
+        [](QtMsgType t, const QMessageLogContext&, const QString& msg) {
+            if (t == QtWarningMsg && msg.contains(QStringLiteral("parse"))) {
+                ++g_warnCount;
+                fprintf(stderr, "PARSE-WARN: %s\n", msg.toUtf8().constData());
+            }
+        });
+    app.setStyleSheet(Theme::styleSheet());
+    {
+        QFont base(QStringLiteral("Inter"));
+        if (!base.exactMatch()) base.setFamily(QStringLiteral("Segoe UI"));
+        base.setPixelSize(14);
+        app.setFont(base);
+    }
     ChatPage page(&api, &ws);
+    qInstallMessageHandler(hPrev);   // тишина при дальнейшей работе
+
+    // ── Бисекция: чей именно лист валит парс в связке с app-стилем.
+    {
+        const QString appQss = Theme::styleSheet();
+        const QString pageQss = page.styleSheet();
+        probeQss(pageQss);
+        fprintf(stderr, "page.sheet alone: warns=%d len=%d\n", g_warnCount, pageQss.size());
+        if (g_warnCount > 0) {
+            const QStringList ch = pageQss.split(QLatin1Char('}'));
+            QString acc;
+            for (int i = 0; i < ch.size(); ++i) {
+                acc += ch[i] + QLatin1Char('}');
+                probeQss(acc);
+                if (g_warnCount > 0) {
+                    fprintf(stderr, "PAGE-QSS FIRST FAIL at chunk %d/%d: >>>%s<<<\n",
+                            i, ch.size(), ch[i].left(400).toUtf8().constData());
+                    // следующий чанк без последнего правила — чей кусок добивает
+                    break;
+                }
+            }
+        }
+        probeQss(appQss + pageQss);
+        fprintf(stderr, "app+page concat: warns=%d\n", g_warnCount);
+        // конкатенация валидна? проверим и обратный порядок
+        probeQss(pageQss + appQss);
+        fprintf(stderr, "page+app concat: warns=%d\n", g_warnCount);
+        // дамп для внешнего анализа
+        QFile df(QStringLiteral("/tmp/app_qss.css"));
+        if (df.open(QIODevice::WriteOnly)) { df.write(appQss.toUtf8()); df.close(); }
+        QFile df2(QStringLiteral("/tmp/page_qss.css"));
+        if (df2.open(QIODevice::WriteOnly)) { df2.write(pageQss.toUtf8()); df2.close(); }
+    }
     page.resize(W, H);
     page.show();
     for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
