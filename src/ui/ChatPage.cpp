@@ -1383,7 +1383,7 @@ void ChatPage::buildUi() {
     inputBar_ = normal;
     normal->setObjectName(QStringLiteral("tgInputBar"));
     auto* cbl = new QHBoxLayout(normal);
-    cbl->setContentsMargins(8, 4, 4, 4);
+    cbl->setContentsMargins(10, 5, 5, 5);
     cbl->setSpacing(2);
 
     const QColor iconClr(0xAC, 0xA6, 0xBD);
@@ -1391,15 +1391,15 @@ void ChatPage::buildUi() {
     timerBtn_->setObjectName(QStringLiteral("composerIcon"));
     timerBtn_->setCursor(Qt::PointingHandCursor);
     timerBtn_->setToolTip(QStringLiteral("Исчезающие сообщения"));
-    timerBtn_->setIcon(Icons::icon(Icons::Clock, 20, iconClr));
-    timerBtn_->setIconSize(QSize(20, 20));
+    timerBtn_->setIcon(Icons::icon(Icons::Clock, 22, iconClr));
+    timerBtn_->setIconSize(QSize(22, 22));
 
     attachBtn_ = new QPushButton(normal);
     attachBtn_->setObjectName(QStringLiteral("composerIcon"));
     attachBtn_->setCursor(Qt::PointingHandCursor);
     attachBtn_->setToolTip(QStringLiteral("Прикрепить"));
-    attachBtn_->setIcon(Icons::icon(Icons::Paperclip, 20, iconClr));
-    attachBtn_->setIconSize(QSize(20, 20));
+    attachBtn_->setIcon(Icons::icon(Icons::Paperclip, 22, iconClr));
+    attachBtn_->setIconSize(QSize(22, 22));
 
     composer_ = new ComposerEdit(normal);
     composer_->installEventFilter(this);   // Esc → закрыть панель эмодзи
@@ -1418,27 +1418,27 @@ void ChatPage::buildUi() {
     emojiBtn_->setObjectName(QStringLiteral("composerIcon"));
     emojiBtn_->setCursor(Qt::PointingHandCursor);
     emojiBtn_->setToolTip(QStringLiteral("Эмодзи"));
-    emojiBtn_->setIcon(Icons::icon(Icons::Smile, 20, iconClr));
-    emojiBtn_->setIconSize(QSize(20, 20));
+    emojiBtn_->setIcon(Icons::icon(Icons::Smile, 22, iconClr));
+    emojiBtn_->setIconSize(QSize(22, 22));
 
     silentBtn_ = new QPushButton(normal);   // MSG-08
     silentBtn_->setObjectName(QStringLiteral("composerIcon"));
     silentBtn_->setCursor(Qt::PointingHandCursor);
     silentBtn_->setToolTip(QStringLiteral("Тихая отправка (без звука у получателей)"));
-    silentBtn_->setIcon(Icons::icon(Icons::Bell, 20, iconClr));
-    silentBtn_->setIconSize(QSize(20, 20));
+    silentBtn_->setIcon(Icons::icon(Icons::Bell, 22, iconClr));
+    silentBtn_->setIconSize(QSize(22, 22));
     silentBtn_->setCheckable(true);
     silentBtn_->setVisible(false);   // только в каналах (is_silent поддержан сервером там)
     micBtn_ = new QPushButton(normal);
     micBtn_->setObjectName(QStringLiteral("micBtn"));
     micBtn_->setCursor(Qt::PointingHandCursor);
-    micBtn_->setIcon(Icons::icon(Icons::Mic, 20, iconClr));
-    micBtn_->setIconSize(QSize(20, 20));
+    micBtn_->setIcon(Icons::icon(Icons::Mic, 22, iconClr));
+    micBtn_->setIconSize(QSize(22, 22));
     sendBtn_ = new QPushButton(normal);
     sendBtn_->setObjectName(QStringLiteral("sendBtn"));
     sendBtn_->setCursor(Qt::PointingHandCursor);
-    sendBtn_->setIcon(Icons::icon(Icons::Send, 20, QColor(0xFF, 0xFF, 0xFF)));
-    sendBtn_->setIconSize(QSize(20, 20));
+    sendBtn_->setIcon(Icons::icon(Icons::Send, 22, QColor(0xFF, 0xFF, 0xFF)));
+    sendBtn_->setIconSize(QSize(22, 22));
     sendBtn_->setVisible(false);   // как в вебе: ➤ появляется при вводе текста, 🎤 уходит
 
     cbl->addWidget(attachBtn_);
@@ -3676,7 +3676,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     if (!out && (currentKind_ == ChatKind::Group || currentKind_ == ChatKind::Channel)
         && !msg.senderName.isEmpty() && msg.senderId != Session::instance().userId) {
         auto* author = new QLabel(streamerSafeName(msg.senderName, indexOfChat(currentPeerId_) + 1, false), bubble);
-        author->setStyleSheet(QStringLiteral("color:%1;font-size:12px;font-weight:700;")
+        author->setStyleSheet(QStringLiteral("color:%1;font-size:13px;font-weight:700;")
                                   .arg(authorColor(msg.senderId).name()));
         author->setCursor(Qt::PointingHandCursor);
         author->setProperty("openProfileFor", msg.senderId);
@@ -4005,7 +4005,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
         flame->setPixmap(Icons::pixmap(Icons::Clock, 12,
             out ? QColor(0xF0,0xEC,0xFA) : QColor(0xAC,0xA6,0xBD)));
         auto* ttlLbl = new QLabel(bubble);
-        ttlLbl->setStyleSheet(QString("color:%1;font-size:11px;font-weight:600;")
+        ttlLbl->setStyleSheet(QString("color:%1;font-size:12px;font-weight:600;")
             .arg(out ? QStringLiteral("rgba(240,236,250,80%)") : QStringLiteral("#ACA6BD")));
 
         const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + qint64(msg.ttlSeconds) * 1000;
@@ -4036,7 +4036,7 @@ void ChatPage::addBubble(const ChatMessage& msg, bool prepend, bool animate) {
     auto* meta = new QLabel(metaText, bubble);
     // Время: на исходящем — светлый на градиенте, на входящем — text-secondary
     // (web --bubble-out-meta / tertiary читаются, #726C82 на s2 тонуло).
-    meta->setStyleSheet(QString("color:%1;font-size:11px;")
+    meta->setStyleSheet(QString("color:%1;font-size:12px;")
         .arg(out ? QStringLiteral("rgba(240,236,250,75%)") : QStringLiteral("#ACA6BD")));
     metaRow->addWidget(meta);
     bl->addLayout(metaRow);
@@ -4917,7 +4917,7 @@ static QString chatQSS() {
 #chatList QScrollBar::add-page:vertical, #chatList QScrollBar::sub-page:vertical { background:transparent; }
 /* ─── Композер: пилюля surface-2 ─── */
 #composerBar { background:@{s1}; border-top:1px solid @{bSub}; }
-#tgInputBar { background:@{s2}; border:1px solid @{bSub}; border-radius:22px; }
+#tgInputBar { background:@{s2}; border:1px solid @{bSub}; border-radius:26px; min-height:52px; }
 #tgInputBar[focused="true"] { border:1px solid @{aBord}; }
 #composer { background:transparent; border:none; color:@{tp}; font-size:15px; padding:0 4px; }
 #composer QScrollBar:vertical { background:transparent; width:7px; margin:4px 2px; }
@@ -4948,11 +4948,14 @@ QSplitter::handle:horizontal { background:transparent; width:4px; }
 #tcMetaKey { color:@{tt}; font-size:12px; }
 #tcMetaVal { color:@{ts}; font-size:13px; }
 #overlayScrim { background:rgba(0,0,0,140); }
-#sendBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px; border:none;
-  border-radius:18px; background:transparent; color:@{ac}; padding:0; }
-#sendBtn:hover { background:@{soft3}; }
-#composerIcon, #micBtn { min-width:36px; max-width:36px; min-height:36px; max-height:36px;
-  border:none; border-radius:18px; background:transparent; color:@{ts}; padding:0; }
+/* Композер TG-масштаба: пилюля 52px, кнопки 40px, отправка — градиент-круг */
+#sendBtn { min-width:40px; max-width:40px; min-height:40px; max-height:40px; border:none;
+  border-radius:20px; padding:0;
+  background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 @{ac},stop:1 @{acD}); }
+#sendBtn:hover { background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 @{acH},stop:1 @{ac}); }
+#sendBtn:pressed { background:@{acP}; }
+#composerIcon, #micBtn { min-width:40px; max-width:40px; min-height:40px; max-height:40px;
+  border:none; border-radius:20px; background:transparent; color:@{ts}; padding:0; }
 #composerIcon:hover, #micBtn:hover { background:@{hovW}; color:@{tp}; }
 /* ─── QMenu: surface-2, radius 12, item-hover accent-soft ─── */
 QMenu { background:@{s2}; border:1px solid @{bDef}; border-radius:12px; color:@{tp}; }
@@ -5312,18 +5315,34 @@ void ChatPage::onEmojiClicked() {
 // ── Вложения (скрепка) ───────────────────────────────────────────────────────
 
 void ChatPage::onAttachClicked() {
+    // TG-масштаб: иконки 22px, шрифт 15px, высокие пункты — меню вложений
+    // Telegram, а не мелкий системный QMenu (было «уёбищно мелко»).
     const QColor mclr(0xAC, 0xA6, 0xBD);
+    const auto th = ThemePreset::current();
     QMenu menu(this);
-    QAction* photoAct = menu.addAction(Icons::icon(Icons::Image, 18, mclr), QStringLiteral("Фото"));
-    QAction* fileAct = menu.addAction(Icons::icon(Icons::File, 18, mclr), QStringLiteral("Файл"));
-    QAction* checklist = menu.addAction(Icons::icon(Icons::Checklist, 18, mclr),
-                                        QStringLiteral("Чек-лист"));
-    QAction* poll = menu.addAction(QStringLiteral("📊 Опрос"));   // MSG-06
-    QAction* rich = menu.addAction(QStringLiteral("✨ Формат")); // RTE-02
-    QAction* later = menu.addAction(QStringLiteral("🕒 Отправить позже"));   // MSG-07
+    menu.setStyleSheet(QStringLiteral(
+        "QMenu{background:%1;border:1px solid %2;border-radius:14px;padding:8px;"
+        "font-size:15px;color:%3;}"
+        "QMenu::item{padding:9px 26px 9px 10px;border-radius:10px;min-height:26px;}"
+        "QMenu::item:selected{background:%4;}"
+        "QMenu::separator{height:1px;background:%2;margin:6px 10px;}"
+        "QMenu::item:disabled{color:%5;}")
+        .arg(th.surface2.name(), th.rgba(QColor(255, 255, 255), 0.10),
+             th.textPrimary.name(), th.accentRgba(0.22),
+             th.textDisabled.name()));
+    auto mk = [&](Icons::Kind k, const QString& t) {
+        QAction* a = menu.addAction(Icons::icon(k, 22, mclr), t);
+        return a;
+    };
+    QAction* photoAct = mk(Icons::Image, QStringLiteral("Фото"));
+    QAction* fileAct = mk(Icons::File, QStringLiteral("Файл"));
+    QAction* checklist = mk(Icons::Checklist, QStringLiteral("Чек-лист"));
+    QAction* poll = mk(Icons::Poll, QStringLiteral("Опрос"));          // MSG-06
+    QAction* rich = mk(Icons::Sparkle, QStringLiteral("Формат"));      // RTE-02
+    QAction* later = mk(Icons::Clock, QStringLiteral("Отправить позже"));   // MSG-07
     menu.addSeparator();
     QMenu* geo = menu.addMenu(QStringLiteral("Геопозиция"));
-    geo->setIcon(Icons::icon(Icons::Location, 18, mclr));
+    geo->setIcon(Icons::icon(Icons::Location, 22, mclr));
     QAction* geoSend = geo->addAction(QStringLiteral("Отправить"));
     QAction* geoLive = geo->addAction(QStringLiteral("Транслировать (Live, скоро)"));
     geoLive->setEnabled(false);

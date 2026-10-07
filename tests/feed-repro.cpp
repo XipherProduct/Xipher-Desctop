@@ -10,8 +10,10 @@
 #include <QDir>
 #include <QScrollBar>
 #include <QScrollArea>
+#include <QMenu>
 #include <QDebug>
 #include <cstdio>
+#include "ui/Icons.h"
 
 #include "net/ApiClient.h"
 #include "net/WsClient.h"
@@ -109,6 +111,34 @@ int main(int argc, char** argv) {
     fprintf(stderr, "page=%dx%d area=%d viewport=%d container=%d\n",
             page.width(), page.height(), area->width(),
             area->viewport()->width(), msgContainerW(page));
+
+    // ── Меню «Прикрепить»: та же QSS-строка, что в ChatPage::onAttachClicked,
+    // popup() без exec — снимаем масштаб пунктов (TG 44px vs прежний QMenu-мелкий).
+    {
+        const QColor mclr(0xAC, 0xA6, 0xBD);
+        QMenu menu(&page);
+        menu.setStyleSheet(QStringLiteral(
+            "QMenu{background:#1A1822;border:1px solid rgba(255,255,255,10%);border-radius:14px;"
+            "padding:8px;font-size:15px;color:#F3F1F8;}"
+            "QMenu::item{padding:9px 26px 9px 10px;border-radius:10px;min-height:26px;}"
+            "QMenu::item:selected{background:rgba(139,92,246,22%);}"
+            "QMenu::separator{height:1px;background:rgba(255,255,255,10%);margin:6px 10px;}"
+            "QMenu::item:disabled{color:#4A4656;}"));
+        const QList<QPair<Icons::Kind, QString>> items = {
+            {Icons::Image, QStringLiteral("Фото")}, {Icons::File, QStringLiteral("Файл")},
+            {Icons::Checklist, QStringLiteral("Чек-лист")}, {Icons::Poll, QStringLiteral("Опрос")},
+            {Icons::Sparkle, QStringLiteral("Формат")}, {Icons::Clock, QStringLiteral("Отправить позже")},
+            {Icons::Location, QStringLiteral("Геопозиция")}};
+        for (const auto& it : items)
+            menu.addAction(Icons::icon(it.first, 22, mclr), it.second);
+        menu.adjustSize();
+        menu.move(120, 40);
+        menu.show();
+        for (int i = 0; i < 6; ++i) QCoreApplication::processEvents();
+        fprintf(stderr, "attach menu size: %dx%d\n", menu.width(), menu.height());
+        menu.grab().save(out.filePath(outPrefix + QStringLiteral("-menu.png")));
+        menu.close();
+    }
 
     // Диагностика бабблов: реальные геометрия и QSS последних пузырей.
     const auto rows = [&]() {

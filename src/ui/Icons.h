@@ -19,7 +19,7 @@ namespace Icons {
 enum Kind { Send, Mic, Smile, Paperclip, Clock, Trash, File, Image,
             Search, Pencil, Phone, Location, Checklist, Logout, Plus, More, Lock,
             Menu, Bell, Shield, User, Globe, Star, Device, Gear, Camera,
-            ChevronRight, ArrowLeft, Block, Chat, Gift,
+            ChevronRight, ArrowLeft, Block, Chat, Gift, Poll, Sparkle,
             // Строки профиля и его действия (SVG из js/profile/view.js веба).
             Message, Megaphone, Cake, At, Calendar, About,
             // Звонки (SVG из js/calls.js): трубка вниз — отбой, динамик.
@@ -164,6 +164,24 @@ inline QPixmap pixmap(Kind kind, int size, const QColor& color) {
     case Plus: {
         p.drawLine(QLineF(12, 5, 12, 19));
         p.drawLine(QLineF(5, 12, 19, 12));
+        break;
+    }
+    case Poll: {
+        // Опрос: три столбика разной высоты (bar-chart).
+        p.drawLine(QLineF(6, 13, 6, 19));
+        p.drawLine(QLineF(12, 6, 12, 19));
+        p.drawLine(QLineF(18, 10, 18, 19));
+        break;
+    }
+    case Sparkle: {
+        // «Формат» (rich text): четырёхлучевая искра.
+        QPainterPath sp;
+        sp.moveTo(12, 3.5);
+        sp.quadTo(13.4, 10.6, 20.5, 12);
+        sp.quadTo(13.4, 13.4, 12, 20.5);
+        sp.quadTo(10.6, 13.4, 3.5, 12);
+        sp.quadTo(10.6, 10.6, 12, 3.5);
+        p.drawPath(sp);
         break;
     }
     case Chat: {
